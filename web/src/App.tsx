@@ -179,12 +179,12 @@ function App() {
           <h1 className="hero__title">
             Tristan Drummond
             <span className="hero__subtitle">
-              Calm, exacting technologist delivering data-free operations tools for blue-collar teams.
+              Calm, exacting technologist composing soulful systems for Africa’s dreamers and doers.
             </span>
           </h1>
           <p className="hero__copy">
-            CTO at WorkWeek, South Africa’s time tracking and wages platform for remote and on-site crews.
-            I translate worker stories into humble software—automatic overtime, site insights, and payroll clarity built for humans.
+            I build for humans before companies—co-founding WorkWeek, coaching Tech Local vibe coders, and nurturing Champ Foundation’s dignity work.
+            Every product blends entrepreneurial roots, CS + business rigor, and on-the-ground listening to keep technology humble and cinematic.
           </p>
           <div className="hero__actions">
             <a className="button button--primary" href="mailto:tristan@workweek.africa">
@@ -207,10 +207,10 @@ function App() {
         <section className="section">
           <div className="section__header">
             <span className="eyebrow">Now</span>
-            <h2>Shipping WorkWeek with field-trusted care</h2>
+            <h2>Designing systems with field-trusted care</h2>
             <p>
-              The team and I obsess over tools that feel simple for supervisors and workers alike—accurate wage calculations,
-              instant accountability, and reports that keep payroll grounded in truth.
+              I translate site walks, founder jams, and lab experiments into craft—whether helping WorkWeek crews clock in with dignity,
+              growing Tech Local’s agent-driven stack, or sketching Champ Foundation pathways toward justice.
             </p>
           </div>
           <div className="card-grid">
