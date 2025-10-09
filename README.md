@@ -29,7 +29,7 @@ This repository powers [tristdrum.com](https://tristdrum.com) — a black, cinem
 ## Active builds
 
 - **WorkWeek** – Co-founder/CTO (20% shareholder). Six-person fully-remote crew replacing paper timesheets and clunky biometric machines with selfie + geofenced clock-ins, automated overtime, and payroll for blue-collar teams. Breakeven on ~ZAR250k MRR and still growing after spinning out of The Delta’s Codelight team.
-- **Tech Local** – 50/50-owned vibe-coder studio that trains non-technical talent, automates agency rails, and ships WhatsApp onboarding flows, Supabase back offices, custom GPT copilots, and AI-orchestrated deployments for South African businesses.
+- **Tech Local** – 50/50-owned vibe-coder studio that trains non-technical talent, automates agency rails, and ships WhatsApp onboarding flows, Supabase back offices, OpenAI platform agents, and AI-orchestrated deployments for South African businesses.
 - **Champ Foundation** – Voucher-backed dignity platform (formerly Heartflow) piloted in Stellenbosch; re-aligns donor incentives and NPO accountability so individual beneficiaries can be tracked from relief to reintegration.
 
 ---
@@ -40,7 +40,18 @@ This repository powers [tristdrum.com](https://tristdrum.com) — a black, cinem
 
 ---
 
-## Personal site (`/web`)
+## Site modules (`/web`)
+
+- Hero + stats on WorkWeek role, team size, impact, and growth.
+- Focus grid highlighting WorkWeek (time tracking SaaS), Tech Local (vibe coder automations), and Champ Foundation (voucher dignity platform).
+- Active labs section with MATTTCHES, Clio, and Tech Local client stack powered by Supabase + OpenAI agents.
+- Timeline from entrepreneurial upbringing, top African university training, Delta venture-builder leadership, to WorkWeek tech lead today.
+- Signals that echo those chapters: entrepreneurial roots, university craftsmanship, builder-of-builders leadership.
+- CTA banner with Google Calendar booking link plus WorkWeek and Tech Local social links.
+
+---
+
+## Personal site scripts
 
 ```
 cd web

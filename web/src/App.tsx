@@ -55,8 +55,8 @@ const focusCards: FocusCard[] = [
     title: 'Tech Local',
     subtitle: 'Vibe coder studio',
     description:
-      '50/50-owned studio training “vibe coders” to ship AI-assisted sites via WhatsApp, Custom GPT copilots, and automation rails so local businesses access world-class stacks without predatory retainers.',
-    tags: ['AI tooling', 'Automation', 'Training'],
+      '50/50-owned studio training “vibe coders” to ship AI-assisted sites via WhatsApp, OpenAI platform agents, and automation rails so local businesses access world-class stacks without predatory retainers.',
+    tags: ['AI tooling', 'Agents', 'Training'],
     linkLabel: 'Explore Tech Local',
     href: 'https://techlocal.co.za',
   },
@@ -136,7 +136,7 @@ const labProjects: LabProject[] = [
   {
     title: 'Tech Local client stack',
     detail:
-      'Custom GPTs, Supabase back offices, and low-cost WhatsApp onboarding for Wheco Holdings, civils companies, and micro-enterprises.',
+      'OpenAI platform agents, Supabase back offices, and low-cost WhatsApp onboarding for Wheco Holdings, civils companies, and micro-enterprises.',
     meta: 'Delivery system',
     tags: ['Supabase', 'WhatsApp', 'No lock-in'],
   },
