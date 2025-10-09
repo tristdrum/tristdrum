@@ -43,11 +43,11 @@ This repository powers [tristdrum.com](https://tristdrum.com) — a black, cinem
 ## Site modules (`/web`)
 
 - Hero + stats on WorkWeek role, team size, impact, and growth.
-- Focus grid highlighting WorkWeek (time tracking SaaS), Tech Local (vibe coder automations), and Champ Foundation (voucher dignity platform).
+- Focus grid with deep links to WorkWeek, Tech Local, and Champ Foundation (impact voucher vision).
 - Active labs section with MATTTCHES, Clio, and Tech Local client stack powered by Supabase + OpenAI agents.
 - Timeline from entrepreneurial upbringing, top African university training, Delta venture-builder leadership, to WorkWeek tech lead today.
 - Signals that echo those chapters: entrepreneurial roots, university craftsmanship, builder-of-builders leadership.
-- CTA banner with Google Calendar booking link plus WorkWeek and Tech Local social links.
+- CTA banner with Google Calendar booking plus navigation to every venture (WorkWeek, Tech Local, Champ).
 
 ---
 

@@ -66,6 +66,8 @@ const focusCards: FocusCard[] = [
     description:
       'Voucher-powered giving that pairs donors, beneficiaries, and partner NPOs on a “journey to dignity.” Heartflow pilots proved the model; Champ keeps the dream alive as resources and AI mature.',
     tags: ['Impact', 'Dignity', 'Community'],
+    linkLabel: 'Explore Champ Foundation',
+    href: 'https://champ.foundation',
   },
 ]
 
@@ -145,6 +147,7 @@ const labProjects: LabProject[] = [
 const socialLinks = [
   { label: 'WorkWeek', href: 'https://workweek.africa' },
   { label: 'Tech Local', href: 'https://techlocal.co.za' },
+  { label: 'Champ Foundation', href: 'https://champ.foundation' },
   { label: 'LinkedIn', href: 'https://www.linkedin.com/in/tristdrum/' },
   { label: 'GitHub', href: 'https://github.com/tristdrum' },
   { label: 'X (Twitter)', href: 'https://x.com/tristdrum' },

@@ -5,7 +5,7 @@ A black, cinematic single-page React experience for [tristdrum.com](https://tris
 ## Features
 
 - Layered hero with stat badges, motion-driven halos, and dual CTAs.
-- Focus, labs, timeline, and signal sections powered by structured TypeScript arrays for quick edits.
+- Focus, labs, timeline, and signal sections powered by structured TypeScript arrays for quick edits and deep links (WorkWeek, Tech Local, Champ Foundation).
 - Accurate storytelling for WorkWeek, Tech Local, Champ Foundation, and ongoing lab experiments.
 - Responsive CSS grid layout with glassmorphism accents, plus reduced-motion safeguards.
 - SEO-ready metadata plus typography via Space Grotesk and Manrope.
