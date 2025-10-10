@@ -1,6 +1,6 @@
 # Tristan Drummond · Web
 
-A black, cinematic single-page React experience for [tristdrum.com](https://tristdrum.com). The site blends floating gradients, glassmorphism cards, and humble copy to reflect Tristan’s calm-yet-epic craft.
+A black single-page React experience for [tristdrum.com](https://tristdrum.com). The site blends floating gradients, glassmorphism cards, and humble copy to reflect Tristan’s calm-yet-epic craft.
 
 ## Features
 

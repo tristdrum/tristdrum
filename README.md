@@ -2,7 +2,7 @@
 
 **Calm African technologist · CTO & co-founder at [WorkWeek](https://workweek.africa) · Builder of human-first systems.**
 
-This repository powers [tristdrum.com](https://tristdrum.com) — a black, cinematic single-page experience that keeps animations intentional, typography confident, and copy grounded in the truth of my work.
+This repository powers [tristdrum.com](https://tristdrum.com) — a black single-page experience that keeps animations intentional, typography confident, and copy grounded in the truth of my work.
 
 ---
 
@@ -29,7 +29,7 @@ This repository powers [tristdrum.com](https://tristdrum.com) — a black, cinem
 ## Active builds
 
 - **WorkWeek** – Co-founder/CTO (20% shareholder). Six-person fully-remote crew replacing paper timesheets and clunky biometric machines with selfie + geofenced clock-ins, automated overtime, and payroll for blue-collar teams. Breakeven on ~ZAR250k MRR and still growing after spinning out of The Delta’s Codelight team.
-- **Tech Local** – 50/50-owned vibe-coder studio that trains non-technical talent, automates agency rails, and ships WhatsApp onboarding flows, Supabase back offices, OpenAI platform agents, and AI-orchestrated deployments for South African businesses.
+- **Tech Local** – Vibe-coder studio that trains non-technical talent, automates agency rails, and ships WhatsApp onboarding flows, Supabase back offices, OpenAI platform agents, and AI-orchestrated deployments for South African businesses.
 - **Champ Foundation** – Voucher-backed dignity platform (formerly Heartflow) piloted in Stellenbosch; re-aligns donor incentives and NPO accountability so individual beneficiaries can be tracked from relief to reintegration.
 
 ---

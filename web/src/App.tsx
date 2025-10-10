@@ -55,7 +55,7 @@ const focusCards: FocusCard[] = [
     title: 'Tech Local',
     subtitle: 'Vibe coder studio',
     description:
-      '50/50-owned studio training “vibe coders” to ship AI-assisted sites via WhatsApp, OpenAI platform agents, and automation rails so local businesses access world-class stacks without predatory retainers.',
+      'Studio training “vibe coders” to ship AI-assisted sites via WhatsApp, OpenAI platform agents, and automation rails so local businesses access world-class stacks without predatory retainers.',
     tags: ['AI tooling', 'Agents', 'Training'],
     linkLabel: 'Explore Tech Local',
     href: 'https://techlocal.co.za',
@@ -187,7 +187,7 @@ function App() {
           </h1>
           <p className="hero__copy">
             I build for humans before companies—co-founding WorkWeek, coaching Tech Local vibe coders, and nurturing Champ Foundation’s dignity work.
-            Every product blends entrepreneurial roots, CS + business rigor, and on-the-ground listening to keep technology humble and cinematic.
+            Every product blends entrepreneurial roots, CS + business rigor, and on-the-ground listening to keep technology humble and human.
           </p>
           <div className="hero__actions">
             <a className="button button--primary" href="mailto:tristan@workweek.africa">
