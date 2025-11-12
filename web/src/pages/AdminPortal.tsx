@@ -92,19 +92,14 @@ function AdminPortal() {
     const img = new Image()
 
     img.onload = () => {
-      // Set canvas size to match image
       canvas.width = img.width
       canvas.height = img.height
       
       if (ctx) {
-        // Fill white background
         ctx.fillStyle = '#ffffff'
         ctx.fillRect(0, 0, canvas.width, canvas.height)
-        
-        // Draw the SVG image
         ctx.drawImage(img, 0, 0)
         
-        // Convert to blob and download
         canvas.toBlob((blob) => {
           if (blob) {
             const url = URL.createObjectURL(blob)
@@ -125,7 +120,6 @@ function AdminPortal() {
       alert('Failed to generate QR code image. Please try again.')
     }
 
-    // Create blob URL from SVG and load it as image
     const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' })
     const url = URL.createObjectURL(svgBlob)
     img.src = url
@@ -134,45 +128,79 @@ function AdminPortal() {
   if (loading) {
     return (
       <div style={{ 
-        padding: '2rem', 
+        padding: '4rem 2rem', 
         textAlign: 'center',
-        backgroundColor: '#ffffff',
+        backgroundColor: '#fafafa',
         minHeight: '100vh',
-        color: '#000000'
+        color: '#1a1a1a',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
       }}>
-        <p>Loading artworks...</p>
+        <p style={{ fontSize: '0.95rem', letterSpacing: '0.02em', color: '#666' }}>Loading artworks...</p>
       </div>
     )
   }
 
   return (
     <div style={{ 
-      padding: '2rem', 
-      maxWidth: '1200px', 
+      padding: '4rem 2rem', 
+      maxWidth: '1400px', 
       margin: '0 auto',
-      backgroundColor: '#ffffff',
+      backgroundColor: '#fafafa',
       minHeight: '100vh',
-      color: '#000000'
+      color: '#1a1a1a',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
     }}>
-      <div style={{ marginBottom: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ color: '#000000', margin: 0 }}>Artwork Management</h1>
-        <button
-          onClick={() => {
-            setEditingArtwork(null)
-            setShowForm(true)
-          }}
-          style={{
-            padding: '0.5rem 1rem',
-            backgroundColor: '#007bff',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-          }}
-        >
-          Add New Artwork
-        </button>
+      <div style={{ marginBottom: '4rem' }}>
+        <h1 style={{ 
+          fontSize: '2.5rem', 
+          fontWeight: 300,
+          letterSpacing: '-0.02em',
+          margin: '0 0 0.5rem 0',
+          color: '#1a1a1a',
+        }}>
+          Artwork Management
+        </h1>
+        <p style={{ 
+          fontSize: '0.95rem', 
+          color: '#666',
+          letterSpacing: '0.01em',
+          margin: 0,
+        }}>
+          Manage your collection
+        </p>
       </div>
+
+      <button
+        onClick={() => {
+          setEditingArtwork(null)
+          setShowForm(true)
+        }}
+        style={{
+          padding: '0.75rem 1.5rem',
+          backgroundColor: '#1a1a1a',
+          color: '#ffffff',
+          border: 'none',
+          borderRadius: '2px',
+          cursor: 'pointer',
+          fontSize: '0.875rem',
+          fontWeight: 400,
+          letterSpacing: '0.05em',
+          textTransform: 'uppercase',
+          transition: 'all 0.2s ease',
+          marginBottom: '3rem',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.backgroundColor = '#333'
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.backgroundColor = '#1a1a1a'
+        }}
+      >
+        Add New Artwork
+      </button>
 
       {showForm && (
         <ArtworkForm artwork={editingArtwork} onClose={handleFormClose} />
@@ -186,38 +214,46 @@ function AdminPortal() {
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            backgroundColor: 'rgba(0, 0, 0, 0.85)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 1000,
             padding: '2rem',
+            backdropFilter: 'blur(8px)',
           }}
           onClick={handleCloseQRModal}
         >
           <div
             style={{
               backgroundColor: '#ffffff',
-              borderRadius: '8px',
-              padding: '2rem',
-              maxWidth: '400px',
+              borderRadius: '0',
+              padding: '3rem',
+              maxWidth: '420px',
               width: '100%',
-              color: '#000000',
+              color: '#1a1a1a',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 style={{ marginTop: 0, color: '#000000', marginBottom: '1rem' }}>
-              QR Code: {selectedArtwork.title}
+            <h2 style={{ 
+              marginTop: 0, 
+              marginBottom: '2rem',
+              fontSize: '1.25rem',
+              fontWeight: 400,
+              letterSpacing: '0.02em',
+              color: '#1a1a1a',
+            }}>
+              {selectedArtwork.title}
             </h2>
             <div
               ref={qrRef}
               style={{
                 display: 'flex',
                 justifyContent: 'center',
-                padding: '1rem',
+                padding: '1.5rem',
                 backgroundColor: '#ffffff',
-                borderRadius: '4px',
-                marginBottom: '1rem',
+                marginBottom: '2rem',
               }}
             >
               <QRCodeSVG
@@ -231,12 +267,25 @@ function AdminPortal() {
               <button
                 onClick={handleCloseQRModal}
                 style={{
-                  padding: '0.5rem 1rem',
-                  backgroundColor: '#6c757d',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
+                  padding: '0.75rem 1.5rem',
+                  backgroundColor: 'transparent',
+                  color: '#666',
+                  border: '1px solid #ddd',
+                  borderRadius: '2px',
                   cursor: 'pointer',
+                  fontSize: '0.875rem',
+                  fontWeight: 400,
+                  letterSpacing: '0.05em',
+                  textTransform: 'uppercase',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = '#1a1a1a'
+                  e.currentTarget.style.color = '#1a1a1a'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = '#ddd'
+                  e.currentTarget.style.color = '#666'
                 }}
               >
                 Close
@@ -244,12 +293,23 @@ function AdminPortal() {
               <button
                 onClick={handleDownloadQR}
                 style={{
-                  padding: '0.5rem 1rem',
-                  backgroundColor: '#007bff',
-                  color: 'white',
+                  padding: '0.75rem 1.5rem',
+                  backgroundColor: '#1a1a1a',
+                  color: '#ffffff',
                   border: 'none',
-                  borderRadius: '4px',
+                  borderRadius: '2px',
                   cursor: 'pointer',
+                  fontSize: '0.875rem',
+                  fontWeight: 400,
+                  letterSpacing: '0.05em',
+                  textTransform: 'uppercase',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#333'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#1a1a1a'
                 }}
               >
                 Download
@@ -260,103 +320,126 @@ function AdminPortal() {
       )}
 
       {artworks.length === 0 ? (
-        <p style={{ color: '#000000' }}>No artworks yet. Click "Add New Artwork" to get started.</p>
+        <div style={{ 
+          padding: '6rem 2rem',
+          textAlign: 'center',
+        }}>
+          <p style={{ 
+            fontSize: '0.95rem', 
+            color: '#666',
+            letterSpacing: '0.01em',
+          }}>
+            No artworks yet. Click "Add New Artwork" to get started.
+          </p>
+        </div>
       ) : (
-        <table
-          style={{
-            width: '100%',
-            borderCollapse: 'collapse',
-            backgroundColor: 'white',
-            borderRadius: '8px',
-            overflow: 'hidden',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-          }}
-        >
-          <thead>
-            <tr style={{ backgroundColor: '#f8f9fa' }}>
-              <th style={{ padding: '1rem', textAlign: 'left', borderBottom: '2px solid #dee2e6', color: '#000000' }}>Title</th>
-              <th style={{ padding: '1rem', textAlign: 'left', borderBottom: '2px solid #dee2e6', color: '#000000' }}>Subtitle</th>
-              <th style={{ padding: '1rem', textAlign: 'left', borderBottom: '2px solid #dee2e6', color: '#000000' }}>Created</th>
-              <th style={{ padding: '1rem', textAlign: 'right', borderBottom: '2px solid #dee2e6', color: '#000000' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {artworks.map((artwork) => (
-              <tr key={artwork.id} style={{ borderBottom: '1px solid #dee2e6', backgroundColor: '#ffffff' }}>
-                <td style={{ padding: '1rem', color: '#000000' }}>{artwork.title}</td>
-                <td style={{ padding: '1rem', color: '#000000' }}>{artwork.subtitle || '-'}</td>
-                <td style={{ padding: '1rem', color: '#000000' }}>
-                  {new Date(artwork.created_at).toLocaleDateString()}
-                </td>
-                <td style={{ padding: '1rem', textAlign: 'right' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {artworks.map((artwork) => (
+            <div
+              key={artwork.id}
+              style={{
+                backgroundColor: '#ffffff',
+                padding: '2rem',
+                border: '1px solid #e8e8e8',
+                transition: 'all 0.2s ease',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: '2rem',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#d0d0d0'
+                e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#e8e8e8'
+                e.currentTarget.style.boxShadow = 'none'
+              }}
+            >
+              <div style={{ flex: 1 }}>
+                <h3 style={{ 
+                  margin: '0 0 0.5rem 0',
+                  fontSize: '1.25rem',
+                  fontWeight: 400,
+                  letterSpacing: '-0.01em',
+                  color: '#1a1a1a',
+                }}>
+                  {artwork.title}
+                </h3>
+                {artwork.subtitle && (
+                  <p style={{ 
+                    margin: '0 0 0.75rem 0',
+                    fontSize: '0.9rem',
+                    color: '#666',
+                    letterSpacing: '0.01em',
+                  }}>
+                    {artwork.subtitle}
+                  </p>
+                )}
+                <p style={{ 
+                  margin: 0,
+                  fontSize: '0.8rem',
+                  color: '#999',
+                  letterSpacing: '0.02em',
+                }}>
+                  {new Date(artwork.created_at).toLocaleDateString('en-US', { 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}
+                </p>
+              </div>
+              <div style={{ 
+                display: 'flex', 
+                gap: '0.5rem',
+                flexWrap: 'wrap',
+              }}>
+                {[
+                  { label: 'Link', onClick: () => handleViewLink(artwork), defaultColor: '#666' },
+                  { label: 'QR', onClick: () => handleViewQR(artwork), defaultColor: '#666' },
+                  { label: 'Edit', onClick: () => handleEdit(artwork), defaultColor: '#666' },
+                  { label: 'Delete', onClick: () => handleDelete(artwork.id), defaultColor: '#999' },
+                ].map((btn) => (
                   <button
-                    onClick={() => handleViewLink(artwork)}
+                    key={btn.label}
+                    onClick={btn.onClick}
                     style={{
-                      marginRight: '0.5rem',
-                      padding: '0.25rem 0.75rem',
-                      backgroundColor: '#17a2b8',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
+                      padding: '0.5rem 1rem',
+                      backgroundColor: 'transparent',
+                      color: btn.defaultColor,
+                      border: '1px solid #e8e8e8',
+                      borderRadius: '2px',
                       cursor: 'pointer',
-                      fontSize: '0.875rem',
+                      fontSize: '0.8rem',
+                      fontWeight: 400,
+                      letterSpacing: '0.05em',
+                      textTransform: 'uppercase',
+                      transition: 'all 0.2s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (btn.label === 'Delete') {
+                        e.currentTarget.style.borderColor = '#dc3545'
+                        e.currentTarget.style.color = '#dc3545'
+                      } else {
+                        e.currentTarget.style.borderColor = '#1a1a1a'
+                        e.currentTarget.style.color = '#1a1a1a'
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = '#e8e8e8'
+                      e.currentTarget.style.color = btn.defaultColor
                     }}
                   >
-                    View Link
+                    {btn.label}
                   </button>
-                  <button
-                    onClick={() => handleViewQR(artwork)}
-                    style={{
-                      marginRight: '0.5rem',
-                      padding: '0.25rem 0.75rem',
-                      backgroundColor: '#6f42c1',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontSize: '0.875rem',
-                    }}
-                  >
-                    View QR
-                  </button>
-                  <button
-                    onClick={() => handleEdit(artwork)}
-                    style={{
-                      marginRight: '0.5rem',
-                      padding: '0.25rem 0.75rem',
-                      backgroundColor: '#28a745',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontSize: '0.875rem',
-                    }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDelete(artwork.id)}
-                    style={{
-                      padding: '0.25rem 0.75rem',
-                      backgroundColor: '#dc3545',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontSize: '0.875rem',
-                    }}
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )
 }
 
 export default AdminPortal
-
