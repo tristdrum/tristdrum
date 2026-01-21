@@ -538,6 +538,256 @@
   color: #ffe893;
 }
 
+.debt {
+  gap: 3.5rem;
+}
+
+.debt__nav-link {
+  border: none;
+  background: transparent;
+  color: rgba(226, 230, 244, 0.88);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.92rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.debt__nav-link:hover,
+.debt__nav-link:focus-visible {
+  color: #ffe893;
+}
+
+.debt__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 2rem;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.debt__headline {
+  max-width: 60ch;
+}
+
+.debt__title {
+  margin: 0.3rem 0 0.6rem;
+  font-size: clamp(2.1rem, 4.6vw, 3.4rem);
+  line-height: 1.08;
+  color: #fafafa;
+}
+
+.debt__subtitle {
+  margin: 0;
+  color: rgba(226, 230, 244, 0.8);
+  line-height: 1.68;
+}
+
+.debt__toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  align-items: flex-end;
+}
+
+.debt__toggle {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-radius: 999px;
+  border: 1px solid rgba(235, 238, 255, 0.16);
+  background: rgba(9, 11, 20, 0.7);
+}
+
+.debt__toggle button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: rgba(230, 233, 247, 0.86);
+  padding: 0.5rem 0.9rem;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.debt__toggle button[aria-pressed='true'] {
+  background: linear-gradient(120deg, rgba(255, 232, 147, 0.9), rgba(254, 208, 85, 0.85));
+  color: #1c1c1f;
+}
+
+.debt__pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.debt__pill {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(9, 11, 20, 0.6);
+  color: rgba(232, 235, 247, 0.78);
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.debt__pill[aria-pressed='true'] {
+  border-color: rgba(255, 232, 147, 0.6);
+  color: #ffe893;
+}
+
+.debt__panel {
+  padding: 1.8rem;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(9, 11, 19, 0.7);
+  box-shadow: 0 24px 60px rgba(5, 6, 12, 0.55);
+}
+
+.debt__panel--error {
+  border-color: rgba(255, 120, 120, 0.35);
+  background: rgba(120, 20, 20, 0.25);
+}
+
+.debt__error-title {
+  margin: 0 0 0.4rem;
+  font-weight: 700;
+  color: rgba(255, 200, 200, 0.95);
+}
+
+.debt__muted {
+  color: rgba(218, 224, 240, 0.72);
+  line-height: 1.64;
+  margin: 0;
+}
+
+.debt__muted code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.12rem 0.35rem;
+  border-radius: 8px;
+}
+
+.debt__tiny {
+  margin: 0.9rem 0 0;
+  font-size: 0.82rem;
+  color: rgba(216, 221, 237, 0.6);
+}
+
+.debt__stat {
+  min-height: 190px;
+}
+
+.debt__stat--warning {
+  border-color: rgba(255, 232, 147, 0.35);
+}
+
+.debt__stat--warning .card__accent {
+  opacity: 0.12;
+}
+
+.debt__grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 1.2rem;
+}
+
+.debt__panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.4rem;
+  flex-wrap: wrap;
+}
+
+.debt__panel-meta {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+.debt__meta-value {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin-top: 0.2rem;
+  color: #fefefe;
+}
+
+.debt__chart {
+  margin-top: 1.4rem;
+}
+
+.debt__sparkline {
+  width: 100%;
+  height: 140px;
+}
+
+.debt__summary-grid {
+  margin-top: 1.4rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.debt__summary {
+  padding: 1.1rem 1.2rem;
+  border-radius: 18px;
+  background: rgba(12, 14, 22, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.debt__table-wrap {
+  margin-top: 1.1rem;
+  overflow-x: auto;
+}
+
+.debt__table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 520px;
+}
+
+.debt__table th {
+  text-align: left;
+  font-size: 0.75rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  padding: 0 0 0.8rem;
+  color: rgba(229, 232, 244, 0.55);
+}
+
+.debt__table td {
+  padding: 0.9rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(226, 230, 244, 0.82);
+}
+
+.debt__table-right {
+  text-align: right;
+}
+
+.debt__table-strong {
+  color: #fdfdfd;
+  font-weight: 700;
+}
+
+.debt__notice {
+  margin: 1.2rem 0 0;
+  padding: 0.9rem 1.1rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 232, 147, 0.22);
+  background: rgba(255, 232, 147, 0.06);
+  color: rgba(226, 230, 244, 0.84);
+}
+
 @keyframes float {
   from {
     transform: translateY(0px) scale(1);
@@ -551,6 +801,14 @@
   .frame {
     padding: 3rem 1.25rem 4rem;
     gap: 4.5rem;
+  }
+
+  .debt__toolbar {
+    align-items: flex-start;
+  }
+
+  .debt__grid {
+    grid-template-columns: 1fr;
   }
 
   .nav {
@@ -596,5 +854,210 @@
   .card,
   .nav__links a {
     transition: none;
+  }
+}
+
+/* Martin's simple debt view */
+.martin-page {
+  min-height: 100vh;
+  background: #0a0a0b;
+  color: #e4e4e7;
+  font-family: ui-monospace, 'SF Mono', Monaco, monospace;
+}
+
+.martin-container {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 4rem;
+}
+
+.martin-header {
+  margin-bottom: 2rem;
+}
+
+.martin-back {
+  display: inline-block;
+  color: #52525b;
+  font-size: 0.75rem;
+  text-decoration: none;
+  margin-bottom: 0.75rem;
+}
+
+.martin-back:hover {
+  color: #a1a1aa;
+}
+
+.martin-header h1 {
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: #fafafa;
+  margin: 0;
+}
+
+.martin-status {
+  color: #71717a;
+  font-size: 0.85rem;
+}
+
+.martin-error {
+  color: #f87171;
+}
+
+.martin-info {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem 2rem;
+  margin: 0 0 2rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid #27272a;
+}
+
+.martin-info div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.martin-info dt {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #52525b;
+}
+
+.martin-info dd {
+  font-size: 0.9rem;
+  color: #e4e4e7;
+  margin: 0;
+}
+
+.martin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  table-layout: fixed;
+  font-variant-numeric: tabular-nums;
+}
+
+.martin-table th,
+.martin-table td {
+  padding: 0.5rem 0.5rem 0.5rem 0;
+  text-align: right;
+}
+
+.martin-table .col-date {
+  text-align: left;
+  width: 18%;
+  padding-left: 0;
+}
+
+.martin-table .col-rate {
+  width: 12%;
+  color: #71717a;
+  cursor: help;
+}
+
+.martin-table .col-money {
+  width: 15%;
+}
+
+.martin-table .col-balance {
+  width: 18%;
+  padding-right: 0;
+}
+
+.martin-table th {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #52525b;
+  font-weight: 500;
+  border-bottom: 1px solid #27272a;
+  padding-bottom: 0.6rem;
+}
+
+.martin-table td {
+  color: #a1a1aa;
+  border-bottom: 1px solid #18181b;
+}
+
+.martin-table td.col-balance {
+  color: #fafafa;
+}
+
+.martin-table tr.grace-row td {
+  color: #52525b;
+}
+
+.martin-table tr.grace-row td.col-balance {
+  color: #71717a;
+}
+
+.martin-auth {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 240px;
+}
+
+.martin-auth label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #52525b;
+}
+
+.martin-auth input {
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 4px;
+  padding: 0.6rem 0.75rem;
+  color: #e4e4e7;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.martin-auth input:focus {
+  outline: none;
+  border-color: #3f3f46;
+}
+
+.martin-auth button {
+  background: #27272a;
+  border: none;
+  border-radius: 4px;
+  padding: 0.6rem 1rem;
+  color: #e4e4e7;
+  font-family: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  margin-top: 0.25rem;
+}
+
+.martin-auth button:hover:not(:disabled) {
+  background: #3f3f46;
+}
+
+.martin-auth button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.martin-auth .martin-error {
+  margin-top: 0.25rem;
+}
+
+@media (max-width: 500px) {
+  .martin-info {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem 1.5rem;
+  }
+  
+  .martin-table {
+    font-size: 0.7rem;
+  }
+  
+  .martin-table th {
+    font-size: 0.55rem;
   }
 }
