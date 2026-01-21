@@ -947,22 +947,22 @@
 
 .martin-table .col-date {
   text-align: left;
-  width: 18%;
+  width: 14%;
   padding-left: 0;
 }
 
 .martin-table .col-rate {
-  width: 12%;
+  width: 10%;
   color: #71717a;
   cursor: help;
 }
 
 .martin-table .col-money {
-  width: 15%;
+  width: 12%;
 }
 
 .martin-table .col-balance {
-  width: 18%;
+  width: 14%;
   padding-right: 0;
 }
 

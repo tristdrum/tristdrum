@@ -41,9 +41,10 @@ type MonthRow = {
   date: string
   repoRate: number
   effectiveRate: number
-  interest: number
+  interestCharged: number
   payment: number | null
-  capital: number
+  interestPaid: number
+  capitalPaid: number
   balance: number
   isPast: boolean
   isGrace: boolean
@@ -74,9 +75,10 @@ function buildFullSchedule(config: HarewoodDriveDebtConfig): MonthRow[] {
     date: config.property.registrationDate,
     repoRate: startRepoRate,
     effectiveRate: startRepoRate - margin,
-    interest: 0,
+    interestCharged: 0,
     payment: null,
-    capital: 0,
+    interestPaid: 0,
+    capitalPaid: 0,
     balance: principalBalance,
     isPast: cursor < today,
     isGrace: true,
@@ -141,9 +143,10 @@ function buildFullSchedule(config: HarewoodDriveDebtConfig): MonthRow[] {
       date: endDate,
       repoRate,
       effectiveRate: repoRate - margin,
-      interest: interestPaid,  // Interest portion of payment (not interest charged)
+      interestCharged: roundedInterest,
       payment,
-      capital: capitalPaid,
+      interestPaid,
+      capitalPaid,
       balance: roundCents(principalBalance + accruedInterest),
       isPast,
       isGrace,
@@ -215,7 +218,7 @@ function HarewoodDriveDebtPage() {
   }, [config])
 
   const totalInterest = useMemo(() => {
-    return schedule.reduce((sum, row) => sum + row.interest, 0)
+    return schedule.reduce((sum, row) => sum + row.interestCharged, 0)
   }, [schedule])
 
   // Password prompt
@@ -272,7 +275,7 @@ function HarewoodDriveDebtPage() {
                 <dt>Principal</dt>
                 <dd>R{formatMoney(config.agreement.principal)}</dd>
                   </div>
-              <div>
+                    <div>
                 <dt>Interest rate</dt>
                 <dd>Repo − {(config.agreement.interestMarginBelowRepo * 100).toFixed(1)}%</dd>
               </div>
@@ -284,14 +287,15 @@ function HarewoodDriveDebtPage() {
 
             <table className="martin-table">
                     <thead>
-                <tr>
+                      <tr>
                   <th className="col-date">Date</th>
                   <th className="col-rate" title="Repo rate less 2.5% p.a.">Rate</th>
-                  <th className="col-money">Interest</th>
+                  <th className="col-money">Charged</th>
                   <th className="col-money">Payment</th>
+                  <th className="col-money">Interest</th>
                   <th className="col-money">Capital</th>
                   <th className="col-balance">Balance</th>
-                </tr>
+                      </tr>
                     </thead>
                     <tbody>
                 {schedule.map((row, i) => (
@@ -300,11 +304,10 @@ function HarewoodDriveDebtPage() {
                     <td className="col-rate" title={`Repo ${formatPercent(row.repoRate)} − 2.5% = ${formatPercent(row.effectiveRate)}`}>
                       {formatPercent(row.effectiveRate)}
                     </td>
-                    <td className="col-money">{row.interest > 0 ? formatMoney(row.interest) : '—'}</td>
-                    <td className="col-money">
-                      {row.payment === null ? '—' : formatMoney(row.payment)}
-                    </td>
-                    <td className="col-money">{row.capital > 0 ? formatMoney(row.capital) : '—'}</td>
+                    <td className="col-money">{row.interestCharged > 0 ? formatMoney(row.interestCharged) : '—'}</td>
+                    <td className="col-money">{row.payment === null ? '—' : formatMoney(row.payment)}</td>
+                    <td className="col-money">{row.interestPaid > 0 ? formatMoney(row.interestPaid) : '—'}</td>
+                    <td className="col-money">{row.capitalPaid > 0 ? formatMoney(row.capitalPaid) : '—'}</td>
                     <td className="col-balance">{formatMoney(row.balance)}</td>
                         </tr>
                       ))}
