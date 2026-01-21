@@ -141,7 +141,7 @@ function buildFullSchedule(config: HarewoodDriveDebtConfig): MonthRow[] {
       date: endDate,
       repoRate,
       effectiveRate: repoRate - margin,
-      interest: roundedInterest,
+      interest: interestPaid,  // Interest portion of payment (not interest charged)
       payment,
       capital: capitalPaid,
       balance: roundCents(principalBalance + accruedInterest),
@@ -272,9 +272,9 @@ function HarewoodDriveDebtPage() {
                 <dt>Principal</dt>
                 <dd>R{formatMoney(config.agreement.principal)}</dd>
                   </div>
-                    <div>
-                <dt>Grace period</dt>
-                <dd>{config.agreement.graceMonths} months</dd>
+              <div>
+                <dt>Interest rate</dt>
+                <dd>Repo − {(config.agreement.interestMarginBelowRepo * 100).toFixed(1)}%</dd>
               </div>
                   <div>
                 <dt>Total interest</dt>
@@ -300,7 +300,7 @@ function HarewoodDriveDebtPage() {
                     <td className="col-rate" title={`Repo ${formatPercent(row.repoRate)} − 2.5% = ${formatPercent(row.effectiveRate)}`}>
                       {formatPercent(row.effectiveRate)}
                     </td>
-                    <td className="col-money">{formatMoney(row.interest)}</td>
+                    <td className="col-money">{row.interest > 0 ? formatMoney(row.interest) : '—'}</td>
                     <td className="col-money">
                       {row.payment === null ? '—' : formatMoney(row.payment)}
                     </td>
