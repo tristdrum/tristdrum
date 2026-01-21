@@ -894,6 +894,29 @@
   margin: 0;
 }
 
+.martin-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.martin-download {
+  background: #27272a;
+  border: none;
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  color: #a1a1aa;
+  font-family: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.martin-download:hover {
+  background: #3f3f46;
+  color: #e4e4e7;
+}
+
 .martin-status {
   color: #71717a;
   font-size: 0.85rem;
@@ -947,14 +970,13 @@
 
 .martin-table .col-date {
   text-align: left;
-  width: 14%;
+  width: 17%;
   padding-left: 0;
 }
 
 .martin-table .col-rate {
   width: 10%;
   color: #71717a;
-  cursor: help;
 }
 
 .martin-table .col-money {
@@ -974,6 +996,7 @@
   font-weight: 500;
   border-bottom: 1px solid #27272a;
   padding-bottom: 0.6rem;
+  cursor: help;
 }
 
 .martin-table td {

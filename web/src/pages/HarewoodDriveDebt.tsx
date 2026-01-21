@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { Link } from 'react-router-dom'
+import * as XLSX from 'xlsx'
 import {
   validateHarewoodDriveDebtConfig,
   getRepoRateAt,
@@ -221,6 +222,25 @@ function HarewoodDriveDebtPage() {
     return schedule.reduce((sum, row) => sum + row.interestCharged, 0)
   }, [schedule])
 
+  const downloadExcel = useCallback(() => {
+    if (!config || schedule.length === 0) return
+
+    const data = schedule.map((row) => ({
+      'Date': row.date,
+      'Rate': `${(row.effectiveRate * 100).toFixed(2)}%`,
+      'Charged': row.interestCharged,
+      'Payment': row.payment ?? '',
+      'Interest': row.interestPaid || '',
+      'Capital': row.capitalPaid || '',
+      'Balance': row.balance,
+    }))
+
+    const ws = XLSX.utils.json_to_sheet(data)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Schedule')
+    XLSX.writeFile(wb, 'harewood-drive-debt.xlsx')
+  }, [config, schedule])
+
   // Password prompt
   if (!isAuthenticated) {
   return (
@@ -257,7 +277,12 @@ function HarewoodDriveDebtPage() {
       <div className="martin-container">
         <header className="martin-header">
           <Link to="/" className="martin-back">← tristdrum.com</Link>
-          <h1>Harewood Drive</h1>
+          <div className="martin-header-row">
+            <h1>Harewood Drive</h1>
+            <button type="button" className="martin-download" onClick={downloadExcel}>
+              Download Excel
+            </button>
+          </div>
         </header>
 
         {loading ? (
@@ -287,15 +312,15 @@ function HarewoodDriveDebtPage() {
 
             <table className="martin-table">
                     <thead>
-                      <tr>
-                  <th className="col-date">Date</th>
-                  <th className="col-rate" title="Repo rate less 2.5% p.a.">Rate</th>
-                  <th className="col-money">Charged</th>
-                  <th className="col-money">Payment</th>
-                  <th className="col-money">Interest</th>
-                  <th className="col-money">Capital</th>
-                  <th className="col-balance">Balance</th>
-                      </tr>
+                <tr>
+                  <th className="col-date" title="End of month">Date</th>
+                  <th className="col-rate" title="Interest rate: Repo − 2.5% p.a.">Rate</th>
+                  <th className="col-money" title="Interest charged this month">Charged</th>
+                  <th className="col-money" title="Payment made">Payment</th>
+                  <th className="col-money" title="Portion of payment applied to interest">Interest</th>
+                  <th className="col-money" title="Portion of payment applied to capital">Capital</th>
+                  <th className="col-balance" title="Outstanding balance">Balance</th>
+                </tr>
                     </thead>
                     <tbody>
                 {schedule.map((row, i) => (
