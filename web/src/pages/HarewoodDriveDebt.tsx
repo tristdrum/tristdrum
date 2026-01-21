@@ -31,6 +31,15 @@ const formatDate = (iso: string) => {
 
 const formatPercent = (rate: number) => `${(rate * 100).toFixed(2)}%`
 
+const formatDuration = (months: number) => {
+  const absMonths = Math.abs(months)
+  if (absMonths < 12) return `${absMonths} mo`
+  const years = Math.floor(absMonths / 12)
+  const remainingMonths = absMonths % 12
+  if (remainingMonths === 0) return `${years} yr`
+  return `${years} yr ${remainingMonths} mo`
+}
+
 const lastDayOfMonth = (year: number, month: number) =>
   new Date(Date.UTC(year, month, 0)).getUTCDate()
 
@@ -51,7 +60,7 @@ type MonthRow = {
   isGrace: boolean
 }
 
-function buildFullSchedule(config: HarewoodDriveDebtConfig): MonthRow[] {
+function buildFullSchedule(config: HarewoodDriveDebtConfig, customFuturePayment?: number | null): MonthRow[] {
   const rows: MonthRow[] = []
   const margin = config.agreement.interestMarginBelowRepo
   const minPayment = config.agreement.minimumMonthlyPayment
@@ -123,8 +132,9 @@ function buildFullSchedule(config: HarewoodDriveDebtConfig): MonthRow[] {
       if (actualPayment !== undefined) {
         payment = actualPayment
       } else if (!isPast) {
-        // Future month: pay minimum or remaining balance, whichever is less
-        payment = Math.min(minPayment, totalOwed)
+        // Future month: use custom payment if set, otherwise minimum
+        const futurePayment = customFuturePayment ?? minPayment
+        payment = Math.min(futurePayment, totalOwed)
       } else {
         payment = 0
       }
@@ -165,6 +175,9 @@ function HarewoodDriveDebtPage() {
   const [loading, setLoading] = useState(false)
   const [password, setPassword] = useState('')
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [role, setRole] = useState<'creditor' | 'debtor' | null>(null)
+  const [customPayment, setCustomPayment] = useState<number | null>(null)
+  const [viewAs, setViewAs] = useState<'creditor' | 'debtor'>('debtor')
 
   const loadData = useCallback(async (pwd: string) => {
       setLoading(true)
@@ -177,6 +190,7 @@ function HarewoodDriveDebtPage() {
       if (response.status === 401) {
         sessionStorage.removeItem(SESSION_KEY)
         setIsAuthenticated(false)
+        setRole(null)
         setError('Invalid password')
           setConfig(null)
         return
@@ -187,6 +201,8 @@ function HarewoodDriveDebtPage() {
       const raw = await response.json()
       const validated = validateHarewoodDriveDebtConfig(raw)
       setConfig(validated)
+      setRole(raw.role ?? 'creditor')
+      setCustomPayment(null) // Reset to default
       setIsAuthenticated(true)
       sessionStorage.setItem(SESSION_KEY, pwd)
     } catch (err) {
@@ -213,14 +229,72 @@ function HarewoodDriveDebtPage() {
     }
   }
 
+  const handleLogout = () => {
+    sessionStorage.removeItem(SESSION_KEY)
+    setIsAuthenticated(false)
+    setConfig(null)
+    setRole(null)
+    setPassword('')
+    setCustomPayment(null)
+    setViewAs('debtor')
+  }
+
+  // Effective view: debtor can toggle, creditor always sees creditor view
+  const activeView = role === 'debtor' ? viewAs : 'creditor'
+
   const schedule = useMemo(() => {
     if (!config) return []
-    return buildFullSchedule(config)
+    return buildFullSchedule(config, customPayment)
+  }, [config, customPayment])
+
+  // Default schedule (minimum payment) for comparison
+  const defaultSchedule = useMemo(() => {
+    if (!config) return []
+    return buildFullSchedule(config, null)
   }, [config])
 
   const totalInterest = useMemo(() => {
     return schedule.reduce((sum, row) => sum + row.interestCharged, 0)
   }, [schedule])
+
+  const defaultTotalInterest = useMemo(() => {
+    return defaultSchedule.reduce((sum, row) => sum + row.interestCharged, 0)
+  }, [defaultSchedule])
+
+  const lastPaymentDate = useMemo(() => {
+    if (schedule.length === 0) return null
+    for (let i = schedule.length - 1; i >= 0; i--) {
+      if (schedule[i].payment && schedule[i].payment > 0) {
+        return schedule[i].date
+      }
+    }
+    return null
+  }, [schedule])
+
+  const defaultLastPaymentDate = useMemo(() => {
+    if (defaultSchedule.length === 0) return null
+    for (let i = defaultSchedule.length - 1; i >= 0; i--) {
+      if (defaultSchedule[i].payment && defaultSchedule[i].payment > 0) {
+        return defaultSchedule[i].date
+      }
+    }
+    return null
+  }, [defaultSchedule])
+
+  // Count payment months
+  const paymentMonths = useMemo(() => {
+    return schedule.filter(row => row.payment && row.payment > 0).length
+  }, [schedule])
+
+  const defaultPaymentMonths = useMemo(() => {
+    return defaultSchedule.filter(row => row.payment && row.payment > 0).length
+  }, [defaultSchedule])
+
+  const interestSaved = defaultTotalInterest - totalInterest
+  const monthsSaved = defaultPaymentMonths - paymentMonths
+
+  const effectivePayment = customPayment ?? config?.agreement.minimumMonthlyPayment ?? 0
+  const isCustomPayment = customPayment !== null && customPayment !== config?.agreement.minimumMonthlyPayment
 
   const downloadExcel = useCallback(() => {
     if (!config || schedule.length === 0) return
@@ -279,9 +353,29 @@ function HarewoodDriveDebtPage() {
           <Link to="/" className="martin-back">← tristdrum.com</Link>
           <div className="martin-header-row">
             <h1>Harewood Drive</h1>
-            <button type="button" className="martin-download" onClick={downloadExcel}>
-              Download Excel
-            </button>
+            <div className="martin-header-actions">
+              {role === 'debtor' && (
+                <div className="martin-view-toggle">
+                  <button
+                    type="button"
+                    className={viewAs === 'debtor' ? 'active' : ''}
+                    onClick={() => setViewAs('debtor')}
+                  >
+                    Tristan
+                  </button>
+                  <button
+                    type="button"
+                    className={viewAs === 'creditor' ? 'active' : ''}
+                    onClick={() => setViewAs('creditor')}
+                  >
+                    Martin
+                  </button>
+                </div>
+              )}
+              <button type="button" className="martin-download" onClick={downloadExcel}>
+                Download
+              </button>
+            </div>
           </div>
         </header>
 
@@ -296,23 +390,71 @@ function HarewoodDriveDebtPage() {
                 <dt>Loan started</dt>
                 <dd>{formatDate(config.property.registrationDate)}</dd>
               </div>
-                  <div>
+              <div>
                 <dt>Principal</dt>
                 <dd>R{formatMoney(config.agreement.principal)}</dd>
-                  </div>
-                    <div>
+              </div>
+              <div>
                 <dt>Interest rate</dt>
                 <dd>Repo − {(config.agreement.interestMarginBelowRepo * 100).toFixed(1)}%</dd>
               </div>
-                  <div>
+              {activeView === 'debtor' ? (
+                <div>
+                  <dt>Monthly payment</dt>
+                  <dd className="martin-payment-row">
+                    <input
+                      type="number"
+                      className="martin-payment-input"
+                      value={effectivePayment}
+                      onChange={(e) => setCustomPayment(Number(e.target.value) || null)}
+                      min={0}
+                      step={100}
+                    />
+                    {isCustomPayment && (
+                      <button
+                        type="button"
+                        className="martin-reset"
+                        onClick={() => setCustomPayment(null)}
+                        title="Reset to minimum"
+                      >
+                        ↺
+                      </button>
+                    )}
+                  </dd>
+                </div>
+              ) : (
+                <div>
+                  <dt>Monthly payment</dt>
+                  <dd>R{formatMoney(config.agreement.minimumMonthlyPayment)}</dd>
+                </div>
+              )}
+              <div>
                 <dt>Total interest</dt>
-                <dd>R{formatMoney(totalInterest)}</dd>
+                <dd>
+                  R{formatMoney(totalInterest)}
+                  {activeView === 'debtor' && isCustomPayment && interestSaved !== 0 && (
+                    <span className={`martin-diff ${interestSaved > 0 ? 'martin-diff--good' : 'martin-diff--bad'}`}>
+                      {interestSaved > 0 ? '↓' : '↑'} R{formatMoney(Math.abs(interestSaved))}
+                    </span>
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>Last payment</dt>
+                <dd>
+                  {lastPaymentDate ? formatDate(lastPaymentDate) : '—'}
+                  {activeView === 'debtor' && isCustomPayment && monthsSaved !== 0 && (
+                    <span className={`martin-diff ${monthsSaved > 0 ? 'martin-diff--good' : 'martin-diff--bad'}`}>
+                      {monthsSaved > 0 ? '↓' : '↑'} {formatDuration(monthsSaved)}
+                    </span>
+                  )}
+                </dd>
               </div>
             </dl>
 
             <table className="martin-table">
                     <thead>
-                <tr>
+                      <tr>
                   <th className="col-date" title="End of month">Date</th>
                   <th className="col-rate" title="Interest rate: Repo − 2.5% p.a.">Rate</th>
                   <th className="col-money" title="Interest charged this month">Charged</th>
@@ -320,7 +462,7 @@ function HarewoodDriveDebtPage() {
                   <th className="col-money" title="Portion of payment applied to interest">Interest</th>
                   <th className="col-money" title="Portion of payment applied to capital">Capital</th>
                   <th className="col-balance" title="Outstanding balance">Balance</th>
-                </tr>
+                      </tr>
                     </thead>
                     <tbody>
                 {schedule.map((row, i) => (
@@ -338,6 +480,10 @@ function HarewoodDriveDebtPage() {
                       ))}
                     </tbody>
                   </table>
+
+            <button type="button" className="martin-logout" onClick={handleLogout}>
+              Logout
+            </button>
           </>
         ) : null}
       </div>

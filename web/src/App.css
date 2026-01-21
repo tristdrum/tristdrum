@@ -917,6 +917,56 @@
   color: #e4e4e7;
 }
 
+.martin-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.martin-view-toggle {
+  display: flex;
+  background: #18181b;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.martin-view-toggle button {
+  background: transparent;
+  border: none;
+  padding: 0.4rem 0.6rem;
+  color: #71717a;
+  font-family: inherit;
+  font-size: 0.65rem;
+  cursor: pointer;
+}
+
+.martin-view-toggle button:hover {
+  color: #a1a1aa;
+}
+
+.martin-view-toggle button.active {
+  background: #27272a;
+  color: #e4e4e7;
+}
+
+.martin-logout {
+  display: block;
+  margin: 2rem auto 0;
+  background: transparent;
+  border: 1px solid #27272a;
+  border-radius: 4px;
+  padding: 0.4rem 1rem;
+  color: #52525b;
+  font-family: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.martin-logout:hover {
+  border-color: #3f3f46;
+  color: #71717a;
+}
+
 .martin-status {
   color: #71717a;
   font-size: 0.85rem;
@@ -928,7 +978,7 @@
 
 .martin-info {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 1rem 2rem;
   margin: 0 0 2rem;
   padding-bottom: 1.5rem;
@@ -952,6 +1002,61 @@
   font-size: 0.9rem;
   color: #e4e4e7;
   margin: 0;
+}
+
+.martin-payment-input {
+  background: #18181b;
+  border: 1px solid #3f3f46;
+  border-radius: 4px;
+  padding: 0.3rem 0.5rem;
+  color: #e4e4e7;
+  font-family: inherit;
+  font-size: 0.9rem;
+  width: 100px;
+}
+
+.martin-payment-input:focus {
+  outline: none;
+  border-color: #52525b;
+}
+
+.martin-payment-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.martin-reset {
+  background: transparent;
+  border: 1px solid #3f3f46;
+  border-radius: 4px;
+  width: 1.6rem;
+  height: 1.6rem;
+  color: #71717a;
+  font-size: 0.85rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.martin-reset:hover {
+  border-color: #52525b;
+  color: #a1a1aa;
+}
+
+.martin-diff {
+  display: block;
+  font-size: 0.7rem;
+  margin-top: 0.2rem;
+}
+
+.martin-diff--good {
+  color: #4ade80;
+}
+
+.martin-diff--bad {
+  color: #f87171;
 }
 
 .martin-table {
@@ -1070,7 +1175,7 @@
   margin-top: 0.25rem;
 }
 
-@media (max-width: 500px) {
+@media (max-width: 600px) {
   .martin-info {
     grid-template-columns: 1fr 1fr;
     gap: 0.75rem 1.5rem;
