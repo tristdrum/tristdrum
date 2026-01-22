@@ -264,22 +264,13 @@ function HarewoodDriveDebtPage() {
   const lastPaymentDate = useMemo(() => {
     if (schedule.length === 0) return null
     for (let i = schedule.length - 1; i >= 0; i--) {
-      if (schedule[i].payment && schedule[i].payment > 0) {
+      const payment = schedule[i].payment
+      if (payment && payment > 0) {
         return schedule[i].date
       }
     }
     return null
   }, [schedule])
-
-  const defaultLastPaymentDate = useMemo(() => {
-    if (defaultSchedule.length === 0) return null
-    for (let i = defaultSchedule.length - 1; i >= 0; i--) {
-      if (defaultSchedule[i].payment && defaultSchedule[i].payment > 0) {
-        return defaultSchedule[i].date
-      }
-    }
-    return null
-  }, [defaultSchedule])
 
   // Count payment months
   const paymentMonths = useMemo(() => {

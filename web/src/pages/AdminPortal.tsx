@@ -382,11 +382,13 @@ function AdminPortal() {
                   color: '#999',
                   letterSpacing: '0.02em',
                 }}>
-                  {new Date(artwork.created_at).toLocaleDateString('en-US', { 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric' 
-                  })}
+                  {artwork.created_at
+                    ? new Date(artwork.created_at).toLocaleDateString('en-US', { 
+                      year: 'numeric', 
+                      month: 'long', 
+                      day: 'numeric' 
+                    })
+                    : '—'}
                 </p>
               </div>
               <div style={{ 
