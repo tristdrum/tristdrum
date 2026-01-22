@@ -241,6 +241,7 @@ function HarewoodDriveDebtPage() {
 
   // Effective view: debtor can toggle, creditor always sees creditor view
   const activeView = role === 'debtor' ? viewAs : 'creditor'
+  const showBreakdownColumns = activeView === 'debtor'
 
   const schedule = useMemo(() => {
     if (!config) return []
@@ -448,10 +449,16 @@ function HarewoodDriveDebtPage() {
                       <tr>
                   <th className="col-date" title="End of month">Date</th>
                   <th className="col-rate" title="Interest rate: Repo − 2.5% p.a.">Rate</th>
-                  <th className="col-money" title="Interest charged this month">Charged</th>
+                  {showBreakdownColumns && (
+                    <th className="col-money" title="Interest charged this month">Charged</th>
+                  )}
                   <th className="col-money" title="Payment made">Payment</th>
-                  <th className="col-money" title="Portion of payment applied to interest">Interest</th>
-                  <th className="col-money" title="Portion of payment applied to capital">Capital</th>
+                  {showBreakdownColumns && (
+                    <th className="col-money" title="Portion of payment applied to interest">Interest</th>
+                  )}
+                  {showBreakdownColumns && (
+                    <th className="col-money" title="Portion of payment applied to capital">Capital</th>
+                  )}
                   <th className="col-balance" title="Outstanding balance">Balance</th>
                       </tr>
                     </thead>
@@ -462,10 +469,16 @@ function HarewoodDriveDebtPage() {
                     <td className="col-rate" title={`Repo ${formatPercent(row.repoRate)} − 2.5% = ${formatPercent(row.effectiveRate)}`}>
                       {formatPercent(row.effectiveRate)}
                     </td>
-                    <td className="col-money">{row.interestCharged > 0 ? formatMoney(row.interestCharged) : '—'}</td>
+                    {showBreakdownColumns && (
+                      <td className="col-money">{row.interestCharged > 0 ? formatMoney(row.interestCharged) : '—'}</td>
+                    )}
                     <td className="col-money">{row.payment === null ? '—' : formatMoney(row.payment)}</td>
-                    <td className="col-money">{row.interestPaid > 0 ? formatMoney(row.interestPaid) : '—'}</td>
-                    <td className="col-money">{row.capitalPaid > 0 ? formatMoney(row.capitalPaid) : '—'}</td>
+                    {showBreakdownColumns && (
+                      <td className="col-money">{row.interestPaid > 0 ? formatMoney(row.interestPaid) : '—'}</td>
+                    )}
+                    {showBreakdownColumns && (
+                      <td className="col-money">{row.capitalPaid > 0 ? formatMoney(row.capitalPaid) : '—'}</td>
+                    )}
                     <td className="col-balance">{formatMoney(row.balance)}</td>
                         </tr>
                       ))}
