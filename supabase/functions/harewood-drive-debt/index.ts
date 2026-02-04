@@ -20,7 +20,7 @@ const DEBT_DATA = {
     principal: 333000,
     interestMarginBelowRepo: 0.025,
     graceMonths: 5,
-    minimumMonthlyPayment: 3149.17
+    minimumMonthlyPayment: 3500
   },
   repoRateTimeline: [
     {
