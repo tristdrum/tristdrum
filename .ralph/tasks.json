@@ -6,50 +6,114 @@
     {
       "id": "TDS-1",
       "title": "Implement proper Supabase auth foundation with email/password + magic link, shared session handling, and a /login route",
-      "status": "todo",
+      "status": "done",
       "priority": 1,
-      "updatedAt": "2026-03-13T10:18:00Z",
-      "notes": "Requested by Trist in Slack on 2026-03-13. Preserve the public homepage. Build a clean auth foundation for the personal site without trampling the existing uncommitted Task Pulse changes in the repo."
+      "updatedAt": "2026-03-13T11:52:00Z",
+      "notes": "Completed on 2026-03-13. Auth foundation shipped live with email/password + magic link, protected routes, and production verification on tristdrum.com."
     },
     {
       "id": "TDS-2",
       "title": "Add protected private routes for the owner dashboard and existing sensitive admin surfaces",
-      "status": "todo",
+      "status": "done",
       "priority": 1,
-      "updatedAt": "2026-03-13T10:18:00Z",
-      "notes": "Replace security-by-obscurity with real auth gating. Keep public routes public. Prefer minimal, composable route guards and clear unauthenticated redirects."
+      "updatedAt": "2026-03-13T11:52:30Z",
+      "notes": "Completed on 2026-03-13. Dashboard, Task Pulse, and artwork admin are now behind auth/admin gating."
     },
     {
       "id": "TDS-3",
       "title": "Harden Supabase authorization and RLS for artworks plus future private dashboard data",
-      "status": "todo",
+      "status": "done",
       "priority": 1,
-      "updatedAt": "2026-03-13T10:18:00Z",
-      "notes": "Current repo has overly open access patterns. Introduce a real owner-only authorization model that is compatible with Supabase Auth and production deployment."
+      "updatedAt": "2026-03-13T11:53:00Z",
+      "notes": "Completed on 2026-03-13. Added `site_admins` auth helpers/bootstrap path and tightened artwork write access."
     },
     {
       "id": "TDS-4",
       "title": "Ship the first private dashboard shell for active projects, open loops, and assistant-tracked work",
-      "status": "todo",
+      "status": "done",
       "priority": 2,
-      "updatedAt": "2026-03-13T10:18:00Z",
-      "notes": "This is the first useful private area behind auth. Start simple: cards, sections, placeholders, and easy extension points for later OpenClaw/Slack/Linear integrations."
+      "updatedAt": "2026-03-13T11:53:30Z",
+      "notes": "Completed on 2026-03-13. Initial private dashboard shell is live and ready for expansion."
     },
     {
       "id": "TDS-5",
       "title": "Document required Supabase project settings, migration/deploy steps, and local env setup for hosted auth",
-      "status": "todo",
+      "status": "done",
       "priority": 2,
-      "updatedAt": "2026-03-13T10:18:00Z",
-      "notes": "Leave the repo in a state where the auth setup is repeatable and understandable, including any manual steps still required in Supabase dashboard settings."
+      "updatedAt": "2026-03-13T11:54:00Z",
+      "notes": "Completed on 2026-03-13. Auth setup and deployment notes were added to repo docs during the rollout."
     },
     {
       "id": "TDS-6",
       "title": "Add tests or smoke checks for auth-critical flows and verify build/lint still pass",
+      "status": "done",
+      "priority": 2,
+      "updatedAt": "2026-03-13T11:54:30Z",
+      "notes": "Completed on 2026-03-13. Lint, tests, and build passed after the auth rollout."
+    },
+    {
+      "id": "TDS-7",
+      "title": "Turn the Ralph Loops proposal into a repo-native implementation plan that Ralph can execute against",
+      "status": "done",
+      "priority": 1,
+      "updatedAt": "2026-03-13T11:55:00Z",
+      "notes": "Completed on 2026-03-13. Canonical plan now lives in `docs/RALPH_LOOPS_PLAN.md` and locks in the source-of-truth, snapshot, schema, automation, security, and rollout direction."
+    },
+    {
+      "id": "TDS-8",
+      "title": "Define the Ralph Loops snapshot JSON contract and runtime validation layer",
+      "status": "todo",
+      "priority": 1,
+      "updatedAt": "2026-03-13T11:56:00Z",
+      "notes": "Top priority now is Ralph Loops. Add a real JSON schema plus shared parser/validator so exporter and UI consume one canonical project snapshot shape only. Keep it DRY and production-minded."
+    },
+    {
+      "id": "TDS-9",
+      "title": "Add Supabase migration for Ralph Loops projection tables, constraints, and owner-only RLS",
+      "status": "todo",
+      "priority": 1,
+      "updatedAt": "2026-03-13T11:57:00Z",
+      "notes": "Create the first read-model tables for `ralph_projects_current`, `ralph_project_snapshots_history`, and `ralph_sync_runs`. Supabase is the site-facing projection only, not the canonical source."
+    },
+    {
+      "id": "TDS-10",
+      "title": "Implement the Ralph Loops exporter that projects local Ralph state into Supabase with hash-aware writes",
+      "status": "todo",
+      "priority": 1,
+      "updatedAt": "2026-03-13T11:58:00Z",
+      "notes": "Read local Ralph config/runtime/task sources, build validated snapshots, upsert current rows, append history only on change, and record sync-run observability."
+    },
+    {
+      "id": "TDS-11",
+      "title": "Add a 5-minute Ralph Loops sync automation with durable logs and failure visibility",
+      "status": "todo",
+      "priority": 1,
+      "updatedAt": "2026-03-13T11:59:00Z",
+      "notes": "Wire the exporter into a reliable local automation path that runs every 5 minutes to start. Keep per-run logs, explicit status, and no dropped loops."
+    },
+    {
+      "id": "TDS-12",
+      "title": "Build the owner-only Ralph Loops dashboard summary page with project cards and sync health",
+      "status": "todo",
+      "priority": 1,
+      "updatedAt": "2026-03-13T12:00:00Z",
+      "notes": "Add `/dashboard/ralph-loops` using the Supabase projection. Show all projects, state, current item, usage multiplier, quick links, and last-sync/sync-health summary."
+    },
+    {
+      "id": "TDS-13",
+      "title": "Add Ralph Loops project detail pages with run history and snapshot inspection",
       "status": "todo",
       "priority": 2,
-      "updatedAt": "2026-03-13T10:18:00Z",
-      "notes": "Protect the basics: unauthenticated redirect, login UX, protected-route access, and build stability. Keep checks lightweight but real."
+      "updatedAt": "2026-03-13T12:01:00Z",
+      "notes": "After the summary page works, add `/dashboard/ralph-loops/:projectId` with deeper run history, backlog state, and raw snapshot visibility."
+    },
+    {
+      "id": "TDS-14",
+      "title": "Add tests, docs, and rollout verification for the Ralph Loops pipeline",
+      "status": "todo",
+      "priority": 2,
+      "updatedAt": "2026-03-13T12:02:00Z",
+      "notes": "Finish with schema/exporter/UI tests, operator docs, and rollout verification so the loop is understandable and safe to evolve."
     }
   ]
 }
