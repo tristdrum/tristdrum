@@ -1,0 +1,15 @@
+{
+  "name": "vitest",
+  "version": "0.0.0-local",
+  "type": "module",
+  "types": "./index.d.ts",
+  "bin": {
+    "vitest": "./bin/vitest.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.mjs"
+    }
+  }
+}

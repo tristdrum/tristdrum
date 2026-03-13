@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "project": "tristdrum-site",
+  "sourceOfTruth": "repo",
+  "tasks": [
+    {
+      "id": "TDS-1",
+      "title": "Implement proper Supabase auth foundation with email/password + magic link, shared session handling, and a /login route",
+      "status": "todo",
+      "priority": 1,
+      "updatedAt": "2026-03-13T10:18:00Z",
+      "notes": "Requested by Trist in Slack on 2026-03-13. Preserve the public homepage. Build a clean auth foundation for the personal site without trampling the existing uncommitted Task Pulse changes in the repo."
+    },
+    {
+      "id": "TDS-2",
+      "title": "Add protected private routes for the owner dashboard and existing sensitive admin surfaces",
+      "status": "todo",
+      "priority": 1,
+      "updatedAt": "2026-03-13T10:18:00Z",
+      "notes": "Replace security-by-obscurity with real auth gating. Keep public routes public. Prefer minimal, composable route guards and clear unauthenticated redirects."
+    },
+    {
+      "id": "TDS-3",
+      "title": "Harden Supabase authorization and RLS for artworks plus future private dashboard data",
+      "status": "todo",
+      "priority": 1,
+      "updatedAt": "2026-03-13T10:18:00Z",
+      "notes": "Current repo has overly open access patterns. Introduce a real owner-only authorization model that is compatible with Supabase Auth and production deployment."
+    },
+    {
+      "id": "TDS-4",
+      "title": "Ship the first private dashboard shell for active projects, open loops, and assistant-tracked work",
+      "status": "todo",
+      "priority": 2,
+      "updatedAt": "2026-03-13T10:18:00Z",
+      "notes": "This is the first useful private area behind auth. Start simple: cards, sections, placeholders, and easy extension points for later OpenClaw/Slack/Linear integrations."
+    },
+    {
+      "id": "TDS-5",
+      "title": "Document required Supabase project settings, migration/deploy steps, and local env setup for hosted auth",
+      "status": "todo",
+      "priority": 2,
+      "updatedAt": "2026-03-13T10:18:00Z",
+      "notes": "Leave the repo in a state where the auth setup is repeatable and understandable, including any manual steps still required in Supabase dashboard settings."
+    },
+    {
+      "id": "TDS-6",
+      "title": "Add tests or smoke checks for auth-critical flows and verify build/lint still pass",
+      "status": "todo",
+      "priority": 2,
+      "updatedAt": "2026-03-13T10:18:00Z",
+      "notes": "Protect the basics: unauthenticated redirect, login UX, protected-route access, and build stability. Keep checks lightweight but real."
+    }
+  ]
+}
