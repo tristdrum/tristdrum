@@ -135,7 +135,7 @@ export const getFirstPaymentDueDate = (registrationDate: string, graceMonths: nu
     throw new Error(`Invalid registrationDate: ${registrationDate}`)
   }
 
-  const monthIndex = month - 1 + graceMonths + 1
+  const monthIndex = month - 1 + graceMonths
   const dueYear = year + Math.floor(monthIndex / 12)
   const dueMonth = (monthIndex % 12) + 1
   const dueDay = lastDayOfMonth(dueYear, dueMonth)
@@ -294,7 +294,7 @@ export const calculateInterestAccrued = (
 
 const getDueDateByInstallmentIndex = (registrationDate: string, graceMonths: number, installmentIndex: number) => {
   const [year, month] = registrationDate.split('-').map((part) => Number(part))
-  const monthIndex = month - 1 + graceMonths + installmentIndex
+  const monthIndex = month - 1 + graceMonths + installmentIndex - 1
   const dueYear = year + Math.floor(monthIndex / 12)
   const dueMonth = (monthIndex % 12) + 1
   const dueDay = lastDayOfMonth(dueYear, dueMonth)
@@ -644,4 +644,3 @@ export const getHarewoodDriveDebtSnapshot = (
     assumptions,
   }
 }
-

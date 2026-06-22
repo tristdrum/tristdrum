@@ -30,9 +30,34 @@ const DEBT_DATA = {
     {
       effectiveFrom: "2025-11-20T15:00:00+02:00",
       repoRate: 0.0675
+    },
+    {
+      effectiveFrom: "2026-05-29T00:00:00+02:00",
+      repoRate: 0.07
     }
   ],
-  payments: []
+  payments: [
+    {
+      paidAt: "2026-02-28",
+      amount: 3500,
+      note: "Monthly plan payment"
+    },
+    {
+      paidAt: "2026-03-31",
+      amount: 3500,
+      note: "Monthly plan payment"
+    },
+    {
+      paidAt: "2026-04-30",
+      amount: 3500,
+      note: "Monthly plan payment"
+    },
+    {
+      paidAt: "2026-05-31",
+      amount: 3500,
+      note: "Monthly plan payment"
+    }
+  ]
 };
 
 const corsHeaders = {
