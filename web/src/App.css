@@ -1265,13 +1265,34 @@
   }
 
   .martin-rate-change {
-    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "badge badge"
+      "date rates"
+      "impact delta";
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 0.25rem 0.55rem;
   }
 
-  .martin-rate-change__badge,
-  .martin-rate-change__impact {
+  .martin-rate-change__badge {
+    grid-area: badge;
     grid-column: 1 / -1;
+  }
+
+  .martin-rate-change__date {
+    grid-area: date;
+  }
+
+  .martin-rate-change__rates {
+    grid-area: rates;
+    justify-self: end;
+  }
+
+  .martin-rate-change__impact {
+    grid-area: impact;
+  }
+
+  .martin-rate-change__delta {
+    grid-area: delta;
   }
 
   .martin-rate-change__date,
@@ -1282,6 +1303,6 @@
   }
 
   .martin-rate-change__impact {
-    white-space: normal;
+    white-space: nowrap;
   }
 }
