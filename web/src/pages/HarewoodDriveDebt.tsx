@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react'
+import { Fragment, useEffect, useState, useMemo, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import {
@@ -51,6 +51,7 @@ type MonthRow = {
   date: string
   repoRate: number
   effectiveRate: number
+  rateChanges: RateChangeMarker[]
   interestCharged: number
   payment: number | null
   interestPaid: number
@@ -60,12 +61,27 @@ type MonthRow = {
   isGrace: boolean
 }
 
+type RateChangeMarker = {
+  effectiveFrom: string
+  previousRepoRate: number
+  nextRepoRate: number
+  previousEffectiveRate: number
+  nextEffectiveRate: number
+  direction: 'up' | 'down'
+}
+
+const sortRepoRateTimeline = (timeline: HarewoodDriveDebtConfig['repoRateTimeline']) =>
+  [...timeline]
+    .map((entry) => ({ ...entry, effectiveFromDate: new Date(entry.effectiveFrom) }))
+    .sort((a, b) => a.effectiveFromDate.getTime() - b.effectiveFromDate.getTime())
+
 function buildFullSchedule(config: HarewoodDriveDebtConfig, customFuturePayment?: number | null): MonthRow[] {
   const rows: MonthRow[] = []
   const margin = config.agreement.interestMarginBelowRepo
   const minPayment = config.agreement.minimumMonthlyPayment
   const graceMonths = config.agreement.graceMonths
   const today = new Date()
+  const sortedRepoRates = sortRepoRateTimeline(config.repoRateTimeline)
 
   const [startYear, startMonth] = config.property.registrationDate.split('-').map(Number)
   
@@ -85,6 +101,7 @@ function buildFullSchedule(config: HarewoodDriveDebtConfig, customFuturePayment?
     date: config.property.registrationDate,
     repoRate: startRepoRate,
     effectiveRate: startRepoRate - margin,
+    rateChanges: [],
     interestCharged: 0,
     payment: null,
     interestPaid: 0,
@@ -120,6 +137,23 @@ function buildFullSchedule(config: HarewoodDriveDebtConfig, customFuturePayment?
     
     const isGrace = monthIndex <= graceMonths
     const isPast = endCursor < today
+    const rateChanges = sortedRepoRates.flatMap((entry, index): RateChangeMarker[] => {
+      const previous = sortedRepoRates[index - 1]
+      if (!previous) return []
+      if (entry.effectiveFromDate <= cursor || entry.effectiveFromDate > endCursor) return []
+      if (entry.repoRate === previous.repoRate) return []
+
+      return [
+        {
+          effectiveFrom: entry.effectiveFrom,
+          previousRepoRate: previous.repoRate,
+          nextRepoRate: entry.repoRate,
+          previousEffectiveRate: previous.repoRate - margin,
+          nextEffectiveRate: entry.repoRate - margin,
+          direction: entry.repoRate > previous.repoRate ? 'up' : 'down',
+        },
+      ]
+    })
     
     let capitalPaid = 0
     let interestPaid = 0
@@ -154,6 +188,7 @@ function buildFullSchedule(config: HarewoodDriveDebtConfig, customFuturePayment?
       date: endDate,
       repoRate,
       effectiveRate: repoRate - margin,
+      rateChanges,
       interestCharged: roundedInterest,
       payment,
       interestPaid,
@@ -242,6 +277,7 @@ function HarewoodDriveDebtPage() {
   // Effective view: debtor can toggle, creditor always sees creditor view
   const activeView = role === 'debtor' ? viewAs : 'creditor'
   const showBreakdownColumns = activeView === 'debtor'
+  const tableColumnCount = showBreakdownColumns ? 7 : 4
 
   const schedule = useMemo(() => {
     if (!config) return []
@@ -464,24 +500,60 @@ function HarewoodDriveDebtPage() {
                     </thead>
                     <tbody>
                 {schedule.map((row, i) => (
-                  <tr key={row.date} className={row.isGrace && i > 0 ? 'grace-row' : ''}>
-                    <td className="col-date">{formatDate(row.date)}</td>
-                    <td className="col-rate" title={`Repo ${formatPercent(row.repoRate)} − 2.5% = ${formatPercent(row.effectiveRate)}`}>
-                      {formatPercent(row.effectiveRate)}
-                    </td>
-                    {showBreakdownColumns && (
-                      <td className="col-money">{row.interestCharged > 0 ? formatMoney(row.interestCharged) : '—'}</td>
-                    )}
-                    <td className="col-money">{row.payment === null ? '—' : formatMoney(row.payment)}</td>
-                    {showBreakdownColumns && (
-                      <td className="col-money">{row.interestPaid > 0 ? formatMoney(row.interestPaid) : '—'}</td>
-                    )}
-                    {showBreakdownColumns && (
-                      <td className="col-money">{row.capitalPaid > 0 ? formatMoney(row.capitalPaid) : '—'}</td>
-                    )}
-                    <td className="col-balance">{formatMoney(row.balance)}</td>
+                  <Fragment key={row.date}>
+                    {row.rateChanges.map((change) => {
+                      const repoDelta = change.nextRepoRate - change.previousRepoRate
+                      const effectiveDelta = change.nextEffectiveRate - change.previousEffectiveRate
+
+                      return (
+                        <tr
+                          key={change.effectiveFrom}
+                          className={`rate-change-row rate-change-row--${change.direction}`}
+                        >
+                          <td colSpan={tableColumnCount}>
+                            <div className="martin-rate-change">
+                              <span className="martin-rate-change__badge">
+                                Repo rate {change.direction === 'up' ? 'up' : 'down'}
+                              </span>
+                              <span className="martin-rate-change__date">{formatDate(change.effectiveFrom)}</span>
+                              <span className="martin-rate-change__rates">
+                                {formatPercent(change.previousRepoRate)} → {formatPercent(change.nextRepoRate)}
+                              </span>
+                              <span className="martin-rate-change__impact">
+                                schedule {formatPercent(change.previousEffectiveRate)} →{' '}
+                                {formatPercent(change.nextEffectiveRate)}
+                                {' '}
+                                ({effectiveDelta > 0 ? '+' : ''}
+                                {formatPercent(effectiveDelta)})
+                              </span>
+                              <span className="martin-rate-change__delta">
+                                {repoDelta > 0 ? '+' : ''}
+                                {formatPercent(repoDelta)}
+                              </span>
+                            </div>
+                          </td>
                         </tr>
-                      ))}
+                      )
+                    })}
+                    <tr className={row.isGrace && i > 0 ? 'grace-row' : ''}>
+                      <td className="col-date">{formatDate(row.date)}</td>
+                      <td className="col-rate" title={`Repo ${formatPercent(row.repoRate)} − 2.5% = ${formatPercent(row.effectiveRate)}`}>
+                        {formatPercent(row.effectiveRate)}
+                      </td>
+                      {showBreakdownColumns && (
+                        <td className="col-money">{row.interestCharged > 0 ? formatMoney(row.interestCharged) : '—'}</td>
+                      )}
+                      <td className="col-money">{row.payment === null ? '—' : formatMoney(row.payment)}</td>
+                      {showBreakdownColumns && (
+                        <td className="col-money">{row.interestPaid > 0 ? formatMoney(row.interestPaid) : '—'}</td>
+                      )}
+                      {showBreakdownColumns && (
+                        <td className="col-money">{row.capitalPaid > 0 ? formatMoney(row.capitalPaid) : '—'}</td>
+                      )}
+                      <td className="col-balance">{formatMoney(row.balance)}</td>
+                    </tr>
+                  </Fragment>
+                ))}
                     </tbody>
                   </table>
 
