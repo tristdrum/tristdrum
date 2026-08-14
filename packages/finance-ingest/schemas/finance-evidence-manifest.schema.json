@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tristdrum.com/schemas/finance-evidence-manifest-v1.json",
+  "title": "Finance evidence manifest v1",
+  "type": "object",
+  "required": [
+    "manifestId",
+    "schemaVersion",
+    "retentionPolicy",
+    "adapter",
+    "source",
+    "evidenceObjects",
+    "canonicalDocuments",
+    "canonicalPages",
+    "stats"
+  ],
+  "properties": {
+    "manifestId": { "type": "string", "pattern": "^finance-manifest:[0-9a-f]{32}$" },
+    "schemaVersion": { "const": "finance-evidence-manifest/v1" },
+    "retentionPolicy": { "const": "retain_forever" },
+    "correctionPolicy": { "const": "supersede_interpretations_never_erase_sources" },
+    "adapter": {
+      "type": "object",
+      "required": ["id", "version", "status"],
+      "properties": {
+        "id": { "type": "string" },
+        "version": { "type": "integer", "minimum": 1 },
+        "status": { "const": "implemented" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["sourceId", "root", "sourceSnapshotKey", "mutationPolicy"],
+      "properties": {
+        "sourceId": { "type": "string" },
+        "root": { "type": "string" },
+        "sourceSnapshotKey": { "type": "string" },
+        "mutationPolicy": { "const": "read_only_never_move_rename_or_delete" }
+      }
+    },
+    "evidenceObjects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "sourceKey",
+          "revisionKey",
+          "localPath",
+          "exactSha256",
+          "role",
+          "financialFactRole",
+          "countingPolicy",
+          "retentionStatus"
+        ],
+        "properties": {
+          "sourceKey": { "type": "string" },
+          "revisionKey": { "type": "string" },
+          "localPath": { "type": "string" },
+          "exactSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "normalizedDocumentHash": { "type": ["string", "null"] },
+          "documentTextHash": { "type": ["string", "null"] },
+          "duplicateOf": { "type": ["string", "null"] },
+          "retentionStatus": { "const": "retain_forever" },
+          "sourceMutationPolicy": { "const": "read_only" }
+        }
+      }
+    },
+    "canonicalDocuments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "canonicalDocumentKey",
+          "memberSourceKeys",
+          "occurrenceCount",
+          "duplicateMultiplicityCap",
+          "countingPolicy"
+        ],
+        "properties": {
+          "duplicateMultiplicityCap": { "const": 1 },
+          "countingPolicy": { "const": "one_reconciled_event_maximum_per_canonical_document" }
+        }
+      }
+    },
+    "canonicalPages": { "type": "array" },
+    "historicalSeeds": { "type": "object" },
+    "stats": { "type": "object" }
+  }
+}

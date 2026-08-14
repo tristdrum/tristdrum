@@ -1,0 +1,9 @@
+{
+  "name": "tristdrum-personal-site",
+  "private": true,
+  "scripts": {
+    "finance:adapters": "npm --prefix packages/finance-ingest run adapters",
+    "finance:ingest": "npm --prefix packages/finance-ingest run cli --",
+    "finance:test": "npm --prefix packages/finance-ingest test"
+  }
+}

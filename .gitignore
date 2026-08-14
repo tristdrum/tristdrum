@@ -31,6 +31,11 @@ yarn-error.log*
 .env*.local
 .env
 
+# finance evidence, manifests, caches, and generated accountant material
+# These files are intentionally local-only and may contain PII.
+/.finance-local/
+**/.finance-local/
+
 # vercel
 .vercel
 
