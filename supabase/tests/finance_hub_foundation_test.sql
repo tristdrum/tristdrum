@@ -208,8 +208,8 @@ select ok(
     where policy.schemaname = 'storage'
       and policy.tablename = 'objects'
       and policy.policyname like '%finance evidence'
-  ) = array['INSERT', 'SELECT', 'UPDATE'],
-  'finance Storage has SELECT, INSERT, and UPDATE policies only'
+  ) = array['INSERT', 'SELECT'],
+  'finance Storage is append-only with SELECT and INSERT policies only'
 );
 
 select ok(

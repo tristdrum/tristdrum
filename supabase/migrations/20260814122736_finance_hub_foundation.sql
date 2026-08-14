@@ -1827,21 +1827,8 @@ create policy "household members can upload finance evidence"
     and private.can_access_finance_storage_path(name)
   );
 
-drop policy if exists "household members can update finance evidence" on storage.objects;
-create policy "household members can update finance evidence"
-  on storage.objects
-  for update
-  to authenticated
-  using (
-    bucket_id = 'finance-evidence'
-    and private.can_access_finance_storage_path(name)
-  )
-  with check (
-    bucket_id = 'finance-evidence'
-    and private.can_access_finance_storage_path(name)
-  );
-
--- Deliberately no DELETE policy for finance-evidence.
+-- Deliberately no UPDATE or DELETE policy for finance-evidence. Uploads use a
+-- new revision path so an original Storage object cannot be overwritten.
 
 create or replace function private.set_finance_updated_at()
 returns trigger
