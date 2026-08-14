@@ -75,6 +75,15 @@ To finish the Supabase side cleanly:
 4. Sign in once and claim the first site-admin slot if prompted.
 5. Confirm magic-link redirect URLs include the production `/login` path.
 
+## Household finance hub
+
+The invite-only finance workspace lives at `/dashboard/finance` behind both session and active-household membership checks.
+
+- Read-only V1 views cover source health, the anomaly inbox, current effective ledger allocations, evidence hashes/mirror state, versioned tax scenarios, and accountant-pack status.
+- Browser queries select only the columns each screen needs. Evidence filesystem and Storage paths are never requested by the client.
+- The interface exposes no finance delete action. Superseded, void, duplicate, private, and not-relevant records remain preserved while current totals use only effective allocations.
+- Source, ledger, evidence, review, and scenario panels each handle empty data. Database setup, access denial, loading, refresh, and query failures have explicit states.
+
 ## Deployment
 
 1. `npm run build` to populate `dist/`.

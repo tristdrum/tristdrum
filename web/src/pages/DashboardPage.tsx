@@ -16,7 +16,7 @@ export default function DashboardPage() {
           <p className="private-eyebrow">Private dashboard</p>
           <h1>Hi {user?.email ?? 'there'}</h1>
           <p className="private-copy">
-            This is the owner-only side of the site. It’s now the right place for private tools, active-project tracking, and the things you want Max to keep visible.
+            This is the private side of the site. Household and site-admin roles keep each tool visible only to the people who should use it.
           </p>
           <div className="private-actions">
             <button type="button" onClick={() => void signOut()}>
@@ -24,6 +24,7 @@ export default function DashboardPage() {
             </button>
             <Link to="/">Public site</Link>
             <Link to="/task-pulse">Task Pulse</Link>
+            <Link to="/dashboard/finance">Finance hub</Link>
             <Link to="/manage-7f8a9c2e-4b3d-11ef-a8c9-0242ac130003">Artwork admin</Link>
           </div>
         </section>
@@ -55,9 +56,17 @@ export default function DashboardPage() {
 
         <section className="private-grid">
           <article className="private-card">
+            <span className="private-kicker">Household</span>
+            <h3>Finance hub</h3>
+            <p>Trace source records, reconciliations, current accounting allocations, open questions, and tax scenarios without erasing history.</p>
+            <div className="private-actions">
+              <Link to="/dashboard/finance">Open finance</Link>
+            </div>
+          </article>
+          <article className="private-card">
             <span className="private-kicker">Now</span>
             <h3>Auth foundation</h3>
-            <p>Email/password + magic link is now the intended access path for private tools on the site.</p>
+            <p>Email/password + magic link provides the session; each private tool then checks its own role or household membership.</p>
           </article>
           <article className="private-card">
             <span className="private-kicker">Next</span>
@@ -74,6 +83,7 @@ export default function DashboardPage() {
         <section className="private-panel">
           <p className="private-eyebrow">Useful entry points</p>
           <div className="private-links">
+            <Link to="/dashboard/finance">Household finance ledger</Link>
             <Link to="/task-pulse">Task Pulse monitor</Link>
             <Link to="/manage-7f8a9c2e-4b3d-11ef-a8c9-0242ac130003">Artwork management</Link>
             <Link to="/harewood-drive">Harewood Drive calculator</Link>
