@@ -52,7 +52,7 @@ export type FinanceReviewItem = {
 
 export type EffectiveRecordStatus = 'current' | 'void' | 'duplicate' | 'private' | 'not_relevant'
 
-export type AllocationKind = 'income' | 'expense' | 'capital' | 'private' | 'transfer' | 'unallocated'
+export type AllocationKind = 'income' | 'expense' | 'capital' | 'private' | 'review' | 'transfer' | 'unallocated'
 
 export type FinanceAllocation = {
   id: string
@@ -152,6 +152,7 @@ export type FinanceSnapshot = {
   loadedIncomeCents: number
   loadedExpenseCents: number
   loadedCapitalCents: number
+  loadedReviewCents: number
   loadedTransferCents: number
   loadedUnallocatedCents: number
   openReviewCount: number
@@ -198,6 +199,7 @@ export function deriveFinanceSnapshot(data: Pick<FinanceDashboardData, 'transact
   let loadedIncomeCents = 0
   let loadedExpenseCents = 0
   let loadedCapitalCents = 0
+  let loadedReviewCents = 0
   let loadedTransferCents = 0
   let loadedUnallocatedCents = 0
   let linkedTransactionCount = 0
@@ -228,6 +230,9 @@ export function deriveFinanceSnapshot(data: Pick<FinanceDashboardData, 'transact
         case 'capital':
           loadedCapitalCents += Math.abs(allocation.signedAmountCents)
           break
+        case 'review':
+          loadedReviewCents += Math.abs(allocation.signedAmountCents)
+          break
         case 'transfer':
           loadedTransferCents += Math.abs(allocation.signedAmountCents)
           break
@@ -249,6 +254,7 @@ export function deriveFinanceSnapshot(data: Pick<FinanceDashboardData, 'transact
     loadedIncomeCents,
     loadedExpenseCents,
     loadedCapitalCents,
+    loadedReviewCents,
     loadedTransferCents,
     loadedUnallocatedCents,
     openReviewCount: openReviewItems.length,

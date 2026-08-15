@@ -213,6 +213,7 @@ function OverviewSection({
       <section className="finance-summary-grid" aria-label="Loaded finance summary">
         <SummaryCard label="Loaded income allocations" value={formatMoney(snapshot.loadedIncomeCents)} tone="positive" />
         <SummaryCard label="Loaded expense allocations" value={formatMoney(snapshot.loadedExpenseCents)} />
+        <SummaryCard label="Accountant-review allocations" value={formatMoney(snapshot.loadedReviewCents)} tone={snapshot.loadedReviewCents ? 'warning' : 'neutral'} />
         <SummaryCard label="Still unallocated" value={formatMoney(snapshot.loadedUnallocatedCents)} tone={snapshot.loadedUnallocatedCents ? 'warning' : 'neutral'} />
         <SummaryCard label="Open review questions" value={String(snapshot.openReviewCount)} tone={snapshot.openReviewCount ? 'warning' : 'positive'} />
         <SummaryCard label="Evidence coverage" value={snapshot.evidenceCoveragePercent === null ? '—' : `${snapshot.evidenceCoveragePercent}%`} />

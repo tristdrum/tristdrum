@@ -143,6 +143,7 @@ describe('deriveFinanceSnapshot', () => {
       loadedIncomeCents: 500_000,
       loadedExpenseCents: 0,
       loadedCapitalCents: 0,
+      loadedReviewCents: 0,
       loadedTransferCents: 0,
       loadedUnallocatedCents: 75_000,
       openReviewCount: 1,
@@ -151,6 +152,40 @@ describe('deriveFinanceSnapshot', () => {
       evidenceCoveragePercent: 33,
       sourceBlockerCount: 1,
     })
+  })
+
+  it('keeps accountant-review allocations out of the unallocated total', () => {
+    const snapshot = deriveFinanceSnapshot({
+      sources: [],
+      reviewItems: [],
+      transactions: [{
+        id: 'tax-review',
+        occurredOn: '2026-01-05',
+        accountName: 'Account',
+        description: 'Needs tax treatment review',
+        counterparty: null,
+        signedAmountCents: -25_000,
+        currency: 'ZAR',
+        effectiveStatus: 'current',
+        reconciliationStatus: 'review_required',
+        evidenceCount: 0,
+        decisionCount: 0,
+        allocations: [{
+          id: 'tax-review-allocation',
+          transactionId: 'tax-review',
+          signedAmountCents: -25_000,
+          kind: 'review',
+          category: 'accountant_review',
+          incomeStream: null,
+          propertyUnit: null,
+          taxTreatment: 'accountant_review',
+          effectiveStatus: 'current',
+        }],
+      }],
+    })
+
+    expect(snapshot.loadedReviewCents).toBe(25_000)
+    expect(snapshot.loadedUnallocatedCents).toBe(0)
   })
 })
 

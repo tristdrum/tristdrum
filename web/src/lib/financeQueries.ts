@@ -553,6 +553,7 @@ function mapRecordStatus(value: string): EffectiveRecordStatus {
 
 function mapAllocationKind(value: string): AllocationKind {
   if (value === 'income' || value === 'expense' || value === 'capital' || value === 'private' || value === 'transfer') return value
+  if (value === 'tax_review') return 'review'
   if (value === 'liability' || value === 'equity') return 'transfer'
   return 'unallocated'
 }
