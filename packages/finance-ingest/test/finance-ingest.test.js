@@ -9,6 +9,11 @@ import { scanHistoricalPack } from "../src/adapters/historical-pack.js";
 import { persistManifest } from "../src/lib/manifest.js";
 import { assertLocalOutputPath } from "../src/lib/paths.js";
 import { inferDocumentRole } from "../src/lib/roles.js";
+import {
+  FINANCE_HEURISTICS,
+  evaluateFundingAccountPurpose,
+  validateHouseholdHeuristicConfig,
+} from "../src/lib/classification-rules.js";
 import { parseWorkbookMetadata, parseWorksheetXml } from "../src/lib/xlsx.js";
 import { buildMinimalXlsx, buildPdf } from "./helpers.js";
 
@@ -195,5 +200,54 @@ test("sensitive output inside the repository must be gitignored", () => {
   assert.equal(
     assertLocalOutputPath(path.join(repoRoot, ".finance-local", "finance-ingest"), repoRoot),
     path.join(repoRoot, ".finance-local", "finance-ingest"),
+  );
+});
+
+test("funding-account heuristic suggests aligned purpose and escalates crossed signals", () => {
+  assert.deepEqual(
+    evaluateFundingAccountPurpose({ accountRole: "property_operating", purposeSignal: "property" }),
+    {
+      heuristicId: "funding-account-purpose-crosscheck",
+      accountRole: "property_operating",
+      purposeSignal: "property",
+      taxTreatment: null,
+      autoConfirm: false,
+      disposition: "suggest_property",
+      suggestedPurpose: "property",
+      confidence: "high",
+      requiresReview: false,
+      reason: "The property-operating account and the independently observed property purpose agree.",
+    },
+  );
+  assert.equal(
+    evaluateFundingAccountPurpose({ accountRole: "personal", purposeSignal: "private" }).disposition,
+    "suggest_private",
+  );
+  assert.equal(
+    evaluateFundingAccountPurpose({ accountRole: "personal", purposeSignal: "property" }).disposition,
+    "review_crossed_signal",
+  );
+  assert.equal(
+    evaluateFundingAccountPurpose({ accountRole: "property_operating", purposeSignal: "private" }).requiresReview,
+    true,
+  );
+  assert.equal(evaluateFundingAccountPurpose({ accountRole: "shared", purposeSignal: "private" }).requiresReview, true);
+  assert.ok(FINANCE_HEURISTICS.some((rule) => rule.id === "mixed-merchant-line-item-review"));
+  assert.ok(FINANCE_HEURISTICS.every((rule) => rule.safeAutomaticOutcome !== "tax_treatment"));
+});
+
+test("private household heuristic config is schema-checked without embedding account names in public code", () => {
+  const config = validateHouseholdHeuristicConfig({
+    schemaVersion: "finance-household-heuristics/v1",
+    accountRoles: [
+      { id: "property-account", role: "property_operating", match: { institutionContains: "example" } },
+      { id: "personal-account", role: "personal", match: { institutionContains: "example personal" } },
+    ],
+    narrowRules: [{ heuristicId: "funding-account-purpose-crosscheck", status: "active" }],
+  });
+  assert.equal(config.accountRoles[0].role, "property_operating");
+  assert.throws(
+    () => validateHouseholdHeuristicConfig({ schemaVersion: "wrong", accountRoles: [], narrowRules: [] }),
+    /finance-household-heuristics\/v1/,
   );
 });

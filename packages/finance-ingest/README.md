@@ -72,3 +72,19 @@ must never multiply an expense by the number of duplicate file variants.
 Historical register and workbook rows are tagged `historical_unverified` and
 `do_not_count_directly`. They are useful prior interpretations, not current tax
 truth.
+
+## Household classification heuristics
+
+`src/lib/classification-rules.js` is the public, PII-free rule registry. Its
+funding-account cross-check uses two independent facts: the account's household
+role and the observed purchase purpose. Aligned signals create a high-confidence
+suggestion; crossed, mixed, or unknown signals go to review. No heuristic assigns
+a tax treatment automatically.
+
+The durable household-specific account map and narrow recurring decisions live
+under the ignored `.finance-local/finance-ingest/household-heuristics.json`.
+That private file maps the real banks/accounts to `property_operating` or
+`personal` without exposing household financial metadata in Git. The registry
+also records the cash-wage, transfer-pairing, reimbursement, mixed-merchant,
+worker-transport, refund and evidence-deduplication safeguards used by future
+importers.

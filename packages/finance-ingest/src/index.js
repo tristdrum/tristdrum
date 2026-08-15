@@ -6,3 +6,9 @@ export { assertManifestInvariants, finalizeManifest, persistManifest } from "./l
 export { analyzePdf } from "./lib/pdf.js";
 export { inferDocumentRole } from "./lib/roles.js";
 export { readXlsxWorkbook } from "./lib/xlsx.js";
+export {
+  FINANCE_HEURISTICS,
+  evaluateFundingAccountPurpose,
+  loadHouseholdHeuristicConfig,
+  validateHouseholdHeuristicConfig,
+} from "./lib/classification-rules.js";
