@@ -422,14 +422,16 @@ function ReviewSection({
                 </div>
               </div>
             </div>
-            <dl className="finance-detail-grid">
-              <DetailField label="Date" value={formatFinanceDate(selected.occurredOn)} />
-              <DetailField label="Amount" value={formatMoney(selected.signedAmountCents, selected.currency)} />
-              <DetailField label="Account" value={selected.accountName ?? '—'} />
-              <DetailField label="Counterparty" value={selected.counterparty ?? '—'} />
-              <DetailField label="Description" value={selected.description ?? '—'} wide />
-              <DetailField label="Estimated tax impact" value={formatMoney(selected.taxImpactCents, selected.currency)} />
-            </dl>
+            {hasReviewMetadata(selected) ? (
+              <dl className="finance-detail-grid">
+                {selected.occurredOn ? <DetailField label="Date" value={formatFinanceDate(selected.occurredOn)} /> : null}
+                {selected.signedAmountCents !== null ? <DetailField label="Amount" value={formatMoney(selected.signedAmountCents, selected.currency)} /> : null}
+                {selected.accountName ? <DetailField label="Account" value={selected.accountName} /> : null}
+                {selected.counterparty ? <DetailField label="Counterparty" value={selected.counterparty} /> : null}
+                {selected.description ? <DetailField label="Description" value={selected.description} wide /> : null}
+                {selected.taxImpactCents !== null ? <DetailField label="Estimated tax impact" value={formatMoney(selected.taxImpactCents, selected.currency)} /> : null}
+              </dl>
+            ) : null}
 
             <DetailBlock title="Why this is ambiguous">{selected.reason}</DetailBlock>
             <DetailBlock title="Proposed interpretation">{selected.proposedInterpretation ?? 'No interpretation has been proposed yet.'}</DetailBlock>
@@ -818,6 +820,17 @@ function DetailField({ label, value, wide = false, mono = false }: { label: stri
       <dt>{label}</dt>
       <dd className={mono ? 'is-mono' : ''}>{value}</dd>
     </div>
+  )
+}
+
+function hasReviewMetadata(review: FinanceReviewItem) {
+  return Boolean(
+    review.occurredOn
+    || review.accountName
+    || review.counterparty
+    || review.description
+    || review.signedAmountCents !== null
+    || review.taxImpactCents !== null,
   )
 }
 
