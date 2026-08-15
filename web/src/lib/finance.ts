@@ -31,6 +31,7 @@ export type ReviewCandidate = {
 
 export type FinanceReviewItem = {
   id: string
+  questionNumber: number | null
   title: string
   status: ReviewStatus
   priority: ReviewPriority

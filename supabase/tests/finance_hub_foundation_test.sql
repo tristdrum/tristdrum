@@ -1,6 +1,6 @@
 begin;
 
-select plan(18);
+select plan(21);
 
 create temp table finance_test_tables (table_name text primary key) on commit drop;
 insert into finance_test_tables (table_name)
@@ -19,6 +19,7 @@ values
   ('finance_transactions'),
   ('finance_transaction_relationships'),
   ('finance_review_items'),
+  ('finance_review_question_numbers'),
   ('finance_human_decisions'),
   ('finance_classification_rules'),
   ('finance_allocations'),
@@ -62,7 +63,7 @@ values
 select ok(
   (select count(*) from information_schema.tables table_info
     join finance_test_tables expected on expected.table_name = table_info.table_name
-    where table_info.table_schema = 'public') = 24,
+    where table_info.table_schema = 'public') = 25,
   'all finance foundation tables exist'
 );
 
@@ -128,7 +129,7 @@ select ok(
     where namespace.nspname = 'public'
       and trigger.tgname = 'finance_no_hard_delete'
       and not trigger.tgisinternal
-  ) = 24,
+  ) = 25,
   'every finance table has a no-hard-delete trigger'
 );
 
@@ -142,8 +143,55 @@ select ok(
     where namespace.nspname = 'public'
       and trigger.tgname = 'finance_no_in_place_update'
       and not trigger.tgisinternal
-  ) = 22,
+  ) = 23,
   'every revisioned finance table has a no-in-place-update trigger'
+);
+
+select ok(
+  exists (
+    select 1
+    from pg_constraint constraint_info
+    where constraint_info.conrelid = 'public.finance_review_question_numbers'::regclass
+      and constraint_info.conname = 'finance_review_question_numbers_household_logical_key'
+      and constraint_info.contype = 'u'
+  )
+  and exists (
+    select 1
+    from pg_constraint constraint_info
+    where constraint_info.conrelid = 'public.finance_review_question_numbers'::regclass
+      and constraint_info.conname = 'finance_review_question_numbers_number_key'
+      and constraint_info.contype = 'u'
+  ),
+  'question numbers are unique per logical question and globally unambiguous'
+);
+
+select ok(
+  exists (
+    select 1
+    from pg_trigger trigger_info
+    where trigger_info.tgrelid = 'public.finance_review_items'::regclass
+      and trigger_info.tgname = 'finance_assign_question_number'
+      and not trigger_info.tgisinternal
+  )
+  and exists (
+    select 1
+    from pg_proc function_info
+    join pg_namespace namespace_info on namespace_info.oid = function_info.pronamespace
+    where namespace_info.nspname = 'private'
+      and function_info.proname = 'assign_finance_review_question_number'
+      and function_info.prosecdef
+  ),
+  'new review items automatically receive a permanent question number'
+);
+
+select ok(
+  has_table_privilege('authenticated', 'public.finance_review_question_numbers', 'SELECT')
+  and has_table_privilege('service_role', 'public.finance_review_question_numbers', 'SELECT')
+  and not has_table_privilege('authenticated', 'public.finance_review_question_numbers', 'INSERT')
+  and not has_table_privilege('service_role', 'public.finance_review_question_numbers', 'INSERT')
+  and not has_sequence_privilege('authenticated', 'public.finance_review_question_number_seq', 'USAGE')
+  and not has_sequence_privilege('service_role', 'public.finance_review_question_number_seq', 'USAGE'),
+  'question-number assignment is internal while household readers can resolve numbers'
 );
 
 select ok(

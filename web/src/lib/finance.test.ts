@@ -10,6 +10,7 @@ import {
 
 const reviewItem = (overrides: Partial<FinanceReviewItem>): FinanceReviewItem => ({
   id: 'review-item',
+  questionNumber: null,
   title: 'Review item',
   status: 'open',
   priority: 'medium',

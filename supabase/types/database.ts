@@ -7,6 +7,11 @@ export type Json =
   | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+  __InternalSupabase: {
+    PostgrestVersion: "13.0.5"
+  }
   graphql_public: {
     Tables: {
       [_ in never]: never
@@ -1745,6 +1750,69 @@ export type Database = {
             columns: ["household_id", "transaction_id"]
             isOneToOne: false
             referencedRelation: "finance_transactions"
+            referencedColumns: ["household_id", "id"]
+          },
+        ]
+      }
+      finance_review_question_numbers: {
+        Row: {
+          assigned_at: string
+          assigned_from_review_item_id: string
+          household_id: string
+          id: string
+          logical_review_item_id: string
+          question_number: number
+        }
+        Insert: {
+          assigned_at?: string
+          assigned_from_review_item_id: string
+          household_id: string
+          id?: string
+          logical_review_item_id: string
+          question_number?: number
+        }
+        Update: {
+          assigned_at?: string
+          assigned_from_review_item_id?: string
+          household_id?: string
+          id?: string
+          logical_review_item_id?: string
+          question_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_review_question_numbers_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "finance_dashboard_summary"
+            referencedColumns: ["household_id"]
+          },
+          {
+            foreignKeyName: "finance_review_question_numbers_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_review_question_numbers_review_same_household_fkey"
+            columns: ["household_id", "assigned_from_review_item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_anomaly_inbox"
+            referencedColumns: ["household_id", "review_item_id"]
+          },
+          {
+            foreignKeyName: "finance_review_question_numbers_review_same_household_fkey"
+            columns: ["household_id", "assigned_from_review_item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_current_review_items"
+            referencedColumns: ["household_id", "id"]
+          },
+          {
+            foreignKeyName: "finance_review_question_numbers_review_same_household_fkey"
+            columns: ["household_id", "assigned_from_review_item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_review_items"
             referencedColumns: ["household_id", "id"]
           },
         ]

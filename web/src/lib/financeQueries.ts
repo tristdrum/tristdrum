@@ -110,6 +110,7 @@ export async function loadFinanceDashboard(membership: FinanceMembership): Promi
     importRunResult,
     accountResult,
     reviewResult,
+    questionNumberResult,
     decisionResult,
     transactionResult,
     allocationResult,
@@ -135,6 +136,10 @@ export async function loadFinanceDashboard(membership: FinanceMembership): Promi
     supabase
       .from('finance_review_items')
       .select('id, logical_review_item_id, transaction_id, document_id, evidence_object_id, review_type, title, question, proposed_interpretation, ambiguity_reason, answer_options, context_snapshot, workflow_status, priority, priority_score, amount_cents, tax_impact_cents, record_status, revision_number, created_at')
+      .eq('household_id', householdId),
+    supabase
+      .from('finance_review_question_numbers')
+      .select('logical_review_item_id, question_number')
       .eq('household_id', householdId),
     supabase
       .from('finance_human_decisions')
@@ -186,6 +191,7 @@ export async function loadFinanceDashboard(membership: FinanceMembership): Promi
   const importRunRows = requireRows(importRunResult, 'Import history')
   const accountRows = requireRows(accountResult, 'Financial accounts')
   const reviewRows = requireRows(reviewResult, 'Review inbox')
+  const questionNumberRows = requireRows(questionNumberResult, 'Permanent question numbers')
   const decisionRows = requireRows(decisionResult, 'Human decisions')
   const transactionRows = requireRows(transactionResult, 'Transaction ledger')
   const allocationRows = requireRows(allocationResult, 'Accounting allocations')
@@ -235,6 +241,10 @@ export async function loadFinanceDashboard(membership: FinanceMembership): Promi
   ]))
   const transactionLogicalIdByRowId = new Map(transactionRows.map((row) => [row.id, row.logical_transaction_id]))
   const currentTransactionByLogicalId = new Map(currentTransactionRows.map((row) => [row.logical_transaction_id, row]))
+  const questionNumberByLogicalReviewId = new Map(questionNumberRows.map((row) => [
+    row.logical_review_item_id,
+    nullableSafeInteger(row.question_number),
+  ]))
   const reviewRowById = new Map(reviewRows.map((row) => [row.id, row]))
   const reviewsByLogicalTransactionId = groupBy(
     currentReviewRows,
@@ -302,6 +312,7 @@ export async function loadFinanceDashboard(membership: FinanceMembership): Promi
 
     return {
       id: review.id,
+      questionNumber: questionNumberByLogicalReviewId.get(review.logical_review_item_id) ?? null,
       title: review.title,
       status: mapReviewStatus(review.workflow_status),
       priority: mapReviewPriority(review.priority),

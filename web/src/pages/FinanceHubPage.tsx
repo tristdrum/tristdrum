@@ -353,7 +353,7 @@ function ReviewSection({
     >
       <div className="finance-list-pane">
         <PanelHeading eyebrow="Reconciliation" title="Anomaly inbox" />
-        <p className="finance-panel-copy">Ordered by stated priority, income/transfer risk, estimated tax impact, amount, and recurring value. Use ↑ and ↓ to move between questions.</p>
+        <p className="finance-panel-copy">Permanent # references stay with each question even if this priority order changes. Use ↑ and ↓ to move between questions.</p>
         {items.length === 0 ? (
           <InlineEmpty>No review questions have been recorded yet.</InlineEmpty>
         ) : (
@@ -372,7 +372,10 @@ function ReviewSection({
                   onClick={() => selectFromInbox(item.id)}
                 >
                   <div className="finance-select-list-title">
-                    <strong>{item.title}</strong>
+                    <strong>
+                      <span className="finance-question-number">#{item.questionNumber ?? '—'}</span>
+                      {item.title}
+                    </strong>
                     <StatusPill value={item.priority} />
                   </div>
                   <span>{formatFinanceDate(item.occurredOn)} · {formatMoney(item.signedAmountCents, item.currency)}</span>
@@ -391,7 +394,7 @@ function ReviewSection({
           <>
             <div className="finance-detail-heading">
               <div>
-                <p className="finance-eyebrow">Question detail</p>
+                <p className="finance-eyebrow">Question #{selected.questionNumber ?? '—'}</p>
                 <h2>{selected.title}</h2>
               </div>
               <div className="finance-detail-actions">
