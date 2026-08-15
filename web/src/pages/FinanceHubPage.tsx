@@ -216,7 +216,12 @@ function OverviewSection({
         <SummaryCard label="Accountant-review allocations" value={formatMoney(snapshot.loadedReviewCents)} tone={snapshot.loadedReviewCents ? 'warning' : 'neutral'} />
         <SummaryCard label="Still unallocated" value={formatMoney(snapshot.loadedUnallocatedCents)} tone={snapshot.loadedUnallocatedCents ? 'warning' : 'neutral'} />
         <SummaryCard label="Open review questions" value={String(snapshot.openReviewCount)} tone={snapshot.openReviewCount ? 'warning' : 'positive'} />
-        <SummaryCard label="Evidence coverage" value={snapshot.evidenceCoveragePercent === null ? '—' : `${snapshot.evidenceCoveragePercent}%`} />
+        <SummaryCard
+          label="Confirmed evidence coverage"
+          value={snapshot.evidenceCoveragePercent === null
+            ? '—'
+            : `${snapshot.evidenceLinkedTransactionCount} tx (${snapshot.evidenceCoveragePercent === 0 && snapshot.evidenceLinkedTransactionCount > 0 ? '<1' : snapshot.evidenceCoveragePercent}%)`}
+        />
         <SummaryCard label="Blocked sources" value={String(snapshot.sourceBlockerCount)} tone={snapshot.sourceBlockerCount ? 'danger' : 'positive'} />
       </section>
 
