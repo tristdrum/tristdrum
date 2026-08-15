@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useFinanceAccess } from '../auth/useFinanceAccess'
 import {
@@ -299,18 +300,77 @@ function ReviewSection({
   selectedId: string | null
   onSelect: (id: string) => void
 }) {
+  const detailPaneRef = useRef<HTMLElement | null>(null)
+  const questionButtonRefs = useRef(new Map<string, HTMLButtonElement>())
+  const selectedIndex = selectedId ? items.findIndex((item) => item.id === selectedId) : -1
+
+  const selectByOffset = (offset: -1 | 1, focusListButton = false) => {
+    if (selectedIndex < 0) return
+
+    const nextIndex = Math.min(items.length - 1, Math.max(0, selectedIndex + offset))
+    const nextItem = items[nextIndex]
+    if (!nextItem || nextIndex === selectedIndex) return
+
+    onSelect(nextItem.id)
+    if (focusListButton) {
+      requestAnimationFrame(() => {
+        const button = questionButtonRefs.current.get(nextItem.id)
+        button?.focus({ preventScroll: true })
+        button?.scrollIntoView({ block: 'nearest' })
+      })
+    }
+  }
+
+  const handleQuestionArrowKey = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+
+    const target = event.target
+    if (target instanceof HTMLElement && (target.isContentEditable || target.matches('input, textarea, select'))) return
+
+    event.preventDefault()
+    const focusListButton = target instanceof HTMLElement && Boolean(target.dataset.reviewQuestionId)
+    selectByOffset(event.key === 'ArrowUp' ? -1 : 1, focusListButton)
+  }
+
+  const selectFromInbox = (id: string) => {
+    onSelect(id)
+    if (!window.matchMedia('(max-width: 880px)').matches) return
+
+    requestAnimationFrame(() => {
+      detailPaneRef.current?.scrollIntoView({
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+        block: 'start',
+      })
+    })
+  }
+
   return (
-    <section className="finance-master-detail">
+    <section
+      className="finance-master-detail finance-master-detail--reviews"
+      aria-keyshortcuts="ArrowUp ArrowDown"
+      onKeyDown={handleQuestionArrowKey}
+    >
       <div className="finance-list-pane">
         <PanelHeading eyebrow="Reconciliation" title="Anomaly inbox" />
-        <p className="finance-panel-copy">Ordered by stated priority, income/transfer risk, estimated tax impact, amount, and recurring value.</p>
+        <p className="finance-panel-copy">Ordered by stated priority, income/transfer risk, estimated tax impact, amount, and recurring value. Use ↑ and ↓ to move between questions.</p>
         {items.length === 0 ? (
           <InlineEmpty>No review questions have been recorded yet.</InlineEmpty>
         ) : (
           <ul className="finance-select-list" aria-label="Review questions">
             {items.map((item) => (
               <li key={item.id}>
-                <button type="button" className={item.id === selectedId ? 'is-selected' : ''} onClick={() => onSelect(item.id)}>
+                <button
+                  ref={(element) => {
+                    if (element) questionButtonRefs.current.set(item.id, element)
+                    else questionButtonRefs.current.delete(item.id)
+                  }}
+                  type="button"
+                  data-review-question-id={item.id}
+                  aria-current={item.id === selectedId ? 'true' : undefined}
+                  className={item.id === selectedId ? 'is-selected' : ''}
+                  onClick={() => selectFromInbox(item.id)}
+                >
                   <div className="finance-select-list-title">
                     <strong>{item.title}</strong>
                     <StatusPill value={item.priority} />
@@ -324,7 +384,7 @@ function ReviewSection({
         )}
       </div>
 
-      <aside className="finance-detail-pane" aria-live="polite">
+      <aside ref={detailPaneRef} className="finance-detail-pane" aria-live="polite">
         {!selected ? (
           <InlineEmpty>Select a question to inspect the available evidence and proposed interpretation.</InlineEmpty>
         ) : (
@@ -334,7 +394,30 @@ function ReviewSection({
                 <p className="finance-eyebrow">Question detail</p>
                 <h2>{selected.title}</h2>
               </div>
-              <StatusPill value={selected.status} />
+              <div className="finance-detail-actions">
+                <StatusPill value={selected.status} />
+                <div className="finance-question-nav" role="group" aria-label="Navigate review questions">
+                  <button
+                    type="button"
+                    aria-label="Previous question"
+                    title="Previous question (Arrow Up)"
+                    disabled={selectedIndex <= 0}
+                    onClick={() => selectByOffset(-1)}
+                  >
+                    ↑
+                  </button>
+                  <span aria-label={`Question ${selectedIndex + 1} of ${items.length}`}>{selectedIndex + 1} / {items.length}</span>
+                  <button
+                    type="button"
+                    aria-label="Next question"
+                    title="Next question (Arrow Down)"
+                    disabled={selectedIndex < 0 || selectedIndex >= items.length - 1}
+                    onClick={() => selectByOffset(1)}
+                  >
+                    ↓
+                  </button>
+                </div>
+              </div>
             </div>
             <dl className="finance-detail-grid">
               <DetailField label="Date" value={formatFinanceDate(selected.occurredOn)} />

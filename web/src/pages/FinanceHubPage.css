@@ -485,6 +485,58 @@
   border-bottom: 1px solid rgba(190, 225, 207, 0.11);
 }
 
+.finance-detail-heading > div:first-child {
+  min-width: 0;
+}
+
+.finance-detail-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.45rem;
+}
+
+.finance-question-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.finance-question-nav button {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(145, 226, 180, 0.28);
+  border-radius: 9px;
+  background: rgba(28, 62, 49, 0.72);
+  color: var(--finance-text);
+  font: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.finance-question-nav button:hover,
+.finance-question-nav button:focus-visible {
+  border-color: rgba(145, 226, 180, 0.62);
+  background: rgba(43, 85, 66, 0.88);
+}
+
+.finance-question-nav button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.finance-question-nav > span {
+  min-width: 3.6rem;
+  color: var(--finance-muted);
+  text-align: center;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .finance-detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1020,6 +1072,10 @@
     min-height: 0;
   }
 
+  .finance-master-detail--reviews .finance-detail-pane {
+    order: -1;
+  }
+
   .finance-list-pane {
     min-height: 0;
   }
@@ -1046,6 +1102,17 @@
   .finance-detail-grid,
   .finance-allocation-list dl {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .finance-detail-heading {
+    flex-direction: column;
+  }
+
+  .finance-detail-actions {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
   }
 
   .finance-trace-line {
