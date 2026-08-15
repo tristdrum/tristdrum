@@ -32,6 +32,27 @@ type QueryError = {
   message?: string
 }
 
+type PagedQueryResult<T> = {
+  data: T[] | null
+  error: QueryError | null
+}
+
+async function loadAllPages<T>(
+  loadPage: (from: number, to: number) => PromiseLike<PagedQueryResult<T>>,
+): Promise<PagedQueryResult<T>> {
+  const pageSize = 1_000
+  const rows: T[] = []
+
+  for (let from = 0; ; from += pageSize) {
+    const result = await loadPage(from, from + pageSize - 1)
+    if (result.error) return { data: null, error: result.error }
+
+    const page = result.data ?? []
+    rows.push(...page)
+    if (page.length < pageSize) return { data: rows, error: null }
+  }
+}
+
 export async function loadFinanceMembership(userId: string): Promise<FinanceAccessResult> {
   const { data: membershipRows, error: membershipError } = await supabase
     .from('household_members')
@@ -119,15 +140,19 @@ export async function loadFinanceDashboard(membership: FinanceMembership): Promi
       .from('finance_human_decisions')
       .select('id, logical_decision_id, review_item_id, record_status, revision_number')
       .eq('household_id', householdId),
-    supabase
+    loadAllPages((from, to) => supabase
       .from('finance_transactions')
       .select('id, logical_transaction_id, financial_account_id, transaction_at, booked_on, amount_cents, currency, raw_description, counterparty_name, reference, record_status, revision_number')
       .eq('household_id', householdId)
-      .order('transaction_at', { ascending: false }),
-    supabase
+      .order('transaction_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, to)),
+    loadAllPages((from, to) => supabase
       .from('finance_allocations')
       .select('id, logical_allocation_id, transaction_id, amount_cents, allocation_type, category_code, income_stream, property_unit, tax_treatment, record_status, revision_number')
-      .eq('household_id', householdId),
+      .eq('household_id', householdId)
+      .order('id', { ascending: true })
+      .range(from, to)),
     supabase
       .from('finance_current_evidence_objects')
       .select('id, logical_evidence_id, source_id, evidence_kind, original_filename, exact_sha256, normalized_sha256, duplicate_of_evidence_id, record_status, source_created_at, acquired_at, last_verified_at, revision_number, created_at, has_local_copy, has_storage_copy')
