@@ -433,9 +433,9 @@ function ReviewSection({
               </dl>
             ) : null}
 
+            <DetailBlock title="Question">{selected.question ?? 'No question text has been recorded yet.'}</DetailBlock>
             <DetailBlock title="Why this is ambiguous">{selected.reason}</DetailBlock>
             <DetailBlock title="Proposed interpretation">{selected.proposedInterpretation ?? 'No interpretation has been proposed yet.'}</DetailBlock>
-            <DetailBlock title="Question">{selected.question ?? 'No question text has been recorded yet.'}</DetailBlock>
 
             <h3>Candidate evidence or answers</h3>
             {selected.candidates.length === 0 ? (
