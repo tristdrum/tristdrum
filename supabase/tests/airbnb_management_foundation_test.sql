@@ -1,6 +1,6 @@
 begin;
 
-select plan(12);
+select plan(14);
 
 create temp table airbnb_test_tables (table_name text primary key) on commit drop;
 insert into airbnb_test_tables (table_name)
@@ -134,6 +134,40 @@ select ok(
       and constraint_info.contype = 'c'
   ),
   'inventory credit requires a verified 1 Bowie invoice address'
+);
+
+select ok(
+  exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'airbnb'
+      and table_name = 'guest_threads'
+      and column_name = 'property_id'
+  )
+  and exists (
+    select 1
+    from pg_constraint constraint_info
+    where constraint_info.conrelid = 'airbnb.guest_threads'::regclass
+      and constraint_info.conname = 'airbnb_guest_threads_property_fkey'
+      and constraint_info.contype = 'f'
+  ),
+  'guest threads retain their household-scoped property relationship'
+);
+
+select ok(
+  (
+    select count(*)
+    from cron.job
+    where jobname in (
+      'airbnb-stock-email-poll-30m',
+      'airbnb-stock-email-poll-1900-utc',
+      'airbnb-stock-weekly-review-0700-utc',
+      'airbnb-support-shadow-poll-5m'
+    )
+      and not active
+      and command not like '%mincool-airbnb-cleaner%'
+  ) = 4,
+  'stock and support observers are installed dormant on personal Fly apps'
 );
 
 select * from finish();

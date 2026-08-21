@@ -5,6 +5,11 @@
     "airbnb:cleaner:start": "npm --prefix apps/airbnb-cleaner start",
     "airbnb:cleaner:test": "npm --prefix apps/airbnb-cleaner test",
     "airbnb:core:test": "npm --prefix packages/airbnb-core test",
+    "airbnb:stock:start": "npm --prefix apps/airbnb-stock start",
+    "airbnb:stock:test": "npm --prefix apps/airbnb-stock test",
+    "airbnb:support:start": "npm --prefix apps/airbnb-support start",
+    "airbnb:support:test": "npm --prefix apps/airbnb-support test",
+    "airbnb:test": "npm run airbnb:cleaner:test && npm run airbnb:core:test && npm run airbnb:stock:test && npm run airbnb:support:test",
     "finance:adapters": "npm --prefix packages/finance-ingest run adapters",
     "finance:ingest": "npm --prefix packages/finance-ingest run cli --",
     "finance:test": "npm --prefix packages/finance-ingest test"

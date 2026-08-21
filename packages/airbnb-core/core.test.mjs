@@ -4,9 +4,12 @@ import {
   AUTOMATED_REPLY_FOOTER,
   buildShoppingList,
   canonicalConversationActor,
+  classifyInventorySku,
   decideOrderEvidence,
   finalSendDecision,
   forecastInventoryDemand,
+  parseAirbnbConversationEmail,
+  parseSixty60Message,
   propertyForListing,
   projectInventory,
   setupGuestCount,
@@ -172,4 +175,61 @@ test("Airbnb host labels never claim whether Tristan or Jane actually sent", () 
   assert.equal(canonicalConversationActor({ airbnbRoleLabel: "Guest" }).direction, "guest");
   assert.equal(trustedAirbnbSender("express@airbnb.com"), true);
   assert.equal(trustedAirbnbSender("airbnb@example.com"), false);
+});
+
+test("Sixty60 confirmation stays provisional while its 1 Bowie invoice is creditable", () => {
+  const confirmation = parseSixty60Message({
+    providerMessageId: "order-1",
+    from: "no-reply@checkers.sixty60.co.za",
+    subject: "We've received your order. We're on it!",
+    body: "Order No.: 218300001 Date placed: 18 Aug, 2026 2:36 PM ETA 3:36PM Delivery 1 (of 1) Guest Water 6 x 500ml Qty 1 R 44.99 Product sub-total R 44.99 Total R 44.99",
+  });
+  assert.equal(confirmation.kind, "confirmation");
+  assert.equal(confirmation.deliveryAddress, null);
+  assert.equal(confirmation.eta, "3:36PM");
+
+  const invoice = parseSixty60Message({
+    providerMessageId: "invoice-1",
+    from: "no-reply@checkers.sixty60.co.za",
+    subject: "Sixty60 invoice for order 218300001",
+    body: "Order No.: 218300001 Delivery address: 1 Bowie St, Nahoon Beach, KuGompo City, 5210, South Africa 60 MIN Delivered on 18 August 2026, 14:59 Product Detail Price (per item) Total Guest Water 6 x 500ml Qty 1 R 44.99 R 44.99 Domestos Multipurpose Thick Bleach 750ml Qty 2 R 36.99 R 73.98 Product sub-total R 118.97 Total R 118.97",
+  });
+  assert.equal(invoice.kind, "invoice");
+  assert.match(invoice.deliveryAddress, /^1 Bowie St/);
+  assert.equal(invoice.totalCents, 11897);
+  assert.deepEqual(invoice.items.map((item) => [item.inventorySku, item.creditedQuantity]), [
+    ["water_500ml", 6],
+    ["bleach", 2],
+  ]);
+});
+
+test("Sixty60 ignores other senders and unrelated household groceries", () => {
+  assert.equal(parseSixty60Message({ from: "offers@example.com", subject: "Sixty60 invoice", body: "Order No 123456" }), null);
+  assert.equal(classifyInventorySku("Selati Golden Brown Sugar 2kg"), null);
+  assert.equal(classifyInventorySku("Individually wrapped buttermilk rusks 20 Pack"), "wrapped_rusk");
+});
+
+test("Airbnb conversation parser treats every Host event as human without inferring identity", () => {
+  const parsed = parseAirbnbConversationEmail({
+    providerMessageId: "mail-1",
+    from: "express@airbnb.com",
+    subject: "RE: Reservation for Jasmine Studio Stay, Aug 22 - 23",
+    occurredAt: "2026-08-21T16:24:00Z",
+    body: [
+      "RESERVATION FOR JASMINE STUDIO STAY, AUG 22 - 23",
+      "For your protection and safety, always communicate through Airbnb.",
+      "SAMPLE GUEST",
+      "Booker",
+      "May I arrive slightly later?",
+      "JANE",
+      "Host",
+      "Yes, that should be fine.",
+      "Reply",
+      "https://www.airbnb.co.za/hosting/thread/2635168007?thread_type=home_booking",
+    ].join("\n"),
+  });
+  assert.equal(parsed.providerThreadId, "2635168007");
+  assert.deepEqual(parsed.entries.map((entry) => entry.direction), ["guest", "host"]);
+  assert.equal(parsed.entries[1].name, "JANE");
+  assert.equal(parsed.listingName, "JASMINE STUDIO STAY");
 });

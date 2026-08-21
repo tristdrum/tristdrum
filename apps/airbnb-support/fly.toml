@@ -1,0 +1,33 @@
+app = "tristdrum-airbnb-support"
+primary_region = "jnb"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  AIRBNB_SERVICE_NAME = "airbnb-support"
+  AIRBNB_SUPPORT_GMAIL_USER = "tristdrum@gmail.com"
+  AIRBNB_SUPPORT_INITIAL_LOOKBACK_DAYS = "90"
+  AIRBNB_SUPPORT_MAX_EMAILS = "500"
+  AIRBNB_SUPPORT_OPENAI_MODEL = "gpt-5.6-terra"
+  PORT = "3000"
+  TZ = "Africa/Johannesburg"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256
