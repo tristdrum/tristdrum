@@ -1,0 +1,310 @@
+[
+  {
+    "id": "ordinary-confirmation",
+    "targetDate": "2026-08-10",
+    "cutoff": "2026-08-09T12:00:00Z",
+    "evidence": [
+      {
+        "id": "ordinary-confirmed",
+        "date": "2026-08-09T10:00:00Z",
+        "subject": "Reservation confirmed - Alpha Guest arrives Aug 10",
+        "body": "NEW BOOKING CONFIRMED! ALPHA GUEST ARRIVES AUG 10.\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 10, 2026\nAugust 12, 2026\nGUESTS\n2 adults\nCONFIRMATION CODE\nHMCONF01"
+      }
+    ],
+    "expected": {
+      "evidenceKinds": ["confirmed"],
+      "active": [{ "confirmationCode": "HMCONF01", "unitId": 1, "checkIn": "2026-08-10", "checkOut": "2026-08-12", "guestName": "Alpha Guest", "guests": "2 adults" }],
+      "actions": ["arrival", "empty", "empty"],
+      "messageIncludes": ["2 guests; Alpha Guest"]
+    }
+  },
+  {
+    "id": "matching-explicit-update",
+    "targetDate": "2026-08-21",
+    "cutoff": "2026-08-20T12:00:00Z",
+    "evidence": [
+      {
+        "id": "revision-old",
+        "date": "2026-08-18T10:00:00Z",
+        "subject": "Reservation confirmed - Bravo Guest arrives Aug 20",
+        "body": "NEW BOOKING CONFIRMED! BRAVO GUEST ARRIVES AUG 20.\nThe Spekboom Studio\nCheck-in Checkout\nAugust 20, 2026\nAugust 22, 2026\nGUESTS\n2 adults\nCONFIRMATION CODE\nHMCONF02"
+      },
+      {
+        "id": "revision-new",
+        "date": "2026-08-20T10:00:00Z",
+        "subject": "Reservation updated for HMCONF02",
+        "body": "Your reservation has been updated.\nThe Spekboom Studio\nCheck-in Checkout\nAugust 21, 2026\nAugust 23, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMCONF02"
+      }
+    ],
+    "expected": {
+      "evidenceKinds": ["confirmed", "supplemental"],
+      "active": [{ "confirmationCode": "HMCONF02", "unitId": 2, "checkIn": "2026-08-21", "checkOut": "2026-08-23", "guestName": "Bravo Guest", "guests": "1 adult" }],
+      "actions": ["empty", "arrival", "empty"],
+      "messageIncludes": ["1 guest; Bravo Guest"]
+    }
+  },
+  {
+    "id": "cancellation-by-code",
+    "targetDate": "2026-08-11",
+    "cutoff": "2026-08-10T12:00:00Z",
+    "evidence": [
+      {
+        "id": "cancel-active",
+        "date": "2026-08-08T10:00:00Z",
+        "subject": "Reservation confirmed - Charlie Guest arrives Aug 10",
+        "body": "NEW BOOKING CONFIRMED! CHARLIE GUEST ARRIVES AUG 10.\nJasmine Studio Stay\nCheck-in Checkout\nAugust 10, 2026\nAugust 12, 2026\nGUESTS\n2 adults\nCONFIRMATION CODE\nHMCONF03"
+      },
+      {
+        "id": "cancel-event",
+        "date": "2026-08-10T10:00:00Z",
+        "subject": "Canceled: Reservation HMCONF03",
+        "body": "Your reservation has been canceled.\nCONFIRMATION CODE\nHMCONF03"
+      },
+      {
+        "id": "post-cancel-update",
+        "date": "2026-08-10T11:00:00Z",
+        "subject": "Reservation updated for HMCONF03",
+        "body": "Your reservation has been updated.\nJasmine Studio Stay\nCheck-in Checkout\nAugust 10, 2026\nAugust 12, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMCONF03"
+      }
+    ],
+    "expected": {
+      "evidenceKinds": ["confirmed", "cancelled", "supplemental"],
+      "active": [],
+      "actions": ["empty", "empty", "empty"],
+      "messageExcludes": ["Charlie Guest"]
+    }
+  },
+  {
+    "id": "cancelled-then-replaced",
+    "targetDate": "2026-08-10",
+    "cutoff": "2026-08-09T15:00:00Z",
+    "evidence": [
+      {
+        "id": "replacement-old",
+        "date": "2026-08-07T10:00:00Z",
+        "subject": "Reservation confirmed - Delta Old arrives Aug 10",
+        "body": "NEW BOOKING CONFIRMED! DELTA OLD ARRIVES AUG 10.\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 10, 2026\nAugust 12, 2026\nGUESTS\n2 adults\nCONFIRMATION CODE\nHMCONF04"
+      },
+      {
+        "id": "replacement-cancel",
+        "date": "2026-08-08T10:00:00Z",
+        "subject": "Canceled: Reservation HMCONF04",
+        "body": "Reservation has been canceled.\nCONFIRMATION CODE\nHMCONF04"
+      },
+      {
+        "id": "replacement-new",
+        "date": "2026-08-09T10:00:00Z",
+        "subject": "Reservation confirmed - Echo New arrives Aug 10",
+        "body": "NEW BOOKING CONFIRMED! ECHO NEW ARRIVES AUG 10.\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 10, 2026\nAugust 12, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMCONF05"
+      }
+    ],
+    "expected": {
+      "evidenceKinds": ["confirmed", "cancelled", "confirmed"],
+      "active": [{ "confirmationCode": "HMCONF05", "unitId": 1, "checkIn": "2026-08-10", "checkOut": "2026-08-12", "guestName": "Echo New", "guests": "1 adult" }],
+      "actions": ["arrival", "empty", "empty"],
+      "messageIncludes": ["1 guest; Echo New"],
+      "messageExcludes": ["Delta Old"]
+    }
+  },
+  {
+    "id": "pending-only",
+    "targetDate": "2026-08-14",
+    "cutoff": "2026-08-13T12:00:00Z",
+    "evidence": [
+      {
+        "id": "pending-only-request",
+        "date": "2026-08-12T10:00:00Z",
+        "subject": "Pending: Reservation Request at Jasmine Studio Stay for Aug 14 - 16, 2026",
+        "body": "Accept/Decline\nhttps://airbnb.example/hosting/reservations/details/HMPEND01?isPending=true\nGUESTS\n2 adults\nA prompt response helps guests finalize their trips."
+      }
+    ],
+    "expected": {
+      "evidenceKinds": ["ignored"],
+      "active": [],
+      "actions": ["empty", "empty", "empty"]
+    }
+  },
+  {
+    "id": "digest-only",
+    "targetDate": "2026-08-18",
+    "cutoff": "2026-08-17T12:00:00Z",
+    "evidence": [
+      {
+        "id": "digest-only-message",
+        "date": "2026-08-17T10:00:00Z",
+        "subject": "RE: Reservation for The Spekboom Studio, Aug 18 - 19",
+        "body": "FOXTROT PERSON\nBooker\nA question about the stay.\nCheck-in Checkout\nAugust 18, 2026\nAugust 19, 2026\nGUESTS\n2 adults\n\nQuoted earlier message:\nNEW BOOKING CONFIRMED! FOXTROT PERSON ARRIVES AUG 18."
+      }
+    ],
+    "expected": {
+      "evidenceKinds": ["supplemental"],
+      "active": [],
+      "actions": ["empty", "empty", "empty"],
+      "messageExcludes": ["Foxtrot Person"]
+    }
+  },
+  {
+    "id": "pending-then-confirmed",
+    "targetDate": "2026-08-16",
+    "cutoff": "2026-08-15T12:00:00Z",
+    "evidence": [
+      {
+        "id": "pending-before-confirmation",
+        "date": "2026-08-13T08:00:00Z",
+        "subject": "Pending: Reservation Request at Jasmine Studio Stay for Aug 16 - 21, 2026",
+        "body": "Accept/Decline\nhttps://airbnb.example/hosting/reservations/details/HMCONF06?isPending=true\nGUESTS\n1 adult"
+      },
+      {
+        "id": "confirmed-after-pending",
+        "date": "2026-08-14T08:00:00Z",
+        "subject": "Reservation confirmed - Golf Guest arrives Aug 16",
+        "body": "NEW BOOKING CONFIRMED! GOLF GUEST ARRIVES AUG 16.\nhttps://airbnb.example/hosting/reservations/details/HMCONF06?isPending=true\nJasmine Studio Stay\nCheck-in Checkout\nAugust 16, 2026\nAugust 21, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMCONF06"
+      }
+    ],
+    "expected": {
+      "evidenceKinds": ["ignored", "confirmed"],
+      "active": [{ "confirmationCode": "HMCONF06", "unitId": 3, "checkIn": "2026-08-16", "checkOut": "2026-08-21", "guestName": "Golf Guest", "guests": "1 adult" }],
+      "actions": ["empty", "empty", "arrival"],
+      "messageIncludes": ["1 guest; Golf Guest"]
+    }
+  },
+  {
+    "id": "digest-fills-missing-name",
+    "targetDate": "2026-08-20",
+    "cutoff": "2026-08-19T12:00:00Z",
+    "evidence": [
+      {
+        "id": "nameless-confirmation",
+        "date": "2026-08-18T08:00:00Z",
+        "subject": "Reservation confirmed - arrives Aug 20",
+        "body": "Bougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 20, 2026\nAugust 21, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMCONF07"
+      },
+      {
+        "id": "matching-name-digest",
+        "date": "2026-08-19T08:00:00Z",
+        "subject": "RE: Reservation for Bougainvillea Courtyard Studio, Aug 20 - 21",
+        "body": "HOTEL FILL\nBooker\nCheck-in Checkout\nAugust 20, 2026\nAugust 21, 2026\nGUESTS\n1 adult"
+      }
+    ],
+    "expected": {
+      "evidenceKinds": ["confirmed", "supplemental"],
+      "active": [{ "confirmationCode": "HMCONF07", "unitId": 1, "checkIn": "2026-08-20", "checkOut": "2026-08-21", "guestName": "Hotel Fill", "guests": "1 adult" }],
+      "actions": ["arrival", "empty", "empty"],
+      "messageIncludes": ["1 guest; Hotel Fill"]
+    }
+  },
+  {
+    "id": "digest-cannot-overwrite-confirmed",
+    "targetDate": "2026-08-15",
+    "cutoff": "2026-08-14T12:00:00Z",
+    "evidence": [
+      {
+        "id": "authoritative-confirmation",
+        "date": "2026-08-13T08:00:00Z",
+        "subject": "Reservation confirmed - India Confirmed arrives Aug 15",
+        "body": "NEW BOOKING CONFIRMED! INDIA CONFIRMED ARRIVES AUG 15.\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 15, 2026\nAugust 17, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMCONF08"
+      },
+      {
+        "id": "conflicting-digest",
+        "date": "2026-08-14T08:00:00Z",
+        "subject": "RE: Reservation for Bougainvillea Courtyard Studio, Aug 15 - 16",
+        "body": "JULIET INQUIRY\nBooker\nCheck-in Checkout\nAugust 15, 2026\nAugust 16, 2026\nGUESTS\n2 adults"
+      }
+    ],
+    "expected": {
+      "evidenceKinds": ["confirmed", "supplemental"],
+      "active": [{ "confirmationCode": "HMCONF08", "unitId": 1, "checkIn": "2026-08-15", "checkOut": "2026-08-17", "guestName": "India Confirmed", "guests": "1 adult" }],
+      "actions": ["arrival", "empty", "empty"],
+      "messageIncludes": ["1 guest; India Confirmed"],
+      "messageExcludes": ["Juliet Inquiry", "2 guests; Juliet Inquiry"]
+    }
+  },
+  {
+    "id": "guest-composition",
+    "targetDate": "2026-08-22",
+    "cutoff": "2026-08-21T12:00:00Z",
+    "evidence": [
+      {
+        "id": "composition-one",
+        "date": "2026-08-20T08:00:00Z",
+        "subject": "Reservation confirmed - Kilo Family arrives Aug 22",
+        "body": "NEW BOOKING CONFIRMED! KILO FAMILY ARRIVES AUG 22.\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 22, 2026\nAugust 23, 2026\nGUESTS\n1 adult\n1 child\n1 infant\nCONFIRMATION CODE\nHMCONF09"
+      },
+      {
+        "id": "composition-two",
+        "date": "2026-08-20T09:00:00Z",
+        "subject": "Reservation confirmed - Lima Solo arrives Aug 22",
+        "body": "NEW BOOKING CONFIRMED! LIMA SOLO ARRIVES AUG 22.\nThe Spekboom Studio\nCheck-in Checkout\nAugust 22, 2026\nAugust 23, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMCONF10"
+      }
+    ],
+    "expected": {
+      "evidenceKinds": ["confirmed", "confirmed"],
+      "active": [
+        { "confirmationCode": "HMCONF09", "unitId": 1, "checkIn": "2026-08-22", "checkOut": "2026-08-23", "guestName": "Kilo Family", "guests": "1 adult, 1 child, 1 infant" },
+        { "confirmationCode": "HMCONF10", "unitId": 2, "checkIn": "2026-08-22", "checkOut": "2026-08-23", "guestName": "Lima Solo", "guests": "1 adult" }
+      ],
+      "actions": ["arrival", "arrival", "empty"],
+      "messageIncludes": ["2 guests; Kilo Family", "1 infant", "1 guest; Lima Solo"]
+    }
+  },
+  {
+    "id": "july-28-late-arrivals",
+    "targetDate": "2026-07-28",
+    "cutoff": "2026-07-28T10:00:00Z",
+    "evidence": [
+      { "id": "july-checkout-1", "date": "2026-07-20T08:00:00Z", "subject": "Reservation confirmed - Mike Out arrives Jul 27", "body": "NEW BOOKING CONFIRMED! MIKE OUT ARRIVES JUL 27.\nBougainvillea Courtyard Studio\nCheck-in Checkout\nJuly 27, 2026\nJuly 28, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMJULY01" },
+      { "id": "july-checkout-2", "date": "2026-07-20T08:10:00Z", "subject": "Reservation confirmed - November Out arrives Jul 27", "body": "NEW BOOKING CONFIRMED! NOVEMBER OUT ARRIVES JUL 27.\nThe Spekboom Studio\nCheck-in Checkout\nJuly 27, 2026\nJuly 28, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMJULY02" },
+      { "id": "july-checkout-3", "date": "2026-07-20T08:20:00Z", "subject": "Reservation confirmed - Oscar Out arrives Jul 27", "body": "NEW BOOKING CONFIRMED! OSCAR OUT ARRIVES JUL 27.\nJasmine Studio Stay\nCheck-in Checkout\nJuly 27, 2026\nJuly 28, 2026\nGUESTS\n2 adults\nCONFIRMATION CODE\nHMJULY03" },
+      { "id": "july-arrival-1", "date": "2026-07-27T18:42:00Z", "subject": "Reservation confirmed - Papa Family arrives Jul 28", "body": "NEW BOOKING CONFIRMED! PAPA FAMILY ARRIVES JUL 28.\nBougainvillea Courtyard Studio\nCheck-in Checkout\nJuly 28, 2026\nJuly 29, 2026\nGUESTS\n1 adult\n1 child\nCONFIRMATION CODE\nHMJULY04" },
+      { "id": "july-arrival-2", "date": "2026-07-28T09:01:00Z", "subject": "Reservation confirmed - Quebec Solo arrives Jul 28", "body": "NEW BOOKING CONFIRMED! QUEBEC SOLO ARRIVES JUL 28.\nThe Spekboom Studio\nCheck-in Checkout\nJuly 28, 2026\nJuly 31, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMJULY05" },
+      { "id": "july-arrival-3", "date": "2026-07-27T17:18:00Z", "subject": "Reservation confirmed - Romeo Solo arrives Jul 28", "body": "NEW BOOKING CONFIRMED! ROMEO SOLO ARRIVES JUL 28.\nJasmine Studio Stay\nCheck-in Checkout\nJuly 28, 2026\nJuly 29, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMJULY06" }
+    ],
+    "expected": {
+      "evidenceKinds": ["confirmed", "confirmed", "confirmed", "confirmed", "confirmed", "confirmed"],
+      "active": [
+        { "confirmationCode": "HMJULY01", "unitId": 1, "checkIn": "2026-07-27", "checkOut": "2026-07-28", "guestName": "Mike Out", "guests": "1 adult" },
+        { "confirmationCode": "HMJULY04", "unitId": 1, "checkIn": "2026-07-28", "checkOut": "2026-07-29", "guestName": "Papa Family", "guests": "1 adult, 1 child" },
+        { "confirmationCode": "HMJULY02", "unitId": 2, "checkIn": "2026-07-27", "checkOut": "2026-07-28", "guestName": "November Out", "guests": "1 adult" },
+        { "confirmationCode": "HMJULY05", "unitId": 2, "checkIn": "2026-07-28", "checkOut": "2026-07-31", "guestName": "Quebec Solo", "guests": "1 adult" },
+        { "confirmationCode": "HMJULY03", "unitId": 3, "checkIn": "2026-07-27", "checkOut": "2026-07-28", "guestName": "Oscar Out", "guests": "2 adults" },
+        { "confirmationCode": "HMJULY06", "unitId": 3, "checkIn": "2026-07-28", "checkOut": "2026-07-29", "guestName": "Romeo Solo", "guests": "1 adult" }
+      ],
+      "actions": ["turnover", "turnover", "turnover"],
+      "messageIncludes": ["2 guests; Papa Family", "1 guest; Quebec Solo", "1 guest; Romeo Solo"]
+    }
+  },
+  {
+    "id": "august-unit-3-incident",
+    "targetDate": "2026-08-14",
+    "cutoff": "2026-08-14T10:00:00Z",
+    "evidence": [
+      {
+        "id": "incident-pending",
+        "date": "2026-08-05T14:35:00Z",
+        "subject": "Pending: Reservation Request at Jasmine Studio Stay for Aug 14 - 16, 2026",
+        "body": "Accept/Decline\nhttps://airbnb.example/hosting/reservations/details/HMINC001?isPending=true\nGUESTS\n2 adults\nA prompt response helps guests finalize their trips."
+      },
+      {
+        "id": "incident-confirmed-stay",
+        "date": "2026-08-11T18:24:00Z",
+        "subject": "Reservation confirmed - Sierra Stay arrives Aug 13",
+        "body": "NEW BOOKING CONFIRMED! SIERRA STAY ARRIVES AUG 13.\nJasmine Studio Stay\nCheck-in Checkout\nAugust 13, 2026\nAugust 15, 2026\nGUESTS\n2 adults\nCONFIRMATION CODE\nHMINC002"
+      },
+      {
+        "id": "incident-future-pending",
+        "date": "2026-08-07T07:16:00Z",
+        "subject": "Pending: Reservation Request at Jasmine Studio Stay for Aug 16 - 21, 2026",
+        "body": "Accept/Decline\nhttps://airbnb.example/hosting/reservations/details/HMINC003?isPending=true\nGUESTS\n1 adult"
+      }
+    ],
+    "expected": {
+      "evidenceKinds": ["ignored", "confirmed", "ignored"],
+      "active": [
+        { "confirmationCode": "HMINC002", "unitId": 3, "checkIn": "2026-08-13", "checkOut": "2026-08-15", "guestName": "Sierra Stay", "guests": "2 adults" }
+      ],
+      "actions": ["empty", "empty", "stayover"],
+      "messageIncludes": ["No Airbnb units need cleaning.", "Please do not come unless Jane or Tristan says otherwise."],
+      "messageExcludes": ["HMINC001"]
+    }
+  }
+]

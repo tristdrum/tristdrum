@@ -1,0 +1,130 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { collectAirbnbMessages } from "./gmail.mjs";
+
+test("filters envelopes before fetching MIME bodies and always closes IMAP", async () => {
+  const calls = [];
+  const client = {
+    usable: true,
+    async connect() { calls.push("connect"); },
+    async getMailboxLock(folder) {
+      calls.push(`lock:${folder}`);
+      return { release: () => calls.push("release") };
+    },
+    async search(query) {
+      calls.push(`search:${query.from}`);
+      return [11, 12];
+    },
+    async *fetch() {
+      yield {
+        uid: 11,
+        internalDate: new Date("2026-08-06T10:00:00Z"),
+        envelope: { subject: "Reservation confirmed - Guest arrives Aug 7", from: [{ name: "Airbnb", address: "automated@airbnb.com" }] },
+      };
+      yield {
+        uid: 12,
+        internalDate: new Date("2026-08-06T11:00:00Z"),
+        envelope: { subject: "Receipt", from: [{ name: "Airbnb", address: "automated@airbnb.com" }] },
+      };
+    },
+    async fetchOne(uid) {
+      calls.push(`source:${uid}`);
+      return { source: Buffer.from("From: Airbnb <automated@airbnb.com>\r\nSubject: Reservation\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nReservation body\r\n") };
+    },
+    async logout() { calls.push("logout"); },
+    close() { calls.push("close"); },
+  };
+
+  const result = await collectAirbnbMessages({
+    afterDate: "2026-05-09",
+    maxRead: 10,
+    env: { AIRBNB_GMAIL_USER: "test@example.com", AIRBNB_GMAIL_APP_PASSWORD: "not-a-real-secret" },
+    createClient: () => client,
+    candidateEnvelope: (envelope) => !/Receipt/.test(envelope.subject),
+    subjectMayTouchTarget: () => true,
+  });
+
+  assert.equal(result.envelopesFound, 1);
+  assert.equal(result.messages[0].body.trim(), "Reservation body");
+  assert.deepEqual(calls, ["connect", "lock:[Gmail]/All Mail", "search:airbnb.com", "source:11", "release", "logout"]);
+});
+
+test("missing credentials fails before creating an IMAP client", async () => {
+  let created = false;
+  await assert.rejects(
+    collectAirbnbMessages({
+      afterDate: "2026-05-09",
+      maxRead: 10,
+      env: {},
+      createClient: () => { created = true; },
+      candidateEnvelope: () => true,
+      subjectMayTouchTarget: () => true,
+    }),
+    /AIRBNB_GMAIL_USER/
+  );
+  assert.equal(created, false);
+});
+
+test("fetches the original confirmation when a target-date update changes the booking dates", async () => {
+  const calls = [];
+  const envelopes = [
+    { uid: 21, date: "2026-08-13T10:00:00Z", subject: "Reservation updated for HMANCHOR1" },
+    { uid: 22, date: "2026-08-01T10:00:00Z", subject: "Reservation confirmed - Anchor Guest arrives Aug 20" },
+    { uid: 23, date: "2026-08-02T10:00:00Z", subject: "Reservation confirmed - Other Guest arrives Aug 18" },
+  ];
+  const bodies = {
+    21: "Reservation update\nCONFIRMATION CODE\nHMANCHOR1",
+    22: "Confirmed booking\nCONFIRMATION CODE\nHMANCHOR1",
+    23: "Confirmed booking\nCONFIRMATION CODE\nHMOTHER1",
+  };
+  const source = (uid) => Buffer.from(
+    `From: Airbnb <automated@airbnb.com>\r\nSubject: Reservation\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${bodies[uid]}\r\n`
+  );
+  const client = {
+    usable: true,
+    async connect() { calls.push("connect"); },
+    async getMailboxLock() { return { release: () => calls.push("release") }; },
+    async search() { return envelopes.map(({ uid }) => uid); },
+    async *fetch() {
+      for (const envelope of envelopes) {
+        yield {
+          uid: envelope.uid,
+          internalDate: new Date(envelope.date),
+          envelope: { subject: envelope.subject, from: [{ name: "Airbnb", address: "automated@airbnb.com" }] },
+        };
+      }
+    },
+    async fetchOne(uid) {
+      calls.push(`source:${uid}`);
+      return { source: source(uid) };
+    },
+    async logout() { calls.push("logout"); },
+    close() { calls.push("close"); },
+  };
+
+  const describeEvidence = ({ envelope, body }) => {
+    const evidenceKind = /updated/i.test(envelope.subject)
+      ? "supplemental"
+      : /confirmed/i.test(envelope.subject) ? "confirmed" : "ignored";
+    return {
+      evidenceKind,
+      evidenceSubtype: evidenceKind === "supplemental" ? "update" : evidenceKind,
+      confirmationCode: /CONFIRMATION CODE\s+([A-Z0-9]+)/i.exec(body)?.[1] ?? "",
+    };
+  };
+  const result = await collectAirbnbMessages({
+    afterDate: "2026-05-15",
+    maxRead: 10,
+    env: { AIRBNB_GMAIL_USER: "test@example.com", AIRBNB_GMAIL_APP_PASSWORD: "not-a-real-secret" },
+    createClient: () => client,
+    candidateEnvelope: () => true,
+    subjectMayTouchTarget: (subject) => /updated/i.test(subject),
+    describeEvidence,
+  });
+
+  assert.equal(result.envelopesFound, 1);
+  assert.equal(result.missingConfirmationAnchorCount, 0);
+  assert.deepEqual(result.messages.map(({ envelope }) => envelope.id), ["21", "22"]);
+  assert.deepEqual(calls, ["connect", "source:21", "source:23", "source:22", "release", "logout"]);
+});
