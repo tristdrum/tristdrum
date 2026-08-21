@@ -11,9 +11,9 @@ import { syncCleanerDatabase } from "../airbnb-cleaner/database.mjs";
 import { reconcileReservationConsumption } from "./repository.mjs";
 
 const adminUrl = process.env.AIRBNB_INTEGRATION_DATABASE_URL;
-const householdId = "22222222-2222-4222-8222-222222222222";
-const otherHouseholdId = "33333333-3333-4333-8333-333333333333";
-const ownerId = "11111111-1111-4111-8111-111111111111";
+const householdId = randomUUID();
+const otherHouseholdId = randomUUID();
+const ownerId = randomUUID();
 const localPassword = "airbnb-local-integration-only";
 
 function isLoopbackDatabase(url) {
@@ -70,7 +70,7 @@ async function provisionLocalFixtures(admin) {
   `);
   await admin`
     insert into auth.users (id, email)
-    values (${ownerId}, 'airbnb-integration@example.invalid')
+    values (${ownerId}, ${`airbnb-integration-${ownerId}@example.invalid`})
     on conflict (id) do nothing
   `;
   for (const [id, name] of [
@@ -120,8 +120,8 @@ function cleanerPayload({
   occurredAt,
   evidenceKind = "confirmed",
   includeReservation = true,
-  checkIn = "2026-08-25",
-  checkOut = "2026-08-26",
+  checkIn = "2026-09-25",
+  checkOut = "2026-09-26",
 }) {
   const reservation = {
     unitId: 1,
@@ -462,6 +462,22 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
         and source_id = ${reservationId}
     `;
     assert.equal(Number(movedTotals[0].quantity), 0);
+    assert.deepEqual(await reconcileReservationConsumption(stock.sql, {
+      householdId,
+      throughDate: "2026-08-25",
+    }), { applied: 1, reversed: 0 });
+    assert.deepEqual(await reconcileReservationConsumption(stock.sql, {
+      householdId,
+      throughDate: "2026-08-25",
+    }), { applied: 0, reversed: 0 });
+    const arrivedTotals = await admin`
+      select sum(quantity_delta) as quantity
+      from airbnb.inventory_movements
+      where household_id = ${householdId}
+        and inventory_item_id = ${inventoryItemId}
+        and source_id = ${reservationId}
+    `;
+    assert.equal(Number(arrivedTotals[0].quantity), -2);
   } finally {
     await Promise.all(databases.map((database) => database.close()));
     await admin.end({ timeout: 5 });

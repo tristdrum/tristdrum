@@ -248,7 +248,9 @@ export async function reconcileReservationConsumption(sql, { householdId, throug
   for (const reservation of reservations) {
     for (const item of reservationConsumptionRequirements(reservation, inventory)) {
       const quantity = item.quantity;
-      const stateKey = `reservation:${reservation.id}:${item.sku}:revision:${reservation.revision}`;
+      const targetQuantity = reservation.bookingStatus === "confirmed" && reservation.isDue ? -quantity : 0;
+      const statePhase = targetQuantity < 0 ? "due" : "inactive";
+      const stateKey = `reservation:${reservation.id}:${item.sku}:revision:${reservation.revision}:${statePhase}`;
       const existingRows = await sql`
         select
           coalesce(sum(quantity_delta) filter (where dedupe_key <> ${stateKey}), 0) as prior_net_quantity,
@@ -259,7 +261,6 @@ export async function reconcileReservationConsumption(sql, { householdId, throug
           and source_type = 'reservation'
           and source_id = ${reservation.id}
       `;
-      const targetQuantity = reservation.bookingStatus === "confirmed" && reservation.isDue ? -quantity : 0;
       const transitionQuantity = requiredStateMovement({
         targetQuantity,
         priorNetQuantity: existingRows[0].priorNetQuantity,
