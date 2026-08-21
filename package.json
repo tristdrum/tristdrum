@@ -2,6 +2,8 @@
   "name": "tristdrum-personal-site",
   "private": true,
   "scripts": {
+    "airbnb:cleaner:start": "npm --prefix apps/airbnb-cleaner start",
+    "airbnb:cleaner:test": "npm --prefix apps/airbnb-cleaner test",
     "finance:adapters": "npm --prefix packages/finance-ingest run adapters",
     "finance:ingest": "npm --prefix packages/finance-ingest run cli --",
     "finance:test": "npm --prefix packages/finance-ingest test"

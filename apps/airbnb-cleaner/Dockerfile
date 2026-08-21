@@ -6,11 +6,12 @@ ENV NODE_ENV=production \
     TZ=Africa/Johannesburg \
     AIRBNB_CLEANER_HOME=/data
 
-COPY automations/airbnb-cleaner/package.json automations/airbnb-cleaner/package-lock.json ./
+COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts \
     && npm cache clean --force
 
-COPY automations/airbnb-cleaner/*.mjs ./
+COPY *.mjs ./
+COPY fixtures ./fixtures
 RUN mkdir -p /data
 
 EXPOSE 3000
