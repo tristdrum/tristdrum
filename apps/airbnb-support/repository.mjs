@@ -81,7 +81,7 @@ export async function ingestConversation(sql, { householdId, email, parsed }) {
   });
 }
 
-export async function loadShadowCandidates(sql, { householdId, since, limit = 8 }) {
+export async function loadShadowCandidates(sql, { householdId, limit = 8 }) {
   const rows = await sql`
     select
       thread.id,
@@ -119,7 +119,6 @@ export async function loadShadowCandidates(sql, { householdId, since, limit = 8 
     ) existing on true
     where thread.household_id = ${householdId}
       and thread.status in ('open', 'needs_human')
-      and thread.last_guest_at >= ${since}
       and (thread.last_host_at is null or thread.last_host_at < thread.last_guest_at)
       and coalesce(existing.status, 'draft') not in ('sent', 'handled_by_human', 'cancelled')
     order by (existing.classification is null) desc, thread.last_guest_at desc

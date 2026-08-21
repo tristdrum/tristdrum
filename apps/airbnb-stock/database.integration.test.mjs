@@ -356,6 +356,32 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
       receipt: { integration: true },
       completedAt: "2026-08-21T20:02:00.000Z",
     });
+    const crossServiceJobUpdate = await support.sql`
+      update airbnb.job_runs
+      set status = 'error'
+      where run_id = ${lockRunId}
+      returning id
+    `;
+    assert.equal(crossServiceJobUpdate.length, 0);
+    const stockAlertKey = `integration-stock-alert-${randomUUID()}`;
+    const stockAlerts = await stock.sql`
+      insert into airbnb.alerts (
+        household_id, alert_type, severity, status, dedupe_key, summary
+      ) values (
+        ${householdId}, 'stock_low', 'warning', 'suppressed',
+        ${stockAlertKey}, 'Integration stock alert'
+      )
+      returning id
+    `;
+    assert.equal(stockAlerts.length, 1);
+    const crossServiceAlertUpdate = await support.sql`
+      update airbnb.alerts
+      set summary = 'Cross-service rewrite'
+      where id = ${stockAlerts[0].id}
+      returning id
+    `;
+    assert.equal(crossServiceAlertUpdate.length, 0);
+    await assert.rejects(support.sql`select id from airbnb.audit_events`, { code: "42501" });
 
     const evidenceId = randomUUID();
     const reservationId = randomUUID();
@@ -415,6 +441,27 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
         and source_id = ${reservationId}
     `;
     assert.equal(Number(totals[0].quantity), -2);
+    await admin`
+      update airbnb.reservations
+      set check_in = '2026-08-25', check_out = '2026-08-26', revision = 4
+      where id = ${reservationId}
+    `;
+    assert.deepEqual(await reconcileReservationConsumption(stock.sql, {
+      householdId,
+      throughDate: "2026-08-21",
+    }), { applied: 0, reversed: 1 });
+    assert.deepEqual(await reconcileReservationConsumption(stock.sql, {
+      householdId,
+      throughDate: "2026-08-21",
+    }), { applied: 0, reversed: 0 });
+    const movedTotals = await admin`
+      select sum(quantity_delta) as quantity
+      from airbnb.inventory_movements
+      where household_id = ${householdId}
+        and inventory_item_id = ${inventoryItemId}
+        and source_id = ${reservationId}
+    `;
+    assert.equal(Number(movedTotals[0].quantity), 0);
   } finally {
     await Promise.all(databases.map((database) => database.close()));
     await admin.end({ timeout: 5 });

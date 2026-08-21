@@ -136,7 +136,7 @@ test("an unrelated historical update without an anchor does not block the target
   assert.equal(collected.unmatchedUpdateCount, 0);
 });
 
-test("collection includes the seven-day stock horizon without widening the cleaner target", async () => {
+test("collection includes seven future stock dates without widening the cleaner target", async () => {
   let subjectFilter;
   const collected = await collectReservations(
     parseISODate("2026-08-14"),
@@ -149,7 +149,8 @@ test("collection includes the seven-day stock horizon without widening the clean
   );
 
   assert.equal(subjectFilter("Reservation confirmed - Future Guest arrives Aug 20"), true);
-  assert.equal(subjectFilter("Reservation confirmed - Later Guest arrives Aug 21"), false);
+  assert.equal(subjectFilter("Reservation confirmed - Final Forecast Guest arrives Aug 21"), true);
+  assert.equal(subjectFilter("Reservation confirmed - Later Guest arrives Aug 22"), false);
   assert.deepEqual(collected.reservations, []);
   assert.deepEqual(collected.evidence, []);
 });

@@ -1282,7 +1282,7 @@ export async function collectReservations(
   searchDays,
   maxRead,
   collectMessagesFn = collectAirbnbMessages,
-  futureHorizonDays = 7
+  futureHorizonDays = 8
 ) {
   const afterDate = formatISODate(addDays(targetDate, -searchDays));
   const horizonDates = Array.from(

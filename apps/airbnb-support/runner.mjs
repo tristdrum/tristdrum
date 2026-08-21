@@ -90,10 +90,8 @@ export async function runSupportShadow({
       ingested.push(await ingestConversation(ownDatabase.sql, { householdId, email, parsed }));
     }
 
-    const candidateSince = new Date(startedAt.getTime() - 24 * 60 * 60 * 1000);
     const candidates = await loadShadowCandidates(ownDatabase.sql, {
       householdId,
-      since: candidateSince,
       limit: Number.parseInt(env.AIRBNB_SUPPORT_CANDIDATE_LIMIT ?? "8", 10),
     });
     const drafts = [];
