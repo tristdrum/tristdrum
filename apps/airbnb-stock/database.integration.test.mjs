@@ -170,7 +170,10 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
 }, async () => {
   const admin = postgres(adminUrl, { max: 1, prepare: false });
   const databases = [];
+  let fixtureLockHeld = false;
   try {
+    await admin`select pg_advisory_lock(hashtext('airbnb-runtime-integration-fixtures'))`;
+    fixtureLockHeld = true;
     const inventoryItemId = await provisionLocalFixtures(admin);
     const stock = workerDatabase(adminUrl, "airbnb_stock_runtime_test", "airbnb-stock");
     const wrongHousehold = workerDatabase(
@@ -480,6 +483,9 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
     assert.equal(Number(arrivedTotals[0].quantity), -2);
   } finally {
     await Promise.all(databases.map((database) => database.close()));
+    if (fixtureLockHeld) {
+      await admin`select pg_advisory_unlock(hashtext('airbnb-runtime-integration-fixtures'))`.catch(() => {});
+    }
     await admin.end({ timeout: 5 });
   }
 });
