@@ -1,0 +1,10 @@
+{
+  "name": "@tristdrum/airbnb-core",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": "./index.mjs",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 *.test.mjs"
+  }
+}
