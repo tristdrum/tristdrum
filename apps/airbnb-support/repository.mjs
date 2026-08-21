@@ -1,4 +1,4 @@
-import { contentFingerprint, propertyForListing } from "@tristdrum/airbnb-core";
+import { contentFingerprint, conversationEntryKey, propertyForListing } from "@tristdrum/airbnb-core";
 
 function eventTime(occurredAt, sequence) {
   const value = new Date(occurredAt);
@@ -57,7 +57,7 @@ export async function ingestConversation(sql, { householdId, email, parsed }) {
     `;
     const thread = threadRows[0];
     for (const entry of parsed.entries) {
-      const providerEntryId = `${parsed.providerThreadId}:${entry.direction}:${entry.contentHash}`;
+      const providerEntryId = conversationEntryKey(parsed.providerThreadId, entry);
       await transaction`
         insert into airbnb.guest_messages (
           household_id, thread_id, provider_message_id, provider_thread_id, direction,
@@ -81,7 +81,7 @@ export async function ingestConversation(sql, { householdId, email, parsed }) {
   });
 }
 
-export async function loadShadowCandidates(sql, { householdId, since }) {
+export async function loadShadowCandidates(sql, { householdId, since, limit = 8 }) {
   const rows = await sql`
     select
       thread.id,
@@ -91,6 +91,8 @@ export async function loadShadowCandidates(sql, { householdId, since }) {
       thread.last_guest_at,
       property.listing_name,
       property.facts,
+      existing.classification as existing_classification,
+      existing.draft_text as existing_draft,
       latest.body_normalized as guest_message,
       latest.provider_sent_at as latest_event_at
     from airbnb.guest_threads thread
@@ -106,22 +108,29 @@ export async function loadShadowCandidates(sql, { householdId, since }) {
     left join airbnb.properties property
       on property.household_id = thread.household_id
      and property.id = thread.property_id
+    left join lateral (
+      select delivery.classification, delivery.draft_text, delivery.status
+      from airbnb.reply_deliveries delivery
+      where delivery.household_id = thread.household_id
+        and delivery.thread_id = thread.id
+        and delivery.source_fingerprint = thread.source_fingerprint
+      order by delivery.created_at desc
+      limit 1
+    ) existing on true
     where thread.household_id = ${householdId}
-      and thread.status = 'open'
+      and thread.status in ('open', 'needs_human')
       and thread.last_guest_at >= ${since}
       and (thread.last_host_at is null or thread.last_host_at < thread.last_guest_at)
-      and not exists (
-        select 1 from airbnb.reply_deliveries delivery
-        where delivery.household_id = thread.household_id
-          and delivery.thread_id = thread.id
-          and delivery.source_fingerprint = thread.source_fingerprint
-      )
-    order by thread.last_guest_at
-    limit 50
+      and coalesce(existing.status, 'draft') not in ('sent', 'handled_by_human', 'cancelled')
+    order by (existing.classification is null) desc, thread.last_guest_at desc
+    limit ${limit}
   `;
   return rows.map((row) => ({
     ...row,
     facts: row.facts ?? {},
+    existingClassification: row.existingClassification
+      ? { ...row.existingClassification, draft: row.existingDraft }
+      : null,
   }));
 }
 

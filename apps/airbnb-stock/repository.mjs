@@ -1,4 +1,44 @@
-import { contentFingerprint, decideOrderEvidence } from "@tristdrum/airbnb-core";
+import { contentFingerprint, decideOrderEvidence, setupGuestCount } from "@tristdrum/airbnb-core";
+
+export function learnedUnitPrices(items) {
+  const totals = new Map();
+  for (const item of items) {
+    if (!item.inventorySku || item.creditedQuantity <= 0 || item.lineTotalCents == null) continue;
+    const total = totals.get(item.inventorySku) ?? { totalCents: 0, quantity: 0 };
+    total.totalCents += item.lineTotalCents;
+    total.quantity += item.creditedQuantity;
+    totals.set(item.inventorySku, total);
+  }
+  return new Map([...totals].map(([sku, total]) => [sku, Math.round(total.totalCents / total.quantity)]));
+}
+
+export function reservationConsumptionRequirements(reservation, inventory) {
+  const setupGuests = setupGuestCount({
+    adults: reservation.adults,
+    children: reservation.children,
+    infants: reservation.infants,
+    guestCountKnown: reservation.guestCountKnown,
+  });
+  return inventory
+    .map((item) => ({
+      ...item,
+      quantity: (item.consumptionBasis === "per_stay" ? 1 : setupGuests) * Number(item.quantityPerBasis),
+    }))
+    .filter((item) => item.quantity > 0);
+}
+
+function isoDate(value) {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(String(value ?? ""));
+  if (!match) throw new Error("Reservation check-in date is invalid.");
+  return match[1];
+}
+
+export function requiredStateMovement({ targetQuantity, priorNetQuantity, currentStateQuantity = null }) {
+  const requiredQuantity = Number(targetQuantity) - Number(priorNetQuantity);
+  if (currentStateQuantity != null && Number(currentStateQuantity) === requiredQuantity) return null;
+  return requiredQuantity;
+}
 
 export async function ingestOrderEvidence(sql, { householdId, message, parsed, deliveryDueAt = null }) {
   const decision = decideOrderEvidence({ kind: parsed.kind, deliveryAddress: parsed.deliveryAddress });
@@ -14,6 +54,7 @@ export async function ingestOrderEvidence(sql, { householdId, message, parsed, d
       quantity: item.quantity,
       inventorySku: item.inventorySku,
       creditedQuantity: item.creditedQuantity,
+      unitPriceCents: item.unitPriceCents,
       lineTotalCents: item.lineTotalCents,
     })),
   };
@@ -110,6 +151,7 @@ export async function ingestOrderEvidence(sql, { householdId, message, parsed, d
 
     if (decision.creditInventory) {
       const creditedBySku = new Map();
+      const unitPrices = learnedUnitPrices(parsed.items);
       for (const item of parsed.items) {
         if (!item.inventorySku || item.creditedQuantity <= 0) continue;
         creditedBySku.set(item.inventorySku, (creditedBySku.get(item.inventorySku) ?? 0) + item.creditedQuantity);
@@ -131,6 +173,15 @@ export async function ingestOrderEvidence(sql, { householdId, message, parsed, d
                         order_id = excluded.order_id,
                         occurred_at = excluded.occurred_at
         `;
+        const unitPriceCents = unitPrices.get(sku);
+        if (unitPriceCents != null) {
+          await transaction`
+            update airbnb.inventory_items
+            set target_unit_price_cents = ${unitPriceCents}
+            where household_id = ${householdId}
+              and id = ${inventoryItemId}
+          `;
+        }
       }
       await transaction`
         update airbnb.orders
@@ -162,6 +213,75 @@ export async function ingestOrderEvidence(sql, { householdId, message, parsed, d
       relevantItemCount: parsed.items.filter((item) => item.inventorySku).length,
     };
   });
+}
+
+export async function reconcileReservationConsumption(sql, { householdId, throughDate, lookbackDays = 180 }) {
+  const [reservations, inventory] = await Promise.all([
+    sql`
+      select id, booking_status, check_in, adults, children, infants, guest_count_known, revision
+      from airbnb.reservations
+      where household_id = ${householdId}
+        and check_in <= ${throughDate}
+        and check_in >= ${throughDate}::date - ${lookbackDays}::integer
+      order by check_in, id
+    `,
+    sql`
+      select id, sku, consumption_basis, quantity_per_basis
+      from airbnb.inventory_items
+      where household_id = ${householdId}
+        and active
+        and consumption_basis in ('per_guest', 'per_stay')
+      order by staple_priority, sku
+    `,
+  ]);
+  let applied = 0;
+  let reversed = 0;
+  for (const reservation of reservations) {
+    for (const item of reservationConsumptionRequirements(reservation, inventory)) {
+      const quantity = item.quantity;
+      const stateKey = `reservation:${reservation.id}:${item.sku}:revision:${reservation.revision}`;
+      const existingRows = await sql`
+        select
+          coalesce(sum(quantity_delta) filter (where dedupe_key <> ${stateKey}), 0) as prior_net_quantity,
+          max(quantity_delta) filter (where dedupe_key = ${stateKey}) as current_state_quantity
+        from airbnb.inventory_movements
+        where household_id = ${householdId}
+          and inventory_item_id = ${item.id}
+          and source_type = 'reservation'
+          and source_id = ${reservation.id}
+      `;
+      const targetQuantity = reservation.bookingStatus === "confirmed" ? -quantity : 0;
+      const transitionQuantity = requiredStateMovement({
+        targetQuantity,
+        priorNetQuantity: existingRows[0].priorNetQuantity,
+        currentStateQuantity: existingRows[0].currentStateQuantity,
+      });
+      if (transitionQuantity == null || transitionQuantity === 0) continue;
+      const rows = await sql`
+        insert into airbnb.inventory_movements (
+          household_id, inventory_item_id, movement_type, quantity_delta,
+          confidence, source_type, source_id, dedupe_key, occurred_at, note
+        ) values (
+          ${householdId}, ${item.id},
+          ${reservation.bookingStatus === "confirmed" ? "consumption" : "adjustment"},
+          ${transitionQuantity}, 'inferred', 'reservation', ${reservation.id}, ${stateKey},
+          ${`${isoDate(reservation.checkIn)}T15:00:00+02:00`},
+          ${reservation.bookingStatus === "confirmed" ? "Reservation stock allocation" : "Reversed cancelled reservation consumption"}
+        )
+        on conflict (household_id, dedupe_key)
+        do update set quantity_delta = excluded.quantity_delta,
+                      movement_type = excluded.movement_type,
+                      occurred_at = excluded.occurred_at,
+                      note = excluded.note
+        returning id
+      `;
+      if (rows.length) {
+        if (transitionQuantity < 0) applied += 1;
+        else reversed += 1;
+      }
+    }
+  }
+  return { applied, reversed };
 }
 
 export async function loadForecastInputs(sql, { householdId, startDate, endDate }) {

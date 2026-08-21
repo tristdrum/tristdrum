@@ -1,6 +1,6 @@
 begin;
 
-select plan(14);
+select plan(20);
 
 create temp table airbnb_test_tables (table_name text primary key) on commit drop;
 insert into airbnb_test_tables (table_name)
@@ -21,13 +21,14 @@ values
   ('shopping_list_items'),
   ('alerts'),
   ('job_runs'),
-  ('audit_events');
+  ('audit_events'),
+  ('worker_identities');
 
 select ok(
   (select count(*)
    from information_schema.tables table_info
    join airbnb_test_tables expected on expected.table_name = table_info.table_name
-   where table_info.table_schema = 'airbnb') = 17,
+   where table_info.table_schema = 'airbnb') = 18,
   'all private Airbnb tables exist'
 );
 
@@ -39,15 +40,53 @@ select ok(
 
 select ok(
   has_schema_privilege('service_role', 'airbnb', 'USAGE')
-  and has_schema_privilege('airbnb_worker', 'airbnb', 'USAGE'),
+  and has_schema_privilege('airbnb_cleaner_worker', 'airbnb', 'USAGE')
+  and has_schema_privilege('airbnb_stock_worker', 'airbnb', 'USAGE')
+  and has_schema_privilege('airbnb_support_worker', 'airbnb', 'USAGE'),
   'service and scoped worker roles can use the private schema'
 );
 
 select ok(
-  not (select rolcanlogin from pg_roles where rolname = 'airbnb_worker')
-  and not (select rolsuper from pg_roles where rolname = 'airbnb_worker')
-  and not (select rolbypassrls from pg_roles where rolname = 'airbnb_worker'),
-  'worker capability role is non-login and cannot bypass RLS'
+  not exists (
+    select 1
+    from pg_roles
+    where rolname in ('airbnb_cleaner_worker', 'airbnb_stock_worker', 'airbnb_support_worker')
+      and (rolcanlogin or rolsuper or rolbypassrls)
+  ),
+  'worker capability roles are non-login and cannot bypass RLS'
+);
+
+select ok(
+  not has_schema_privilege('airbnb_worker', 'airbnb', 'USAGE')
+  and not exists (
+    select 1 from airbnb_test_tables expected
+    where has_table_privilege('airbnb_worker', format('airbnb.%I', expected.table_name), 'SELECT')
+       or has_table_privilege('airbnb_worker', format('airbnb.%I', expected.table_name), 'INSERT')
+       or has_table_privilege('airbnb_worker', format('airbnb.%I', expected.table_name), 'UPDATE')
+  ),
+  'legacy broad worker capability has no Airbnb access'
+);
+
+select ok(
+  has_table_privilege('airbnb_cleaner_worker', 'airbnb.cleaner_plans', 'SELECT')
+  and not has_table_privilege('airbnb_cleaner_worker', 'airbnb.guest_messages', 'SELECT')
+  and not has_table_privilege('airbnb_cleaner_worker', 'airbnb.inventory_items', 'SELECT'),
+  'cleaner capability cannot read support or stock tables'
+);
+
+select ok(
+  has_table_privilege('airbnb_stock_worker', 'airbnb.inventory_items', 'SELECT')
+  and has_table_privilege('airbnb_stock_worker', 'airbnb.reservations', 'SELECT')
+  and not has_table_privilege('airbnb_stock_worker', 'airbnb.guest_messages', 'SELECT'),
+  'stock capability can forecast without reading support tables'
+);
+
+select ok(
+  has_table_privilege('airbnb_support_worker', 'airbnb.guest_messages', 'SELECT')
+  and has_table_privilege('airbnb_support_worker', 'airbnb.reservations', 'SELECT')
+  and not has_table_privilege('airbnb_support_worker', 'airbnb.cleaner_plans', 'SELECT')
+  and not has_table_privilege('airbnb_support_worker', 'airbnb.inventory_items', 'SELECT'),
+  'support capability cannot read cleaner or stock tables'
 );
 
 select ok(
@@ -76,6 +115,9 @@ select ok(
   not exists (
     select 1 from airbnb_test_tables expected
     where has_table_privilege('airbnb_worker', format('airbnb.%I', expected.table_name), 'DELETE')
+       or has_table_privilege('airbnb_cleaner_worker', format('airbnb.%I', expected.table_name), 'DELETE')
+       or has_table_privilege('airbnb_stock_worker', format('airbnb.%I', expected.table_name), 'DELETE')
+       or has_table_privilege('airbnb_support_worker', format('airbnb.%I', expected.table_name), 'DELETE')
        or has_table_privilege('service_role', format('airbnb.%I', expected.table_name), 'DELETE')
   ),
   'worker roles cannot hard-delete Airbnb data'
@@ -91,8 +133,28 @@ select ok(
     where namespace.nspname = 'airbnb'
       and trigger_info.tgname = 'airbnb_no_hard_delete'
       and not trigger_info.tgisinternal
-  ) = 17,
+  ) = 18,
   'every Airbnb table rejects hard deletes'
+);
+
+select ok(
+  not has_table_privilege('service_role', 'airbnb.worker_identities', 'SELECT')
+  and not has_table_privilege('airbnb_cleaner_worker', 'airbnb.worker_identities', 'SELECT')
+  and not has_table_privilege('airbnb_stock_worker', 'airbnb.worker_identities', 'SELECT')
+  and not has_table_privilege('airbnb_support_worker', 'airbnb.worker_identities', 'SELECT'),
+  'worker identity bindings are not readable by runtime roles'
+);
+
+select ok(
+  exists (
+    select 1
+    from pg_proc procedure
+    join pg_namespace namespace on namespace.oid = procedure.pronamespace
+    where namespace.nspname = 'airbnb'
+      and procedure.proname = 'current_household_id'
+      and procedure.prosecdef
+  ),
+  'household identity is resolved by a security-definer function'
 );
 
 select ok(

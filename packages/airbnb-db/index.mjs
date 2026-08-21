@@ -7,6 +7,10 @@ function required(name, env) {
 export function createAirbnbDatabase({ env = process.env, url = null, postgresFactory } = {}) {
   if (typeof postgresFactory !== "function") throw new Error("postgresFactory is required.");
   const connectionUrl = url ?? required("AIRBNB_DATABASE_URL", env);
+  const householdId = required("AIRBNB_HOUSEHOLD_ID", env);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(householdId)) {
+    throw new Error("AIRBNB_HOUSEHOLD_ID must be a UUID.");
+  }
   const sql = postgresFactory(connectionUrl, {
     max: 2,
     idle_timeout: 20,
@@ -23,10 +27,6 @@ export function createAirbnbDatabase({ env = process.env, url = null, postgresFa
   return {
     sql,
     async householdId() {
-      const householdId = required("AIRBNB_HOUSEHOLD_ID", env);
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(householdId)) {
-        throw new Error("AIRBNB_HOUSEHOLD_ID must be a UUID.");
-      }
       return householdId;
     },
     async close() {
@@ -43,13 +43,34 @@ export async function recordJobStart(sql, {
   targetDate = null,
   startedAt,
 }) {
-  await sql`
-    insert into airbnb.job_runs (
-      household_id, service, job_name, run_id, target_date, status, started_at
-    ) values (
-      ${householdId}, ${service}, ${jobName}, ${runId}, ${targetDate}, 'started', ${startedAt}
-    )
-  `;
+  try {
+    await sql.begin(async (transaction) => {
+      await transaction`
+        update airbnb.job_runs
+        set status = 'error',
+            error_code = 'STALE_RUN',
+            error_message = 'Previous run exceeded the fifteen-minute lock window.',
+            completed_at = ${startedAt}
+        where service = ${service}
+          and status = 'started'
+          and started_at < ${startedAt}::timestamptz - interval '15 minutes'
+      `;
+      await transaction`
+        insert into airbnb.job_runs (
+          household_id, service, job_name, run_id, target_date, status, started_at
+        ) values (
+          ${householdId}, ${service}, ${jobName}, ${runId}, ${targetDate}, 'started', ${startedAt}
+        )
+      `;
+    });
+  } catch (error) {
+    if (error?.code === "23505") {
+      const overlap = new Error(`${service} run already in progress.`);
+      overlap.code = "RUN_IN_PROGRESS";
+      throw overlap;
+    }
+    throw error;
+  }
 }
 
 export async function recordJobFinish(sql, {

@@ -10,6 +10,7 @@ import TaskPulsePage from './pages/TaskPulsePage'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import FinanceHubPage from './pages/FinanceHubPage'
+import AirbnbManagementPage from './pages/AirbnbManagementPage'
 
 function App() {
   return (
@@ -26,6 +27,20 @@ function App() {
           element={
             <FinanceAccessGate>
               <FinanceHubPage />
+            </FinanceAccessGate>
+          }
+        />
+        <Route
+          path="/dashboard/airbnb"
+          element={
+            <FinanceAccessGate
+              area={{
+                eyebrow: 'Airbnb access',
+                title: 'Airbnb management',
+                setupDescription: 'The Airbnb dashboard helper or household access records are not available yet. Apply the Airbnb management migration, provision household membership, then retry.',
+              }}
+            >
+              <AirbnbManagementPage />
             </FinanceAccessGate>
           }
         />

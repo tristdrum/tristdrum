@@ -20,6 +20,8 @@ export function supportDisposition(classification) {
     classification?.riskTier === "low"
     && AUTO_REPLY_TOPICS.has(topic)
     && classification?.factsVerified === true
+    && classification?.replyNeeded === true
+    && Boolean(String(classification?.draft ?? "").trim())
     && confidence >= 0.9;
   return {
     topic,

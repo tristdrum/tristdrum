@@ -25,6 +25,7 @@ export default function DashboardPage() {
             <Link to="/">Public site</Link>
             <Link to="/task-pulse">Task Pulse</Link>
             <Link to="/dashboard/finance">Finance hub</Link>
+            <Link to="/dashboard/airbnb">Airbnb management</Link>
             <Link to="/manage-7f8a9c2e-4b3d-11ef-a8c9-0242ac130003">Artwork admin</Link>
           </div>
         </section>
@@ -57,6 +58,14 @@ export default function DashboardPage() {
         <section className="private-grid">
           <article className="private-card">
             <span className="private-kicker">Household</span>
+            <h3>Airbnb management</h3>
+            <p>Monitor guests, cleaner plans, stock, relevant orders, and automation health for the three studios.</p>
+            <div className="private-actions">
+              <Link to="/dashboard/airbnb">Open Airbnb</Link>
+            </div>
+          </article>
+          <article className="private-card">
+            <span className="private-kicker">Household</span>
             <h3>Finance hub</h3>
             <p>Trace source records, reconciliations, current accounting allocations, open questions, and tax scenarios without erasing history.</p>
             <div className="private-actions">
@@ -83,6 +92,7 @@ export default function DashboardPage() {
         <section className="private-panel">
           <p className="private-eyebrow">Useful entry points</p>
           <div className="private-links">
+            <Link to="/dashboard/airbnb">Airbnb management</Link>
             <Link to="/dashboard/finance">Household finance ledger</Link>
             <Link to="/task-pulse">Task Pulse monitor</Link>
             <Link to="/manage-7f8a9c2e-4b3d-11ef-a8c9-0242ac130003">Artwork management</Link>
