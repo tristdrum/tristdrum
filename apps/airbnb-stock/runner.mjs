@@ -42,7 +42,7 @@ export function stockPlanningWindow(runDate) {
   return {
     consumptionThroughDate: runDate,
     forecastStartDate: addDays(runDate, 1),
-    forecastEndDate: addDays(runDate, 6),
+    forecastEndDate: addDays(runDate, 7),
   };
 }
 

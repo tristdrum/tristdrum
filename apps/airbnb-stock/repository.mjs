@@ -218,11 +218,20 @@ export async function ingestOrderEvidence(sql, { householdId, message, parsed, d
 export async function reconcileReservationConsumption(sql, { householdId, throughDate, lookbackDays = 180 }) {
   const [reservations, inventory] = await Promise.all([
     sql`
-      select id, booking_status, check_in, adults, children, infants, guest_count_known, revision
+      select id, booking_status, check_in, adults, children, infants, guest_count_known, revision,
+             check_in <= ${throughDate} as is_due
       from airbnb.reservations
       where household_id = ${householdId}
-        and check_in <= ${throughDate}
-        and check_in >= ${throughDate}::date - ${lookbackDays}::integer
+        and (
+          check_in between ${throughDate}::date - ${lookbackDays}::integer and ${throughDate}
+          or exists (
+            select 1
+            from airbnb.inventory_movements movement
+            where movement.household_id = airbnb.reservations.household_id
+              and movement.source_type = 'reservation'
+              and movement.source_id = airbnb.reservations.id::text
+          )
+        )
       order by check_in, id
     `,
     sql`
@@ -250,7 +259,7 @@ export async function reconcileReservationConsumption(sql, { householdId, throug
           and source_type = 'reservation'
           and source_id = ${reservation.id}
       `;
-      const targetQuantity = reservation.bookingStatus === "confirmed" ? -quantity : 0;
+      const targetQuantity = reservation.bookingStatus === "confirmed" && reservation.isDue ? -quantity : 0;
       const transitionQuantity = requiredStateMovement({
         targetQuantity,
         priorNetQuantity: existingRows[0].priorNetQuantity,
@@ -263,10 +272,12 @@ export async function reconcileReservationConsumption(sql, { householdId, throug
           confidence, source_type, source_id, dedupe_key, occurred_at, note
         ) values (
           ${householdId}, ${item.id},
-          ${reservation.bookingStatus === "confirmed" ? "consumption" : "adjustment"},
+          ${targetQuantity < 0 ? "consumption" : "adjustment"},
           ${transitionQuantity}, 'inferred', 'reservation', ${reservation.id}, ${stateKey},
-          ${`${isoDate(reservation.checkIn)}T15:00:00+02:00`},
-          ${reservation.bookingStatus === "confirmed" ? "Reservation stock allocation" : "Reversed cancelled reservation consumption"}
+          ${targetQuantity < 0
+            ? `${isoDate(reservation.checkIn)}T15:00:00+02:00`
+            : `${throughDate}T12:00:00+02:00`},
+          ${targetQuantity < 0 ? "Reservation stock allocation" : "Reversed reservation consumption"}
         )
         on conflict (household_id, dedupe_key)
         do update set quantity_delta = excluded.quantity_delta,

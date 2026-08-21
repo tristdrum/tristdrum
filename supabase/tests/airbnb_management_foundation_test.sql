@@ -1,6 +1,6 @@
 begin;
 
-select plan(20);
+select plan(23);
 
 create temp table airbnb_test_tables (table_name text primary key) on commit drop;
 insert into airbnb_test_tables (table_name)
@@ -230,6 +230,46 @@ select ok(
       and command not like '%mincool-airbnb-cleaner%'
   ) = 4,
   'stock and support observers are installed dormant on personal Fly apps'
+);
+
+select ok(
+  not has_table_privilege('airbnb_cleaner_worker', 'airbnb.audit_events', 'SELECT')
+  and not has_table_privilege('airbnb_stock_worker', 'airbnb.audit_events', 'SELECT')
+  and not has_table_privilege('airbnb_support_worker', 'airbnb.audit_events', 'SELECT'),
+  'runtime workers cannot rewrite or read the human audit log'
+);
+
+select ok(
+  (
+    select count(*)
+    from pg_policies
+    where schemaname = 'airbnb'
+      and tablename = 'job_runs'
+      and policyname in (
+        'airbnb cleaner job access',
+        'airbnb stock job access',
+        'airbnb support job access'
+      )
+  ) = 3,
+  'job receipts have one service-bound policy per worker'
+);
+
+select ok(
+  (
+    select count(*)
+    from pg_policies
+    where schemaname = 'airbnb'
+      and tablename in ('alerts', 'evidence')
+      and policyname in (
+        'airbnb cleaner alert access',
+        'airbnb stock alert access',
+        'airbnb support alert access',
+        'airbnb cleaner evidence access',
+        'airbnb stock evidence access',
+        'airbnb support evidence access'
+      )
+  ) = 6,
+  'shared alerts and evidence are partitioned by worker domain'
 );
 
 select * from finish();
