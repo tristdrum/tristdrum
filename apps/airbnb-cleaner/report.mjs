@@ -1127,17 +1127,23 @@ export async function whatsappSend(
   throw lastError ?? new Error(`WhatsApp ${dryRun ? "dry-run" : "send"} failed.`);
 }
 
-export async function sendFinalFailureAlert({ targetDate, runId }) {
+export async function sendFinalFailureAlert({ targetDate, runId, reason = "delivery" }) {
   const alertChatId = String(process.env.AIRBNB_WHATSAPP_ALERT_CHAT_ID ?? "").trim();
   const cleanersChatId = whatsappConfig().chatId;
   if (!alertChatId) throw new Error("Private failure-alert chat is not configured.");
   if (alertChatId === cleanersChatId) throw new Error("Failure alerts may not target the cleaners chat.");
-  const text = [
-    `Airbnb cleaner report failed after the final cloud retry for ${targetDate}.`,
-    `Run: ${runId}`,
-    "Check the private Fly status endpoint and sanitized run receipt.",
-  ].join("\n");
-  const idempotencyKey = `airbnb-cleaner-failure:${targetDate}:${runId}`;
+  const text = reason === "database_sync"
+    ? [
+      `Airbnb cleaner plan was delivered for ${targetDate}, but its database mirror failed after the final retry.`,
+      `Run: ${runId}`,
+      "The cleaners message remains valid. Check the private Fly status endpoint before stock forecasting.",
+    ].join("\n")
+    : [
+      `Airbnb cleaner report failed after the final cloud retry for ${targetDate}.`,
+      `Run: ${runId}`,
+      "Check the private Fly status endpoint and sanitized run receipt.",
+    ].join("\n");
+  const idempotencyKey = `airbnb-cleaner-failure:${reason}:${targetDate}:${runId}`;
   await whatsappSend({ text, dryRun: true, idempotencyKey, targetChatId: alertChatId });
   const sent = await whatsappSend({ text, dryRun: false, idempotencyKey, targetChatId: alertChatId });
   return { sent: true, attempts: sent.attempts };
@@ -1275,14 +1281,19 @@ export async function collectReservations(
   targetDate,
   searchDays,
   maxRead,
-  collectMessagesFn = collectAirbnbMessages
+  collectMessagesFn = collectAirbnbMessages,
+  futureHorizonDays = 7
 ) {
   const afterDate = formatISODate(addDays(targetDate, -searchDays));
+  const horizonDates = Array.from(
+    { length: Math.max(1, futureHorizonDays) },
+    (_, index) => addDays(targetDate, index),
+  );
   const collected = await collectMessagesFn({
     afterDate,
     maxRead,
     candidateEnvelope,
-    subjectMayTouchTarget: (subject) => subjectMayTouchTarget(subject, targetDate),
+    subjectMayTouchTarget: (subject) => horizonDates.some((date) => subjectMayTouchTarget(subject, date)),
     describeEvidence: ({ envelope, body }) => {
       const evidenceKind = reservationEvidenceKind(envelope.subject, body);
       return {
@@ -1317,6 +1328,7 @@ export async function collectReservations(
 
   return {
     reservations: mergeReservations(parsed),
+    evidence: parsed,
     envelopesFound: collected.envelopesFound,
     envelopesRead: collected.messages.length,
     unmatchedUpdateCount,
@@ -1422,6 +1434,8 @@ export async function runReport({
     idempotencyKey,
     message,
     chatRead: mode === "preview" ? null : { ok: true, messageCount: chatMessages.length },
+    reservations: collected.reservations,
+    reservationEvidence: collected.evidence,
   };
 
   if (!confidence.ok) {

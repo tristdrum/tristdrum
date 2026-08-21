@@ -119,6 +119,18 @@ verification, duplicate checks, independent monitoring, and a rollback window.
 
 ## Validation and rollout
 
+### Fly account routing
+
+- Run every command for `tristdrum-airbnb-cleaner`,
+  `tristdrum-airbnb-stock`, and `tristdrum-airbnb-support` through
+  `/Users/tristdrum/.local/bin/fly-personal`.
+- Never use bare `fly` or `flyctl` for this platform. The shared login may belong
+  to another concurrent Codex task, while the scoped helper remains bound to
+  Tristan's personal Fly organization.
+- Verify the helper with `fly-personal auth whoami` and
+  `fly-personal status --app <app>` before a production mutation. Never print,
+  export, inspect, or copy the underlying Keychain token.
+
 - Keep all existing cleaner tests green and replay the confirmed-only historical
   corpus against the migrated implementation.
 - Add regression coverage for Jane's `automated@airbnb.com` notifications versus
@@ -153,4 +165,3 @@ verification, duplicate checks, independent monitoring, and a rollback window.
 - No autonomous guest reply can race or duplicate a human response.
 - Every external action is attributable through a sanitized audit record.
 - Old infrastructure is not deleted until the seven-day rollback period ends.
-

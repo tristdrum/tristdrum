@@ -46,6 +46,15 @@ export function parseConversationEntries(body) {
   return entries;
 }
 
+export function conversationEntryKey(providerThreadId, entry) {
+  return [
+    String(providerThreadId ?? "").trim(),
+    Number(entry?.sequence ?? -1),
+    String(entry?.direction ?? "unknown"),
+    String(entry?.contentHash ?? "").trim(),
+  ].join(":");
+}
+
 export function parseAirbnbConversationEmail({
   providerMessageId,
   subject,

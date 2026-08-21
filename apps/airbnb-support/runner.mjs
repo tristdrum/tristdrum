@@ -91,12 +91,18 @@ export async function runSupportShadow({
     }
 
     const candidateSince = new Date(startedAt.getTime() - 24 * 60 * 60 * 1000);
-    const candidates = await loadShadowCandidates(ownDatabase.sql, { householdId, since: candidateSince });
+    const candidates = await loadShadowCandidates(ownDatabase.sql, {
+      householdId,
+      since: candidateSince,
+      limit: Number.parseInt(env.AIRBNB_SUPPORT_CANDIDATE_LIMIT ?? "8", 10),
+    });
     const drafts = [];
     let classificationFailureCount = 0;
-    for (const candidate of candidates) {
+    const classifyAndStore = async (candidate) => {
       let classification;
-      try {
+      if (candidate.existingClassification) {
+        classification = candidate.existingClassification;
+      } else try {
         classification = await classify({
           guestMessage: candidate.guestMessage,
           listingName: candidate.listingName,
@@ -107,12 +113,16 @@ export async function runSupportShadow({
         classificationFailureCount += 1;
         classification = fallbackClassification(error);
       }
-      drafts.push(await storeShadowDraft(ownDatabase.sql, {
+      return storeShadowDraft(ownDatabase.sql, {
         householdId,
         candidate,
         classification,
         now: startedAt,
-      }));
+      });
+    };
+    const concurrency = Math.max(1, Math.min(4, Number.parseInt(env.AIRBNB_SUPPORT_CLASSIFICATION_CONCURRENCY ?? "4", 10)));
+    for (let index = 0; index < candidates.length; index += concurrency) {
+      drafts.push(...await Promise.all(candidates.slice(index, index + concurrency).map(classifyAndStore)));
     }
 
     const receipt = {

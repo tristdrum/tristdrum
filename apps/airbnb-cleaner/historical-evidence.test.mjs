@@ -136,6 +136,24 @@ test("an unrelated historical update without an anchor does not block the target
   assert.equal(collected.unmatchedUpdateCount, 0);
 });
 
+test("collection includes the seven-day stock horizon without widening the cleaner target", async () => {
+  let subjectFilter;
+  const collected = await collectReservations(
+    parseISODate("2026-08-14"),
+    90,
+    80,
+    async (options) => {
+      subjectFilter = options.subjectMayTouchTarget;
+      return { envelopesFound: 0, messages: [] };
+    },
+  );
+
+  assert.equal(subjectFilter("Reservation confirmed - Future Guest arrives Aug 20"), true);
+  assert.equal(subjectFilter("Reservation confirmed - Later Guest arrives Aug 21"), false);
+  assert.deepEqual(collected.reservations, []);
+  assert.deepEqual(collected.evidence, []);
+});
+
 test("a blocked overlap performs no WhatsApp write", async () => {
   const priorEnv = {
     baseUrl: process.env.MINCOOL_CUSTOMER_WHATSAPP_API_BASE_URL,

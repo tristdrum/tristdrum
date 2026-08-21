@@ -81,7 +81,9 @@ export function createAirbnbStockServer({
       }
       json(response, 404, { error: "not_found" });
     } catch (error) {
-      const statusCode = error.code === "BODY_TOO_LARGE" ? 413 : 500;
+      const statusCode = error.code === "BODY_TOO_LARGE" ? 413
+        : error.code === "RUN_IN_PROGRESS" ? 409
+          : 500;
       json(response, statusCode, { error: "request_failed", code: error.code ?? null });
     }
   });

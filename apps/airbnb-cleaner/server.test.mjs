@@ -122,6 +122,55 @@ test("only a final failed attempt sends the private failure alert", async () => 
   assert.equal(alerts[0].targetDate, "2026-08-07");
 });
 
+test("a final successful delivery privately alerts when its database mirror still fails", async () => {
+  const alerts = [];
+  const dependencies = {
+    runReport: async () => successfulResult("live", "2026-08-08"),
+    syncDatabase: async () => { throw new Error("safe database test failure"); },
+    sendFinalFailureAlert: async (value) => {
+      alerts.push(value);
+      return { sent: true, attempts: 1 };
+    },
+  };
+  await withServer(dependencies, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/run`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ mode: "live", target: "2026-08-08", finalAttempt: true }),
+    });
+    assert.equal(response.status, 200);
+    const receipt = await response.json();
+    assert.equal(receipt.status, "sent");
+    assert.equal(receipt.databaseSync.status, "error");
+    assert.equal(receipt.failureAlert.sent, true);
+  });
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].targetDate, "2026-08-08");
+  assert.equal(alerts[0].reason, "database_sync");
+});
+
+test("status remains degraded when both the database mirror and its private alert fail", async () => {
+  const dependencies = {
+    runReport: async () => successfulResult("live", "2026-08-09"),
+    syncDatabase: async () => { throw new Error("safe database test failure"); },
+    sendFinalFailureAlert: async () => { throw new Error("safe alert test failure"); },
+  };
+  await withServer(dependencies, async (baseUrl) => {
+    const run = await fetch(`${baseUrl}/run`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ mode: "live", target: "2026-08-09", finalAttempt: true }),
+    });
+    assert.equal(run.status, 200);
+    const status = await fetch(`${baseUrl}/status?date=2026-08-09`, { headers: authHeaders() });
+    assert.equal(status.status, 503);
+    const receipt = await status.json();
+    assert.equal(receipt.status, "sent");
+    assert.equal(receipt.databaseSync.status, "error");
+    assert.equal(receipt.failureAlert.sent, false);
+  });
+});
+
 test("relative final failures keep their calendar status and an earlier success", async () => {
   const targetDate = "2030-01-15";
   const fixedNow = new Date("2030-01-15T08:00:00.000Z");

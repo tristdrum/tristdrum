@@ -5,6 +5,7 @@ import {
   buildShoppingList,
   canonicalConversationActor,
   classifyInventorySku,
+  conversationEntryKey,
   decideOrderEvidence,
   finalSendDecision,
   forecastInventoryDemand,
@@ -119,18 +120,32 @@ test("support auto-reply gate is whitelist and verified-facts only", () => {
     riskTier: "low",
     factsVerified: true,
     confidence: 0.97,
+    replyNeeded: true,
+    draft: "The verified Wi-Fi details are available.",
   }).autoReply, true);
   assert.equal(supportDisposition({
     topic: "refund",
     riskTier: "low",
     factsVerified: true,
     confidence: 0.99,
+    replyNeeded: true,
+    draft: "A refund has been approved.",
   }).autoReply, false);
   assert.equal(supportDisposition({
     topic: "wifi",
     riskTier: "low",
     factsVerified: false,
     confidence: 0.99,
+    replyNeeded: true,
+    draft: "Use an unverified password.",
+  }).autoReply, false);
+  assert.equal(supportDisposition({
+    topic: "thanks",
+    riskTier: "low",
+    factsVerified: true,
+    confidence: 0.99,
+    replyNeeded: false,
+    draft: null,
   }).autoReply, false);
 });
 
@@ -232,4 +247,12 @@ test("Airbnb conversation parser treats every Host event as human without inferr
   assert.deepEqual(parsed.entries.map((entry) => entry.direction), ["guest", "host"]);
   assert.equal(parsed.entries[1].name, "JANE");
   assert.equal(parsed.listingName, "JASMINE STUDIO STAY");
+});
+
+test("identical repeated guest messages retain distinct stable conversation keys", () => {
+  const shared = { direction: "guest", contentHash: "same-content" };
+  const first = conversationEntryKey("thread-1", { ...shared, sequence: 0 });
+  const second = conversationEntryKey("thread-1", { ...shared, sequence: 1 });
+  assert.notEqual(first, second);
+  assert.equal(first, conversationEntryKey("thread-1", { ...shared, sequence: 0 }));
 });

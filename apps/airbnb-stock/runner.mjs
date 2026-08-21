@@ -17,6 +17,7 @@ import {
   ingestOrderEvidence,
   latestStockRun,
   loadForecastInputs,
+  reconcileReservationConsumption,
   storeShoppingList,
 } from "./repository.mjs";
 
@@ -35,6 +36,14 @@ function addDays(isoDate, days) {
   const value = new Date(`${isoDate}T12:00:00Z`);
   value.setUTCDate(value.getUTCDate() + days);
   return value.toISOString().slice(0, 10);
+}
+
+export function stockPlanningWindow(runDate) {
+  return {
+    consumptionThroughDate: runDate,
+    forecastStartDate: addDays(runDate, 1),
+    forecastEndDate: addDays(runDate, 6),
+  };
 }
 
 function deliveryDueAt(occurredAt, eta) {
@@ -91,9 +100,20 @@ export async function runStockObservation({
     }
 
     const startDate = localDate(startedAt);
-    const endDate = addDays(startDate, 6);
-    const inputs = await loadForecastInputs(ownDatabase.sql, { householdId, startDate, endDate });
-    const forecast = forecastInventoryDemand({ reservations: inputs.reservations, startDate });
+    const planningWindow = stockPlanningWindow(startDate);
+    const consumption = await reconcileReservationConsumption(ownDatabase.sql, {
+      householdId,
+      throughDate: planningWindow.consumptionThroughDate,
+    });
+    const inputs = await loadForecastInputs(ownDatabase.sql, {
+      householdId,
+      startDate: planningWindow.forecastStartDate,
+      endDate: planningWindow.forecastEndDate,
+    });
+    const forecast = forecastInventoryDemand({
+      reservations: inputs.reservations,
+      startDate: planningWindow.forecastStartDate,
+    });
     const projections = projectInventory({ inventoryItems: inputs.inventory, forecast });
     const list = buildShoppingList({ projections });
     const storedList = await storeShoppingList(ownDatabase.sql, { householdId, forecast, list });
@@ -105,11 +125,14 @@ export async function runStockObservation({
       fullReview,
       startedAt: startedAt.toISOString(),
       completedAt: now().toISOString(),
+      planningWindow,
       emailsFound: collected.envelopesFound,
       evidenceProcessed: evidenceResults.length,
       invoiceCount: evidenceResults.filter((result) => result.kind === "invoice").length,
       creditedInvoiceCount: evidenceResults.filter((result) => result.inventoryCredited).length,
       ignoredInvoiceCount: evidenceResults.filter((result) => result.ignored).length,
+      consumptionMovementCount: consumption.applied,
+      reversedConsumptionCount: consumption.reversed,
       reservationCount: inputs.reservations.length,
       inventoryItemCount: inputs.inventory.length,
       urgentItemCount: projections.filter((item) => item.urgent).length,

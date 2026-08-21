@@ -3,6 +3,7 @@
 import { timingSafeEqual, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
+import { syncCleanerDatabase } from "./database.mjs";
 import { formatISODate, parseISODate, resolveTargetDate, runReport, sendFinalFailureAlert } from "./report.mjs";
 import {
   acquireRunLock,
@@ -87,6 +88,11 @@ function publicReceipt(receipt, result = null) {
   };
 }
 
+function statusCodeForReceipt(receipt) {
+  if (receipt?.databaseSync?.status === "error" && receipt?.failureAlert?.sent !== true) return 503;
+  return 200;
+}
+
 async function handleRun(request, response, dependencies) {
   const body = await readJson(request);
   const mode = body.mode ?? "live";
@@ -103,6 +109,31 @@ async function handleRun(request, response, dependencies) {
     const result = await dependencies.runReport({ mode, targetDate, deliveryAttemptId: runId });
     const completedAt = dependencies.now().toISOString();
     const receipt = sanitizeRunResult(result, { runId, startedAt, completedAt, finalAttempt });
+    try {
+      const databaseSync = await dependencies.syncDatabase({ result, receipt });
+      if (databaseSync?.status !== "disabled") receipt.databaseSync = databaseSync;
+    } catch (databaseError) {
+      receipt.databaseSync = {
+        status: "error",
+        code: databaseError.code ?? null,
+        message: String(databaseError.message ?? "Database synchronization failed.").slice(0, 200),
+      };
+    }
+    if (
+      finalAttempt
+      && receipt.databaseSync?.status === "error"
+      && ["sent", "duplicate_skipped"].includes(result.status)
+    ) {
+      try {
+        receipt.failureAlert = await dependencies.sendFinalFailureAlert({
+          targetDate: result.targetDate,
+          runId,
+          reason: "database_sync",
+        });
+      } catch (alertError) {
+        receipt.failureAlert = { sent: false, error: String(alertError.message).slice(0, 200) };
+      }
+    }
     persistRun(receipt);
     if (result.status === "blocked") {
       if (finalAttempt) {
@@ -139,6 +170,7 @@ export function createAirbnbCleanerServer(dependencies = {}) {
   const resolved = {
     runReport: dependencies.runReport ?? runReport,
     sendFinalFailureAlert: dependencies.sendFinalFailureAlert ?? sendFinalFailureAlert,
+    syncDatabase: dependencies.syncDatabase ?? syncCleanerDatabase,
     now: dependencies.now ?? (() => new Date()),
   };
   return createServer(async (request, response) => {
@@ -163,7 +195,7 @@ export function createAirbnbCleanerServer(dependencies = {}) {
           return;
         }
         const receipt = loadStatus(date);
-        json(response, receipt ? 200 : 404, receipt ?? { error: "not_found" });
+        json(response, receipt ? statusCodeForReceipt(receipt) : 404, receipt ?? { error: "not_found" });
         return;
       }
       json(response, 404, { error: "not_found" });
