@@ -1,0 +1,32 @@
+app = "tristdrum-airbnb-stock"
+primary_region = "jnb"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  AIRBNB_SERVICE_NAME = "airbnb-stock"
+  AIRBNB_STOCK_LOOKBACK_DAYS = "120"
+  AIRBNB_STOCK_MAX_EMAILS = "400"
+  JANE_GMAIL_USER = "janeannechubb@gmail.com"
+  PORT = "3000"
+  TZ = "Africa/Johannesburg"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256
