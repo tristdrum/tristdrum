@@ -1,0 +1,37 @@
+app = "tristdrum-airbnb-cleaner"
+primary_region = "jnb"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  AIRBNB_CLEANER_HOME = "/data"
+  AIRBNB_WHATSAPP_CHAT_NAME = "Airbnbs"
+  PORT = "3000"
+  TZ = "Africa/Johannesburg"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/healthz"
+
+[[mounts]]
+  source = "airbnb_cleaner_data"
+  destination = "/data"
+  auto_extend_size_threshold = 80
+  auto_extend_size_increment = "1GB"
+  auto_extend_size_limit = "2GB"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256
