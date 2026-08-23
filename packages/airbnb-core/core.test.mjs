@@ -223,6 +223,7 @@ test("Sixty60 ignores other senders and unrelated household groceries", () => {
   assert.equal(parseSixty60Message({ from: "offers@example.com", subject: "Sixty60 invoice", body: "Order No 123456" }), null);
   assert.equal(classifyInventorySku("Selati Golden Brown Sugar 2kg"), null);
   assert.equal(classifyInventorySku("Individually wrapped buttermilk rusks 20 Pack"), "wrapped_rusk");
+  assert.equal(classifyInventorySku("NESCAF Gold Cappuccino Sticks 20 x 18g"), "coffee_portion");
   assert.equal(classifyInventorySku("Bakers Choc-kits Classic Chocolate Oat Biscuits 200g"), null);
   assert.equal(classifyInventorySku("Magnum Death By Chocolate Flavoured Ice Cream 100ml"), null);
   assert.equal(classifyInventorySku("Staffords Magicmelt Choc Chips Box 250g"), null);

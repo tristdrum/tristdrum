@@ -23,7 +23,9 @@ export function classifyInventorySku(description) {
     && !/\b(biscuits?|cookies?|ice cream|choc(?:olate)? chips?|slab|powder|spread|cake)\b/.test(name)
   ) return "guest_chocolate";
   if (/\brusk/.test(name) && /(?:individually|single|wrapped|portion)/.test(name)) return "wrapped_rusk";
-  if (/\bcoffee\b/.test(name) && /(?:stick|sachet|portion|single)/.test(name)) return "coffee_portion";
+  if (/\b(coffee|cappuccino|nescaf(?:e|\u00e9)?)\b/.test(name) && /(?:stick|sachet|portion|single)/.test(name)) {
+    return "coffee_portion";
+  }
   if (/\bsugar\b/.test(name) && /(?:stick|sachet|portion|single)/.test(name)) return "sugar_portion";
   if (/\btoilet\b/.test(name) && /\b(roll|tissue|paper)\b/.test(name)) return "toilet_roll";
   if (/\b(refuse|garbage|bin)\b/.test(name) && /\bbag/.test(name)) return "refuse_bag";
