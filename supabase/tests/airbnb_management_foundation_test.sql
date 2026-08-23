@@ -1,6 +1,6 @@
 begin;
 
-select plan(32);
+select plan(41);
 
 insert into auth.users (id, email)
 values ('00000000-0000-0000-0000-00000000a001', 'airbnb-dashboard-test@example.invalid');
@@ -395,6 +395,63 @@ select is(
   'reply review transitions the draft to approved'
 );
 
+update airbnb.reply_deliveries
+set status = 'ambiguous',
+    send_attempt_count = 1,
+    send_attempted_at = now(),
+    last_delivery_error = 'fixture ambiguous result'
+where id = '00000000-0000-0000-0000-000000001001';
+
+insert into airbnb.alerts (
+  household_id, alert_type, severity, status, dedupe_key, summary, details
+) values (
+  '00000000-0000-0000-0000-00000000b001',
+  'guest_overdue',
+  'critical',
+  'suppressed',
+  'fixture-ambiguous-delivery',
+  'Fixture ambiguous delivery',
+  jsonb_build_object(
+    'threadId', '00000000-0000-0000-0000-00000000f001',
+    'replyDeliveryId', '00000000-0000-0000-0000-000000001001',
+    'stage', 'delivery_ambiguous'
+  )
+);
+
+select is(
+  public.airbnb_review_reply(
+    '00000000-0000-0000-0000-000000001001',
+    'retry',
+    null
+  )->>'status',
+  'approved',
+  'ambiguous reply can be explicitly requeued after Sent-mail review'
+);
+
+select ok(
+  (select send_attempt_count = 0 and send_attempted_at is null and last_delivery_error is null
+   from airbnb.reply_deliveries
+   where id = '00000000-0000-0000-0000-000000001001')
+  and (select status = 'resolved'
+       from airbnb.alerts
+       where dedupe_key = 'fixture-ambiguous-delivery'),
+  'explicit retry clears ambiguous attempt state and resolves its alert'
+);
+
+update airbnb.reply_deliveries
+set status = 'ambiguous', send_attempt_count = 1, send_attempted_at = now()
+where id = '00000000-0000-0000-0000-000000001001';
+
+select is(
+  public.airbnb_review_reply(
+    '00000000-0000-0000-0000-000000001001',
+    'mark_sent',
+    null
+  )->>'status',
+  'sent',
+  'ambiguous reply can be explicitly reconciled as sent'
+);
+
 select is(
   public.airbnb_update_order_status(
     '00000000-0000-0000-0000-000000002001',
@@ -462,12 +519,17 @@ select ok(
       'airbnb-stock-email-poll-30m',
       'airbnb-stock-email-poll-1900-utc',
       'airbnb-stock-weekly-review-0700-utc',
+      'airbnb-stock-management-alerts-10-40',
       'airbnb-support-shadow-poll-5m'
     )
       and not active
       and command not like '%mincool-airbnb-cleaner%'
-  ) = 4,
-  'stock and support observers are installed dormant on personal Fly apps'
+      and (
+        jobname <> 'airbnb-stock-management-alerts-10-40'
+        or (command like '%mode%live%' and command like '%fullReview%false%')
+      )
+  ) = 5,
+  'stock observers, gated Management delivery, and support shadow are installed dormant on personal Fly apps'
 );
 
 select ok(
@@ -508,6 +570,72 @@ select ok(
       )
   ) = 6,
   'shared alerts and evidence are partitioned by worker domain'
+);
+
+select ok(
+  (
+    select count(*)
+    from information_schema.columns
+    where table_schema = 'airbnb'
+      and table_name = 'reply_deliveries'
+      and column_name in (
+        'send_attempt_count', 'send_attempted_at', 'last_reconciled_at', 'last_delivery_error'
+      )
+  ) = 4,
+  'reply deliveries retain guarded send and reconciliation state'
+);
+
+select ok(
+  exists (
+    select 1
+    from pg_constraint constraint_info
+    where constraint_info.conrelid = 'airbnb.reply_deliveries'::regclass
+      and constraint_info.conname = 'airbnb_reply_deliveries_idempotency_key'
+      and pg_get_constraintdef(constraint_info.oid) = 'UNIQUE (household_id, idempotency_key)'
+  ),
+  'reply delivery idempotency is scoped to one household'
+);
+
+select ok(
+  has_table_privilege('airbnb_support_worker', 'airbnb.audit_events', 'INSERT')
+  and not has_table_privilege('airbnb_support_worker', 'airbnb.audit_events', 'SELECT')
+  and not has_table_privilege('airbnb_support_worker', 'airbnb.audit_events', 'UPDATE')
+  and not has_table_privilege('airbnb_support_worker', 'airbnb.audit_events', 'DELETE'),
+  'support can append delivery audit evidence without reading or rewriting it'
+);
+
+select ok(
+  exists (
+    select 1
+    from pg_policies
+    where schemaname = 'airbnb'
+      and tablename = 'audit_events'
+      and policyname = 'airbnb support audit insert'
+      and cmd = 'INSERT'
+      and with_check like '%actor_id = ''support''%'
+  ),
+  'support audit inserts are household and actor scoped'
+);
+
+select ok(
+  has_table_privilege('airbnb_stock_worker', 'airbnb.audit_events', 'INSERT')
+  and not has_table_privilege('airbnb_stock_worker', 'airbnb.audit_events', 'SELECT')
+  and not has_table_privilege('airbnb_stock_worker', 'airbnb.audit_events', 'UPDATE')
+  and not has_table_privilege('airbnb_stock_worker', 'airbnb.audit_events', 'DELETE'),
+  'stock can append notification audit evidence without reading or rewriting it'
+);
+
+select ok(
+  exists (
+    select 1
+    from pg_policies
+    where schemaname = 'airbnb'
+      and tablename = 'audit_events'
+      and policyname = 'airbnb stock audit insert'
+      and cmd = 'INSERT'
+      and with_check like '%actor_id = ''stock''%'
+  ),
+  'stock audit inserts are household and actor scoped'
 );
 
 select * from finish();

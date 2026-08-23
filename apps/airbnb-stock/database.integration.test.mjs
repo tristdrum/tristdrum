@@ -7,9 +7,10 @@ import {
   recordJobFinish,
   recordJobStart,
 } from "@tristdrum/airbnb-db";
-import { syncCleanerDatabase } from "../airbnb-cleaner/database.mjs";
+import { loadCleanerLedgerRecords, syncCleanerDatabase } from "../airbnb-cleaner/database.mjs";
 import {
   ingestOrderEvidence,
+  loadSuppressedStockAlerts,
   reconcileReservationConsumption,
   storeShoppingList,
 } from "./repository.mjs";
@@ -216,6 +217,52 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
     assert.equal(Array.isArray(await support.sql`select id from airbnb.guest_messages`), true);
     assert.equal(Array.isArray(await cleaner.sql`select id from airbnb.cleaner_plans`), true);
 
+    const supportAuditEntityId = randomUUID();
+    await support.sql`
+      insert into airbnb.audit_events (
+        household_id, actor_type, actor_id, action, entity_type, entity_id
+      ) values (
+        ${householdId}, 'worker', 'support', 'integration_guard_checked',
+        'reply_delivery', ${supportAuditEntityId}
+      )
+    `;
+    assert.equal((await admin`
+      select count(*)::integer as count
+      from airbnb.audit_events
+      where household_id = ${householdId} and entity_id = ${supportAuditEntityId}
+    `)[0].count, 1);
+    await assert.rejects(support.sql`
+      insert into airbnb.audit_events (
+        household_id, actor_type, actor_id, action, entity_type, entity_id
+      ) values (
+        ${householdId}, 'worker', 'stock', 'integration_spoofed',
+        'reply_delivery', ${randomUUID()}
+      )
+    `, { code: "42501" });
+
+    const stockAuditEntityId = randomUUID();
+    await stock.sql`
+      insert into airbnb.audit_events (
+        household_id, actor_type, actor_id, action, entity_type, entity_id
+      ) values (
+        ${householdId}, 'worker', 'stock', 'integration_alert_notified',
+        'alert', ${stockAuditEntityId}
+      )
+    `;
+    assert.equal((await admin`
+      select count(*)::integer as count
+      from airbnb.audit_events
+      where household_id = ${householdId} and entity_id = ${stockAuditEntityId}
+    `)[0].count, 1);
+    await assert.rejects(stock.sql`
+      insert into airbnb.audit_events (
+        household_id, actor_type, actor_id, action, entity_type, entity_id
+      ) values (
+        ${householdId}, 'worker', 'support', 'integration_spoofed',
+        'alert', ${randomUUID()}
+      )
+    `, { code: "42501" });
+
     const confirmationCode = `INTEGRATION-MIRROR-${randomUUID()}`;
     const confirmed = cleanerPayload({
       runId: randomUUID(),
@@ -229,6 +276,52 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
     };
     assert.equal((await syncCleanerDatabase({ ...confirmed, env: cleanerEnv })).status, "synced");
     assert.equal((await syncCleanerDatabase({ ...confirmed, env: cleanerEnv })).status, "synced");
+    const cleanerLedger = await loadCleanerLedgerRecords({
+      targetDate: confirmed.result.targetDate,
+      env: cleanerEnv,
+    });
+    assert.equal(cleanerLedger.status, "loaded");
+    assert.equal(cleanerLedger.records.some((record) => (
+      record.messageHash === confirmed.result.messageHash
+      && record.source === "supabase"
+    )), true);
+    const blockedAfterSend = {
+      receipt: {
+        ...confirmed.receipt,
+        runId: randomUUID(),
+        status: "blocked",
+        startedAt: "2026-08-21T18:02:00.000Z",
+        completedAt: "2026-08-21T18:02:01.000Z",
+      },
+      result: {
+        ...confirmed.result,
+        status: "blocked",
+        confidence: { ok: false, blockers: ["Integration overlap"] },
+      },
+    };
+    assert.equal((await syncCleanerDatabase({ ...blockedAfterSend, env: cleanerEnv })).status, "synced");
+    const preservedPlan = (await admin`
+      select delivery_status, sent_at
+      from airbnb.cleaner_plans
+      where household_id = ${householdId}
+        and target_date = ${confirmed.result.targetDate}
+        and message_hash = ${confirmed.result.messageHash}
+    `)[0];
+    assert.equal(preservedPlan.delivery_status, "duplicate_skipped");
+    assert.ok(preservedPlan.sent_at);
+    const ledgerAfterBlock = await loadCleanerLedgerRecords({
+      targetDate: confirmed.result.targetDate,
+      env: cleanerEnv,
+    });
+    assert.equal(ledgerAfterBlock.records.some((record) => (
+      record.messageHash === confirmed.result.messageHash
+    )), true);
+    const mirroredRun = (await admin`
+      select receipt
+      from airbnb.job_runs
+      where service = 'cleaner' and run_id = ${confirmed.receipt.runId}
+    `)[0];
+    assert.equal(mirroredRun.receipt.databaseSync.status, "synced");
     let mirrored = await admin`
       select booking_status, revision, adults, children, infants
       from airbnb.reservations
@@ -447,6 +540,13 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
     assert.equal(listStatuses.filter((row) => row.status === "draft").length, 1);
     assert.equal(listStatuses.filter((row) => row.status === "superseded").length, 1);
     assert.equal(listStatuses.find((row) => row.status === "draft").id, secondShoppingList.id);
+    let linkedAlertStates = await admin`
+      select details->>'shoppingListId' as shopping_list_id, status
+      from airbnb.alerts
+      where household_id = ${householdId} and alert_type = 'stock_low'
+    `;
+    assert.equal(linkedAlertStates.find((row) => row.shopping_list_id === firstShoppingList.id).status, "resolved");
+    assert.equal(linkedAlertStates.find((row) => row.shopping_list_id === secondShoppingList.id).status, "suppressed");
 
     const restoredShoppingList = await storeShoppingList(stock.sql, {
       householdId,
@@ -471,6 +571,37 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
     assert.equal(restoredShoppingList.id, firstShoppingList.id);
     assert.equal(listStatuses.filter((row) => row.status === "draft").length, 1);
     assert.equal(listStatuses.find((row) => row.status === "draft").id, firstShoppingList.id);
+    linkedAlertStates = await admin`
+      select details->>'shoppingListId' as shopping_list_id, status
+      from airbnb.alerts
+      where household_id = ${householdId} and alert_type = 'stock_low'
+    `;
+    assert.equal(linkedAlertStates.find((row) => row.shopping_list_id === firstShoppingList.id).status, "suppressed");
+    assert.equal(linkedAlertStates.find((row) => row.shopping_list_id === secondShoppingList.id).status, "resolved");
+    const currentAlerts = await loadSuppressedStockAlerts(stock.sql, {
+      householdId,
+      now: new Date(),
+      limit: 24,
+    });
+    assert.deepEqual(
+      currentAlerts.filter((alert) => alert.alertType === "stock_low").map((alert) => alert.shoppingList.id),
+      [firstShoppingList.id],
+    );
+    assert.equal(await storeShoppingList(stock.sql, {
+      householdId,
+      forecast: shoppingForecast,
+      list: { estimatedTotalCents: 0, countsToConfirm: [], items: [] },
+    }), null);
+    assert.equal((await admin`
+      select count(*)::integer as count
+      from airbnb.shopping_lists
+      where household_id = ${householdId} and status = 'draft'
+    `)[0].count, 0);
+    assert.equal((await loadSuppressedStockAlerts(stock.sql, {
+      householdId,
+      now: new Date(),
+      limit: 24,
+    })).some((alert) => alert.alertType === "stock_low"), false);
 
     const orderNumber = randomUUID();
     const invoiceMessage = {

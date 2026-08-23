@@ -625,13 +625,15 @@ function ReplyReviewRow({
 }) {
   const [text, setText] = useState(delivery.finalText ?? delivery.draftText ?? '')
   const reviewable = ['draft', 'needs_approval', 'approved', 'failed'].includes(delivery.status)
+  const ambiguous = delivery.status === 'ambiguous'
 
   useEffect(() => {
     setText(delivery.finalText ?? delivery.draftText ?? '')
   }, [delivery.draftText, delivery.finalText])
 
   const submit = async (action: AirbnbReplyReviewAction) => {
-    await onReview(delivery.id, action, action === 'cancel' ? null : text.trim() || null)
+    const editedText = ['save', 'approve'].includes(action) ? text.trim() || null : null
+    await onReview(delivery.id, action, editedText)
   }
 
   return (
@@ -663,6 +665,22 @@ function ReplyReviewRow({
           <button type="button" className="is-primary" onClick={() => void submit('approve')} disabled={busy || !text.trim()}>
             <Check size={15} aria-hidden />
             <span>Approve</span>
+          </button>
+          <button type="button" className="is-danger" onClick={() => void submit('cancel')} disabled={busy}>
+            <X size={15} aria-hidden />
+            <span>Cancel</span>
+          </button>
+        </div>
+      ) : null}
+      {ambiguous ? (
+        <div className="airbnb-actions">
+          <button type="button" onClick={() => void submit('mark_sent')} disabled={busy}>
+            <CheckCircle2 size={15} aria-hidden />
+            <span>Mark sent</span>
+          </button>
+          <button type="button" className="is-primary" onClick={() => void submit('retry')} disabled={busy}>
+            <RefreshCw size={15} aria-hidden />
+            <span>Retry</span>
           </button>
           <button type="button" className="is-danger" onClick={() => void submit('cancel')} disabled={busy}>
             <X size={15} aria-hidden />

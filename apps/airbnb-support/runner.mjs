@@ -8,14 +8,19 @@ import {
   sanitizedError,
 } from "@tristdrum/airbnb-db";
 import { classifyGuestMessage } from "./classifier.mjs";
+import { processDeliveryGuard } from "./delivery.mjs";
 import { collectConversationMessages } from "./gmail.mjs";
+import { notifySupportManagement } from "./management.mjs";
 import {
   ingestConversation,
+  ingestSupplementalConversation,
   latestConversationEvidenceAt,
   latestSupportRun,
+  loadDeliveryGuardCandidates,
   loadShadowCandidates,
-  storeShadowDraft,
+  storeSupportDraft,
 } from "./repository.mjs";
+import { assertSupportModeAllowed } from "./runtime.mjs";
 
 function localDate(value) {
   return new Intl.DateTimeFormat("en-CA", {
@@ -50,13 +55,17 @@ function fallbackClassification(error) {
   };
 }
 
-export async function runSupportShadow({
+export async function runSupport({
+  mode = "shadow",
   now = () => new Date(),
   collectMessages = collectConversationMessages,
   classify = classifyGuestMessage,
+  processDelivery = processDeliveryGuard,
+  notifyManagement = notifySupportManagement,
   database = null,
   env = process.env,
 } = {}) {
+  const capabilities = assertSupportModeAllowed(mode, env);
   const runId = randomUUID();
   const startedAt = now();
   const ownDatabase = database ?? createAirbnbDatabase({ env, postgresFactory: postgres });
@@ -66,28 +75,79 @@ export async function runSupportShadow({
     await recordJobStart(ownDatabase.sql, {
       householdId,
       service: "support",
-      jobName: "shadow-poll",
+      jobName: mode === "live" ? "live-poll" : "shadow-poll",
       runId,
       targetDate: localDate(startedAt),
       startedAt,
     });
     started = true;
-    const cursor = await latestConversationEvidenceAt(ownDatabase.sql, householdId);
+    const janeUserConfigured = Boolean(String(env.AIRBNB_SUPPORT_JANE_GMAIL_USER ?? "").trim());
+    const janePasswordConfigured = Boolean(String(env.AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD ?? "").trim());
+    const janeConfigured = janeUserConfigured && janePasswordConfigured;
+    const [cursor, janeCursor] = await Promise.all([
+      latestConversationEvidenceAt(ownDatabase.sql, householdId, "tristan"),
+      janeConfigured
+        ? latestConversationEvidenceAt(ownDatabase.sql, householdId, "jane")
+        : Promise.resolve(null),
+    ]);
     const since = earlierOfRecentCursor(
       startedAt,
       cursor,
       Number.parseInt(env.AIRBNB_SUPPORT_INITIAL_LOOKBACK_DAYS ?? "90", 10),
     );
-    const collected = await collectMessages({
+    const canonicalCollection = collectMessages({
       since,
       maxRead: Number.parseInt(env.AIRBNB_SUPPORT_MAX_EMAILS ?? "500", 10),
+      mailboxScope: "tristan",
       env,
     });
+    const janeSince = janeConfigured
+      ? earlierOfRecentCursor(
+        startedAt,
+        janeCursor,
+        Number.parseInt(env.AIRBNB_SUPPORT_INITIAL_LOOKBACK_DAYS ?? "90", 10),
+      )
+      : null;
+    const supplementalCollection = janeConfigured
+      ? collectMessages({
+        since: janeSince,
+        maxRead: Number.parseInt(env.AIRBNB_SUPPORT_JANE_MAX_EMAILS ?? env.AIRBNB_SUPPORT_MAX_EMAILS ?? "500", 10),
+        mailboxScope: "jane",
+        env,
+      })
+      : Promise.resolve({ messages: [], envelopesFound: 0 });
+    const [canonicalResult, supplementalResult] = await Promise.allSettled([
+      canonicalCollection,
+      supplementalCollection,
+    ]);
+    if (canonicalResult.status === "rejected") throw canonicalResult.reason;
+    const collected = canonicalResult.value;
     const ingested = [];
     for (const email of collected.messages) {
       const parsed = parseAirbnbConversationEmail(email);
       if (!parsed) continue;
       ingested.push(await ingestConversation(ownDatabase.sql, { householdId, email, parsed }));
+    }
+
+    let supplemental = { messages: [], envelopesFound: 0 };
+    const supplementalIngested = [];
+    let supplementalError = null;
+    if (janeConfigured) {
+      if (supplementalResult.status === "fulfilled") {
+        supplemental = supplementalResult.value;
+        for (const email of supplemental.messages) {
+          const parsed = parseAirbnbConversationEmail(email);
+          if (!parsed) continue;
+          supplementalIngested.push(await ingestSupplementalConversation(
+            ownDatabase.sql,
+            { householdId, email, parsed },
+          ));
+        }
+      } else {
+        supplementalError = sanitizedError(supplementalResult.reason);
+      }
+    } else if (janeUserConfigured || janePasswordConfigured) {
+      supplementalError = sanitizedError(new Error("Jane's supplemental Gmail credentials are incomplete."));
     }
 
     const candidates = await loadShadowCandidates(ownDatabase.sql, {
@@ -111,11 +171,16 @@ export async function runSupportShadow({
         classificationFailureCount += 1;
         classification = fallbackClassification(error);
       }
-      return storeShadowDraft(ownDatabase.sql, {
+      return storeSupportDraft(ownDatabase.sql, {
         householdId,
         candidate,
         classification,
         now: startedAt,
+        shadowMode: mode === "shadow",
+        automaticallyApprove: mode === "live"
+          && capabilities.autonomousRepliesEnabled
+          && !candidate.existingClassification
+          && classification.autoReply === true,
       });
     };
     const concurrency = Math.max(1, Math.min(4, Number.parseInt(env.AIRBNB_SUPPORT_CLASSIFICATION_CONCURRENCY ?? "4", 10)));
@@ -123,25 +188,67 @@ export async function runSupportShadow({
       drafts.push(...await Promise.all(candidates.slice(index, index + concurrency).map(classifyAndStore)));
     }
 
+    const deliveries = [];
+    if (mode === "live" && capabilities.replyDeliveryEnabled) {
+      const deliveryCandidates = await loadDeliveryGuardCandidates(ownDatabase.sql, {
+        householdId,
+        now: startedAt,
+        limit: Number.parseInt(env.AIRBNB_SUPPORT_DELIVERY_LIMIT ?? "1", 10),
+      });
+      for (const delivery of deliveryCandidates) {
+        deliveries.push(await processDelivery({
+          sql: ownDatabase.sql,
+          householdId,
+          deliveryId: delivery.id,
+          now,
+          env,
+        }));
+      }
+    }
+    const managementNotifications = mode === "live" && capabilities.managementAlertsEnabled
+      ? await notifyManagement({
+        sql: ownDatabase.sql,
+        householdId,
+        now,
+        env,
+      })
+      : [];
+
     const receipt = {
       schemaVersion: 1,
       runId,
       status: "success",
-      mode: "shadow",
+      mode,
       startedAt: startedAt.toISOString(),
       completedAt: now().toISOString(),
       cursorAt: cursor?.toISOString() ?? null,
       searchSince: since.toISOString(),
-      emailsFound: collected.envelopesFound,
+      emailsFound: collected.envelopesFound + supplemental.envelopesFound,
+      canonicalEmailsFound: collected.envelopesFound,
+      supplementalEmailsFound: supplemental.envelopesFound,
       conversationsIngested: ingested.length,
+      supplementalConversationsIngested: supplementalIngested.length,
+      supplementalMailboxStatus: supplementalError
+        ? { status: "error", error: supplementalError }
+        : janeUserConfigured && janePasswordConfigured
+          ? { status: "enabled" }
+          : { status: "disabled" },
       handledByHumanCount: ingested.filter((item) => item.latestDirection === "host").length,
       candidateCount: candidates.length,
       draftCount: drafts.length,
       classificationFailureCount,
-      overdueCount: drafts.filter((draft) => draft.minutesOpen >= 60).length,
-      externalWritesEnabled: false,
-      autonomousRepliesEnabled: false,
-      managementAlertsEnabled: false,
+      reminderCount: drafts.filter((draft) => draft.alertStages.includes("reminder")).length,
+      overdueCount: drafts.filter((draft) => draft.alertStages.includes("overdue")).length,
+      deliveryCandidateCount: deliveries.length,
+      deliveredReplyCount: deliveries.filter((delivery) => delivery.action === "sent").length,
+      reconciledReplyCount: deliveries.filter((delivery) => delivery.action === "mark_sent").length,
+      deliveryAmbiguousCount: deliveries.filter((delivery) => ["ambiguous", "guard_error"].includes(delivery.action)).length,
+      managementNotificationCount: managementNotifications.length,
+      managementNotificationVerifiedCount: managementNotifications.filter((item) => item.verified).length,
+      externalWritesEnabled: mode === "live" && capabilities.externalWritesEnabled,
+      replyDeliveryEnabled: mode === "live" && capabilities.replyDeliveryEnabled,
+      autonomousRepliesEnabled: mode === "live" && capabilities.autonomousRepliesEnabled,
+      managementAlertsEnabled: mode === "live" && capabilities.managementAlertsEnabled,
     };
     await recordJobFinish(ownDatabase.sql, {
       service: "support",
@@ -168,6 +275,10 @@ export async function runSupportShadow({
   } finally {
     if (!database) await ownDatabase.close();
   }
+}
+
+export function runSupportShadow(options = {}) {
+  return runSupport({ ...options, mode: "shadow" });
 }
 
 export async function loadSupportStatus({ database = null, env = process.env } = {}) {

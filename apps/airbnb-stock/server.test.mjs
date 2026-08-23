@@ -35,9 +35,11 @@ test("health is public and identifies observation mode", async () => {
   const response = await request(createAirbnbStockServer({ secret: "secret" }), { path: "/healthz" });
   assert.equal(response.status, 200);
   assert.equal(response.body.mode, "observation");
+  assert.equal(response.body.managementAlertsEnabled, false);
+  assert.equal(response.body.orderPlacementAllowed, false);
 });
 
-test("run is authenticated and rejects any live mode", async () => {
+test("run is authenticated and rejects live mode without every gate", async () => {
   const unauthorized = await request(createAirbnbStockServer({ secret: "secret" }), { method: "POST", path: "/run" });
   assert.equal(unauthorized.status, 401);
   const live = await request(createAirbnbStockServer({ secret: "secret" }), {
@@ -47,7 +49,7 @@ test("run is authenticated and rejects any live mode", async () => {
     body: { mode: "live" },
   });
   assert.equal(live.status, 400);
-  assert.equal(live.body.error, "observation_mode_only");
+  assert.equal(live.body.error, "live_mode_disabled");
 });
 
 test("authenticated observation returns only the runner receipt", async () => {
@@ -65,4 +67,56 @@ test("authenticated observation returns only the runner receipt", async () => {
   assert.equal(response.body.fullReview, true);
   assert.equal(response.body.externalWritesEnabled, false);
   assert.equal(calls, 1);
+});
+
+test("live mode reaches the runner only after all exact Management gates pass", async () => {
+  const calls = [];
+  const env = {
+    AIRBNB_STOCK_EXTERNAL_WRITES_ENABLED: "true",
+    AIRBNB_STOCK_LIVE_CONFIRMATION: "ENABLE_AIRBNB_STOCK_MANAGEMENT_WRITES",
+    AIRBNB_STOCK_MANAGEMENT_ALERTS_ENABLED: "true",
+  };
+  const server = createAirbnbStockServer({
+    secret: "secret",
+    env,
+    run: async (options) => {
+      calls.push(options);
+      return {
+        status: "success",
+        mode: options.mode,
+        externalWritesEnabled: true,
+        orderPlacementAllowed: false,
+      };
+    },
+  });
+  const response = await request(server, {
+    method: "POST",
+    path: "/run",
+    secret: "secret",
+    body: { mode: "live", fullReview: false },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.body.mode, "live");
+  assert.equal(response.body.orderPlacementAllowed, false);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].mode, "live");
+  assert.equal(calls[0].env, env);
+});
+
+test("unsupported stock modes fail closed before the runner", async () => {
+  let called = false;
+  const response = await request(createAirbnbStockServer({
+    secret: "secret",
+    run: async () => {
+      called = true;
+    },
+  }), {
+    method: "POST",
+    path: "/run",
+    secret: "secret",
+    body: { mode: "order" },
+  });
+  assert.equal(response.status, 400);
+  assert.equal(response.body.error, "invalid_mode");
+  assert.equal(called, false);
 });

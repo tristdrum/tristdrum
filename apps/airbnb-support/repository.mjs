@@ -1,4 +1,9 @@
-import { contentFingerprint, conversationEntryKey, propertyForListing } from "@tristdrum/airbnb-core";
+import {
+  contentFingerprint,
+  conversationEntryKey,
+  propertyForListing,
+  supportEscalationStages,
+} from "@tristdrum/airbnb-core";
 
 function eventTime(occurredAt, sequence) {
   const value = new Date(occurredAt);
@@ -7,6 +12,9 @@ function eventTime(occurredAt, sequence) {
 }
 
 export async function ingestConversation(sql, { householdId, email, parsed }) {
+  if ((email.mailboxScope ?? "tristan") !== "tristan") {
+    throw new Error("Canonical Airbnb conversations must come from Tristan's mailbox.");
+  }
   return sql.begin(async (transaction) => {
     const evidenceRows = await transaction`
       insert into airbnb.evidence (
@@ -17,7 +25,14 @@ export async function ingestConversation(sql, { householdId, email, parsed }) {
         ${householdId}, 'tristan', 'gmail', ${email.providerMessageId}, ${parsed.providerThreadId},
         ${email.from}, ${email.subject}, 'conversation', 'airbnb_thread', ${email.occurredAt},
         ${contentFingerprint(parsed.sourceFingerprint)},
-        ${transaction.json({ listingName: parsed.listingName, stayLabel: parsed.stayLabel, entryCount: parsed.entries.length })}
+        ${transaction.json({
+          listingName: parsed.listingName,
+          stayLabel: parsed.stayLabel,
+          entryCount: parsed.entries.length,
+          replyTo: parsed.replyTo,
+          inReplyTo: email.inReplyTo,
+          references: parsed.references,
+        })}
       )
       on conflict (household_id, mailbox_scope, provider, provider_message_id)
       do update set content_hash = excluded.content_hash,
@@ -70,6 +85,25 @@ export async function ingestConversation(sql, { householdId, email, parsed }) {
         on conflict (household_id, provider_message_id) do nothing
       `;
     }
+    if (latest.direction === "host") {
+      await transaction`
+        update airbnb.reply_deliveries
+        set status = 'handled_by_human',
+            cancellation_reason = 'A newer host reply was observed in the canonical Airbnb thread.',
+            updated_at = ${email.occurredAt}
+        where household_id = ${householdId}
+          and thread_id = ${thread.id}
+          and status not in ('sent', 'handled_by_human', 'cancelled')
+      `;
+      await transaction`
+        update airbnb.alerts
+        set status = 'resolved', resolved_at = ${email.occurredAt}, updated_at = ${email.occurredAt}
+        where household_id = ${householdId}
+          and status = 'suppressed'
+          and alert_type in ('guest_escalation', 'guest_overdue')
+          and details->>'threadId' = ${thread.id}
+      `;
+    }
     return {
       threadId: thread.id,
       providerThreadId: parsed.providerThreadId,
@@ -79,6 +113,42 @@ export async function ingestConversation(sql, { householdId, email, parsed }) {
       propertyId: propertyRows[0]?.id ?? null,
     };
   });
+}
+
+export async function ingestSupplementalConversation(sql, { householdId, email, parsed }) {
+  if ((email.mailboxScope ?? "jane") !== "jane") {
+    throw new Error("Supplemental Airbnb conversation evidence must come from Jane's mailbox.");
+  }
+  const rows = await sql`
+    insert into airbnb.evidence (
+      household_id, mailbox_scope, provider, provider_message_id, provider_thread_id,
+      sender_address, subject, evidence_kind, evidence_subtype, occurred_at,
+      content_hash, normalized_payload
+    ) values (
+      ${householdId}, 'jane', 'gmail', ${email.providerMessageId}, ${parsed.providerThreadId},
+      ${email.from}, ${email.subject}, 'conversation', 'airbnb_thread_supplemental', ${email.occurredAt},
+      ${contentFingerprint(parsed.sourceFingerprint)},
+      ${sql.json({ listingName: parsed.listingName, stayLabel: parsed.stayLabel, entryCount: parsed.entries.length })}
+    )
+    on conflict (household_id, mailbox_scope, provider, provider_message_id)
+    do update set content_hash = excluded.content_hash,
+                  normalized_payload = excluded.normalized_payload,
+                  occurred_at = excluded.occurred_at
+    returning id
+  `;
+  const canonical = await sql`
+    select id
+    from airbnb.guest_threads
+    where household_id = ${householdId}
+      and canonical_mailbox = 'tristan'
+      and provider_thread_id = ${parsed.providerThreadId}
+    limit 1
+  `;
+  return {
+    evidenceId: rows[0].id,
+    providerThreadId: parsed.providerThreadId,
+    canonicalThreadId: canonical[0]?.id ?? null,
+  };
 }
 
 export async function loadShadowCandidates(sql, { householdId, limit = 8 }) {
@@ -120,7 +190,7 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8 }) {
     where thread.household_id = ${householdId}
       and thread.status in ('open', 'needs_human')
       and (thread.last_host_at is null or thread.last_host_at < thread.last_guest_at)
-      and coalesce(existing.status, 'draft') not in ('sent', 'handled_by_human', 'cancelled')
+      and coalesce(existing.status, 'draft') not in ('sent', 'handled_by_human', 'cancelled', 'ambiguous')
     order by (existing.classification is null) desc, thread.last_guest_at desc
     limit ${limit}
   `;
@@ -133,9 +203,17 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8 }) {
   }));
 }
 
-export async function storeShadowDraft(sql, { householdId, candidate, classification, now }) {
+export async function storeSupportDraft(sql, {
+  householdId,
+  candidate,
+  classification,
+  now,
+  shadowMode = true,
+  automaticallyApprove = false,
+}) {
   const idempotencyKey = `airbnb-support:${candidate.providerThreadId}:${candidate.sourceFingerprint}`;
-  const outboundMessageId = `<${contentFingerprint(idempotencyKey).slice(0, 32)}@airbnb.tristdrum.com>`;
+  const outboundMessageId = `<${contentFingerprint(`${householdId}:${idempotencyKey}`).slice(0, 32)}@airbnb.tristdrum.com>`;
+  const initialStatus = automaticallyApprove ? "approved" : "needs_approval";
   const rows = await sql`
     insert into airbnb.reply_deliveries (
       household_id, thread_id, source_fingerprint, source_last_event_at, topic,
@@ -143,11 +221,14 @@ export async function storeShadowDraft(sql, { householdId, candidate, classifica
     ) values (
       ${householdId}, ${candidate.id}, ${candidate.sourceFingerprint}, ${candidate.latestEventAt},
       ${classification.topic}, ${classification.riskTier},
-      ${sql.json({ ...classification, shadowMode: true })}, ${classification.draft},
-      'needs_approval', ${idempotencyKey}, ${outboundMessageId}
+      ${sql.json({ ...classification, shadowMode })}, ${classification.draft},
+      ${initialStatus}, ${idempotencyKey}, ${outboundMessageId}
     )
-    on conflict (idempotency_key)
-    do update set classification = excluded.classification,
+    on conflict (household_id, idempotency_key)
+    do update set source_last_event_at = excluded.source_last_event_at,
+                  topic = excluded.topic,
+                  risk_tier = excluded.risk_tier,
+                  classification = excluded.classification,
                   draft_text = excluded.draft_text,
                   updated_at = now()
     returning id, status
@@ -157,25 +238,415 @@ export async function storeShadowDraft(sql, { householdId, candidate, classifica
     set status = 'needs_human', risk_tier = ${classification.riskTier}
     where household_id = ${householdId} and id = ${candidate.id}
   `;
-  const minutesOpen = Math.floor((now.getTime() - Date.parse(candidate.latestEventAt)) / 60_000);
-  const alertType = minutesOpen >= 60 ? "guest_overdue" : "guest_escalation";
-  await sql`
-    insert into airbnb.alerts (
-      household_id, alert_type, severity, status, dedupe_key, summary, details
-    ) values (
-      ${householdId}, ${alertType}, ${minutesOpen >= 60 ? "critical" : "warning"}, 'suppressed',
-      ${`guest:${candidate.providerThreadId}:${candidate.sourceFingerprint}`},
-      ${minutesOpen >= 60 ? "Airbnb guest message is overdue" : "Airbnb guest message needs human review"},
-      ${sql.json({ threadId: candidate.id, replyDeliveryId: rows[0].id, minutesOpen, topic: classification.topic })}
-    )
-    on conflict (household_id, dedupe_key)
-    do update set alert_type = excluded.alert_type,
-                  severity = excluded.severity,
-                  summary = excluded.summary,
-                  details = excluded.details,
-                  updated_at = now()
+  const escalationStages = classification.alertManagement === true
+    ? supportEscalationStages({ latestEventAt: candidate.latestEventAt, now })
+    : [];
+  for (const escalation of escalationStages) {
+    const summary = escalation.stage === "overdue"
+      ? "Airbnb guest message is overdue"
+      : escalation.stage === "reminder"
+        ? "Airbnb guest message still needs human review"
+        : "Airbnb guest message needs human review";
+    await sql`
+      insert into airbnb.alerts (
+        household_id, alert_type, severity, status, dedupe_key, summary, details
+      ) values (
+        ${householdId}, ${escalation.alertType}, ${escalation.severity}, 'suppressed',
+        ${`guest:${candidate.providerThreadId}:${candidate.sourceFingerprint}:${escalation.stage}`},
+        ${summary},
+        ${sql.json({
+          threadId: candidate.id,
+          replyDeliveryId: rows[0].id,
+          stage: escalation.stage,
+          minutesOpen: escalation.minutesOpen,
+          topic: classification.topic,
+          listingName: candidate.listingName,
+          guestName: candidate.guestDisplayName,
+          classificationSummary: classification.summary,
+        })}
+      )
+      on conflict (household_id, dedupe_key)
+      do update set alert_type = excluded.alert_type,
+                    severity = excluded.severity,
+                    summary = excluded.summary,
+                    details = excluded.details,
+                    updated_at = now()
+    `;
+  }
+  return {
+    id: rows[0].id,
+    status: rows[0].status,
+    minutesOpen: escalationStages[0]?.minutesOpen ?? null,
+    alertStages: escalationStages.map((item) => item.stage),
+  };
+}
+
+export function storeShadowDraft(sql, options) {
+  return storeSupportDraft(sql, { ...options, shadowMode: true, automaticallyApprove: false });
+}
+
+export async function loadDeliveryGuardCandidates(sql, { householdId, now, limit = 8 }) {
+  return sql`
+    select id
+    from airbnb.reply_deliveries
+    where household_id = ${householdId}
+      and status = 'approved'
+    order by created_at
+    limit ${limit}
   `;
-  return { id: rows[0].id, status: rows[0].status, minutesOpen, alertType };
+}
+
+async function recordSupportAudit(transaction, {
+  householdId,
+  action,
+  entityId,
+  entityType = "reply_delivery",
+  details = {},
+  occurredAt,
+}) {
+  await transaction`
+    insert into airbnb.audit_events (
+      household_id, actor_type, actor_id, action, entity_type, entity_id, details, occurred_at
+    ) values (
+      ${householdId}, 'worker', 'support', ${action}, ${entityType}, ${entityId},
+      ${transaction.json(details)}, ${occurredAt}
+    )
+  `;
+}
+
+export async function loadSuppressedSupportAlerts(sql, { householdId, limit = 24 }) {
+  return sql`
+    select alert.id, alert.alert_type, alert.severity, alert.dedupe_key,
+           alert.summary, alert.details, alert.opened_at
+    from airbnb.alerts alert
+    join airbnb.guest_threads thread
+      on thread.household_id = alert.household_id
+     and thread.id = nullif(alert.details->>'threadId', '')::uuid
+    join airbnb.reply_deliveries delivery
+      on delivery.household_id = alert.household_id
+     and delivery.id = nullif(alert.details->>'replyDeliveryId', '')::uuid
+    where alert.household_id = ${householdId}
+      and alert.status = 'suppressed'
+      and alert.alert_type in ('guest_escalation', 'guest_overdue')
+      and thread.status = 'needs_human'
+      and (thread.last_host_at is null or thread.last_host_at < thread.last_guest_at)
+      and (
+        delivery.status not in ('sent', 'handled_by_human', 'cancelled', 'ambiguous')
+        or (
+          delivery.status = 'ambiguous'
+          and alert.details->>'stage' = 'delivery_ambiguous'
+        )
+      )
+    order by alert.opened_at, alert.id
+    limit ${limit}
+  `;
+}
+
+export async function markSupportAlertNotified(sql, { householdId, alertId, now }) {
+  return sql.begin(async (transaction) => {
+    const rows = await transaction`
+      update airbnb.alerts
+      set status = 'notified', notified_at = ${now}
+      where household_id = ${householdId}
+        and id = ${alertId}
+        and status = 'suppressed'
+      returning id, details
+    `;
+    if (!rows[0]) return null;
+    const threadId = rows[0].details?.threadId ?? null;
+    if (threadId) {
+      await transaction`
+        update airbnb.alerts
+        set status = 'resolved', resolved_at = ${now}
+        where household_id = ${householdId}
+          and id <> ${alertId}
+          and status = 'suppressed'
+          and alert_type in ('guest_escalation', 'guest_overdue')
+          and details->>'threadId' = ${threadId}
+      `;
+    }
+    await recordSupportAudit(transaction, {
+      householdId,
+      action: "guest_alert_notified",
+      entityType: "alert",
+      entityId: alertId,
+      occurredAt: now,
+    });
+    return { id: rows[0].id, status: "notified" };
+  });
+}
+
+export async function claimDeliveryForGuard(sql, { householdId, deliveryId, now }) {
+  return sql.begin(async (transaction) => {
+    const rows = await transaction`
+      select
+        delivery.id,
+        delivery.status,
+        delivery.source_fingerprint,
+        delivery.source_last_event_at,
+        delivery.draft_text,
+        delivery.final_text,
+        delivery.outbound_message_id,
+        delivery.send_attempt_count,
+        delivery.send_attempted_at,
+        thread.provider_thread_id,
+        thread.source_fingerprint as latest_thread_fingerprint,
+        coalesce((
+          select jsonb_agg(jsonb_build_object(
+            'direction', message.direction,
+            'contentHash', message.content_hash
+          ))
+          from airbnb.guest_messages message
+          where message.household_id = delivery.household_id
+            and message.thread_id = delivery.thread_id
+            and message.provider_sent_at <= delivery.source_last_event_at
+        ), '[]'::jsonb) as source_events
+      from airbnb.reply_deliveries delivery
+      join airbnb.guest_threads thread
+        on thread.household_id = delivery.household_id
+       and thread.id = delivery.thread_id
+      where delivery.household_id = ${householdId}
+        and delivery.id = ${deliveryId}
+        and delivery.status = 'approved'
+      for update of delivery, thread
+    `;
+    const delivery = rows[0];
+    if (!delivery) return null;
+    await transaction`
+      update airbnb.reply_deliveries
+      set status = 'sending',
+          last_reconciled_at = ${now},
+          last_delivery_error = null
+      where household_id = ${householdId} and id = ${deliveryId}
+    `;
+    return { ...delivery, status: "sending", action: "claimed" };
+  });
+}
+
+export async function applyDeliveryGuardDecision(sql, {
+  householdId,
+  deliveryId,
+  decision,
+  now,
+}) {
+  if (decision.action === "send") return { status: "sending", reason: decision.reason };
+  const status = decision.action === "mark_sent"
+    ? "sent"
+    : decision.action === "handled_by_human"
+      ? "handled_by_human"
+      : "cancelled";
+  return sql.begin(async (transaction) => {
+    const rows = await transaction`
+      update airbnb.reply_deliveries
+      set status = ${status},
+          cancellation_reason = ${status === "cancelled" ? decision.reason : null},
+          provider_sent_message_id = case
+            when ${status} = 'sent' then outbound_message_id
+            else provider_sent_message_id
+          end,
+          sent_at = case when ${status} = 'sent' then coalesce(sent_at, ${now}) else sent_at end,
+          last_reconciled_at = ${now}
+      where household_id = ${householdId}
+        and id = ${deliveryId}
+        and status = 'sending'
+      returning id, thread_id, status
+    `;
+    if (!rows[0]) return null;
+    if (["sent", "handled_by_human"].includes(status)) {
+      await transaction`
+        update airbnb.guest_threads thread
+        set status = 'handled'
+        where thread.household_id = ${householdId}
+          and thread.id = ${rows[0].threadId}
+          and thread.source_fingerprint = (
+            select delivery.source_fingerprint
+            from airbnb.reply_deliveries delivery
+            where delivery.household_id = ${householdId} and delivery.id = ${deliveryId}
+          )
+      `;
+      await transaction`
+        update airbnb.alerts
+        set status = 'resolved', resolved_at = ${now}, updated_at = ${now}
+        where household_id = ${householdId}
+          and status = 'suppressed'
+          and alert_type in ('guest_escalation', 'guest_overdue')
+          and details->>'threadId' = ${rows[0].threadId}
+      `;
+    } else {
+      await transaction`
+        update airbnb.guest_threads
+        set status = 'open'
+        where household_id = ${householdId} and id = ${rows[0].threadId}
+      `;
+    }
+    await recordSupportAudit(transaction, {
+      householdId,
+      action: `guest_reply_guard_${status}`,
+      entityId: deliveryId,
+      details: { reason: decision.reason },
+      occurredAt: now,
+    });
+    return { ...rows[0], reason: decision.reason };
+  });
+}
+
+export async function recordDeliveryAttempt(sql, { householdId, deliveryId, now }) {
+  return sql.begin(async (transaction) => {
+    const rows = await transaction`
+      update airbnb.reply_deliveries
+      set send_attempt_count = send_attempt_count + 1,
+          send_attempted_at = ${now},
+          last_delivery_error = null
+      where household_id = ${householdId}
+        and id = ${deliveryId}
+        and status = 'sending'
+      returning id, send_attempt_count
+    `;
+    if (!rows[0]) return null;
+    await recordSupportAudit(transaction, {
+      householdId,
+      action: "guest_reply_send_attempted",
+      entityId: deliveryId,
+      details: { attempt: rows[0].sendAttemptCount },
+      occurredAt: now,
+    });
+    return rows[0];
+  });
+}
+
+export async function markDeliverySent(sql, {
+  householdId,
+  deliveryId,
+  providerMessageId,
+  now,
+}) {
+  return sql.begin(async (transaction) => {
+    const rows = await transaction`
+      update airbnb.reply_deliveries
+      set status = 'sent',
+          provider_sent_message_id = ${providerMessageId},
+          sent_at = ${now},
+          last_reconciled_at = ${now},
+          last_delivery_error = null
+      where household_id = ${householdId}
+        and id = ${deliveryId}
+        and status = 'sending'
+      returning id, thread_id, status
+    `;
+    if (!rows[0]) return null;
+    await transaction`
+      update airbnb.guest_threads thread
+      set status = 'handled'
+      where thread.household_id = ${householdId}
+        and thread.id = ${rows[0].threadId}
+        and thread.source_fingerprint = (
+          select delivery.source_fingerprint
+          from airbnb.reply_deliveries delivery
+          where delivery.household_id = ${householdId} and delivery.id = ${deliveryId}
+        )
+    `;
+    await transaction`
+      update airbnb.alerts
+      set status = 'resolved', resolved_at = ${now}, updated_at = ${now}
+      where household_id = ${householdId}
+        and status = 'suppressed'
+        and alert_type in ('guest_escalation', 'guest_overdue')
+        and details->>'threadId' = ${rows[0].threadId}
+    `;
+    await recordSupportAudit(transaction, {
+      householdId,
+      action: "guest_reply_sent",
+      entityId: deliveryId,
+      details: { providerMessageFingerprint: contentFingerprint(providerMessageId).slice(0, 16) },
+      occurredAt: now,
+    });
+    return rows[0];
+  });
+}
+
+export async function recordAmbiguousDeliveryFailure(sql, {
+  householdId,
+  deliveryId,
+  error,
+  now,
+}) {
+  const message = String(error?.message ?? "Ambiguous SMTP failure.").slice(0, 300);
+  return sql.begin(async (transaction) => {
+    const rows = await transaction`
+      update airbnb.reply_deliveries
+      set status = 'ambiguous',
+          cancellation_reason = 'Ambiguous SMTP result requires manual Sent-mail reconciliation.',
+          last_delivery_error = ${message},
+          last_reconciled_at = ${now}
+      where household_id = ${householdId}
+        and id = ${deliveryId}
+        and status = 'sending'
+      returning id, thread_id, status
+    `;
+    if (!rows[0]) return null;
+    await transaction`
+      insert into airbnb.alerts (
+        household_id, alert_type, severity, status, dedupe_key, summary, details
+      ) values (
+        ${householdId}, 'guest_overdue', 'critical', 'suppressed',
+        ${`guest:${rows[0].threadId}:delivery-ambiguous:${deliveryId}`},
+        'Airbnb reply delivery outcome needs confirmation',
+        ${transaction.json({
+          threadId: rows[0].threadId,
+          replyDeliveryId: deliveryId,
+          stage: "delivery_ambiguous",
+          classificationSummary: "Check Sent mail, then mark the reply sent, retry it, or cancel it.",
+        })}
+      )
+      on conflict (household_id, dedupe_key)
+      do update set severity = excluded.severity,
+                    status = 'suppressed',
+                    summary = excluded.summary,
+                    details = excluded.details,
+                    notified_at = null,
+                    resolved_at = null,
+                    updated_at = now()
+    `;
+    await recordSupportAudit(transaction, {
+      householdId,
+      action: "guest_reply_send_ambiguous",
+      entityId: deliveryId,
+      details: { error: message },
+      occurredAt: now,
+    });
+    return rows[0];
+  });
+}
+
+export async function recordDeliveryGuardFailure(sql, {
+  householdId,
+  deliveryId,
+  error,
+  now,
+}) {
+  const message = String(error?.message ?? "Delivery guard failed.").slice(0, 300);
+  return sql.begin(async (transaction) => {
+    const rows = await transaction`
+      update airbnb.reply_deliveries
+      set status = 'approved',
+          last_delivery_error = ${message},
+          last_reconciled_at = ${now}
+      where household_id = ${householdId}
+        and id = ${deliveryId}
+        and status = 'sending'
+        and send_attempted_at is null
+      returning id, status
+    `;
+    if (!rows[0]) return null;
+    await recordSupportAudit(transaction, {
+      householdId,
+      action: "guest_reply_guard_failed",
+      entityId: deliveryId,
+      details: { error: message },
+      occurredAt: now,
+    });
+    return rows[0];
+  });
 }
 
 export async function latestSupportRun(sql, householdId) {
@@ -189,12 +660,13 @@ export async function latestSupportRun(sql, householdId) {
   return rows[0] ?? null;
 }
 
-export async function latestConversationEvidenceAt(sql, householdId) {
+export async function latestConversationEvidenceAt(sql, householdId, mailboxScope = "tristan") {
+  if (!["tristan", "jane"].includes(mailboxScope)) throw new Error("Unsupported mailbox scope.");
   const rows = await sql`
     select max(occurred_at) as latest
     from airbnb.evidence
     where household_id = ${householdId}
-      and mailbox_scope = 'tristan'
+      and mailbox_scope = ${mailboxScope}
       and provider = 'gmail'
       and evidence_kind = 'conversation'
   `;

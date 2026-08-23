@@ -1,11 +1,14 @@
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { htmlToText } from "html-to-text";
+import nodemailer from "nodemailer";
+import { trustedAirbnbSender } from "@tristdrum/airbnb-core";
 
 const DEFAULT_FOLDER = "[Gmail]/All Mail";
-const DEFAULT_CONNECTION_TIMEOUT_MS = 30_000;
-const DEFAULT_SOCKET_TIMEOUT_MS = 60_000;
-const DEFAULT_IMPORT_DEADLINE_MS = 60_000;
+const DEFAULT_CONNECTION_TIMEOUT_MS = 15_000;
+const DEFAULT_SOCKET_TIMEOUT_MS = 30_000;
+const DEFAULT_IMPORT_DEADLINE_MS = 30_000;
+const DEFAULT_SENT_FOLDER = "[Gmail]/Sent Mail";
 
 function required(name, env) {
   const value = String(env[name] ?? "").trim();
@@ -40,30 +43,48 @@ function importDeadlineError(milliseconds) {
   );
 }
 
-export async function collectConversationMessages({
-  since,
-  maxRead = 500,
-  env = process.env,
-  createClient = (options) => new ImapFlow(options),
-}) {
-  const client = createClient({
-    host: String(env.AIRBNB_SUPPORT_GMAIL_IMAP_HOST ?? "imap.gmail.com"),
-    port: Number.parseInt(env.AIRBNB_SUPPORT_GMAIL_IMAP_PORT ?? "993", 10),
+function mailboxPrefix(mailboxScope) {
+  if (mailboxScope === "tristan") return "AIRBNB_SUPPORT_GMAIL";
+  if (mailboxScope === "jane") return "AIRBNB_SUPPORT_JANE_GMAIL";
+  throw new Error(`Unsupported Airbnb support mailbox scope: ${mailboxScope}`);
+}
+
+function mailboxValue(mailboxScope, suffix, env, fallback = null) {
+  const scoped = String(env[`${mailboxPrefix(mailboxScope)}_${suffix}`] ?? "").trim();
+  if (scoped) return scoped;
+  if (fallback != null) return fallback;
+  throw new Error(`Missing required environment variable ${mailboxPrefix(mailboxScope)}_${suffix}.`);
+}
+
+function imapOptions(mailboxScope, env) {
+  return {
+    host: mailboxValue(mailboxScope, "IMAP_HOST", env, String(env.AIRBNB_SUPPORT_GMAIL_IMAP_HOST ?? "imap.gmail.com")),
+    port: Number.parseInt(mailboxValue(mailboxScope, "IMAP_PORT", env, String(env.AIRBNB_SUPPORT_GMAIL_IMAP_PORT ?? "993")), 10),
     secure: true,
     auth: {
-      user: required("AIRBNB_SUPPORT_GMAIL_USER", env),
-      pass: required("AIRBNB_SUPPORT_GMAIL_APP_PASSWORD", env),
+      user: mailboxValue(mailboxScope, "USER", env),
+      pass: mailboxValue(mailboxScope, "APP_PASSWORD", env),
     },
     connectionTimeout: positiveInteger(
-      env.AIRBNB_SUPPORT_GMAIL_CONNECTION_TIMEOUT_MS,
+      env[`${mailboxPrefix(mailboxScope)}_CONNECTION_TIMEOUT_MS`] ?? env.AIRBNB_SUPPORT_GMAIL_CONNECTION_TIMEOUT_MS,
       DEFAULT_CONNECTION_TIMEOUT_MS,
     ),
     socketTimeout: positiveInteger(
-      env.AIRBNB_SUPPORT_GMAIL_SOCKET_TIMEOUT_MS,
+      env[`${mailboxPrefix(mailboxScope)}_SOCKET_TIMEOUT_MS`] ?? env.AIRBNB_SUPPORT_GMAIL_SOCKET_TIMEOUT_MS,
       DEFAULT_SOCKET_TIMEOUT_MS,
     ),
     logger: false,
-  });
+  };
+}
+
+export async function collectConversationMessages({
+  since,
+  maxRead = 500,
+  mailboxScope = "tristan",
+  env = process.env,
+  createClient = (options) => new ImapFlow(options),
+}) {
+  const client = createClient(imapOptions(mailboxScope, env));
   let lock;
   let deadlineTimer;
   try {
@@ -73,14 +94,21 @@ export async function collectConversationMessages({
     );
     const importWork = (async () => {
       await client.connect();
-      lock = await client.getMailboxLock(String(env.AIRBNB_SUPPORT_GMAIL_FOLDER ?? DEFAULT_FOLDER));
-      const uids = await client.search({ since, from: "express@airbnb.com" }, { uid: true });
+      lock = await client.getMailboxLock(mailboxValue(
+        mailboxScope,
+        "FOLDER",
+        env,
+        String(env.AIRBNB_SUPPORT_GMAIL_FOLDER ?? DEFAULT_FOLDER),
+      ));
+      const expectedSender = mailboxScope === "tristan" ? "express@airbnb.com" : "airbnb.com";
+      const uids = await client.search({ since, from: expectedSender }, { uid: true });
       if (!uids.length) return { messages: [], envelopesFound: 0 };
       const candidates = [];
       for await (const message of client.fetch(uids, { envelope: true, internalDate: true, uid: true }, { uid: true })) {
         const sender = String(message.envelope?.from?.[0]?.address ?? "").toLowerCase();
         const subject = message.envelope?.subject ?? "";
-        if (sender !== "express@airbnb.com" || !/^RE:\s*Reservation for /i.test(subject)) continue;
+        if (!trustedAirbnbSender(sender) || !/^RE:\s*Reservation for /i.test(subject)) continue;
+        if (mailboxScope === "tristan" && sender !== "express@airbnb.com") continue;
         candidates.push({ uid: Number(message.uid), occurredAt: message.internalDate?.toISOString?.() ?? null, from: sender, subject });
       }
       const selected = candidates
@@ -99,6 +127,7 @@ export async function collectConversationMessages({
         const parsed = await simpleParser(message.source, { skipHtmlToText: true, skipTextToHtml: true });
         parsedByUid.set(envelope.uid, {
           ...envelope,
+          mailboxScope,
           providerMessageId: parsed.messageId ?? `imap:${envelope.uid}`,
           replyTo: addressList(parsed.replyTo)[0] ?? null,
           references: Array.isArray(parsed.references) ? parsed.references : parsed.references ? [parsed.references] : [],
@@ -123,5 +152,73 @@ export async function collectConversationMessages({
     lock?.release();
     if (client.usable) await client.logout();
     else client.close();
+  }
+}
+
+export async function findSentMessageIds({
+  messageIds,
+  env = process.env,
+  createClient = (options) => new ImapFlow(options),
+}) {
+  const wanted = [...new Set((messageIds ?? []).map((value) => String(value ?? "").trim()).filter(Boolean))];
+  if (!wanted.length) return [];
+  const client = createClient(imapOptions("tristan", env));
+  let lock;
+  try {
+    await client.connect();
+    lock = await client.getMailboxLock(String(env.AIRBNB_SUPPORT_GMAIL_SENT_FOLDER ?? DEFAULT_SENT_FOLDER));
+    const found = [];
+    for (const messageId of wanted) {
+      const matches = await client.search({ header: { "message-id": messageId } }, { uid: true });
+      if (matches?.length) found.push(messageId);
+    }
+    return found;
+  } finally {
+    lock?.release();
+    if (client.usable) await client.logout();
+    else client.close();
+  }
+}
+
+export async function sendThreadedReply({
+  to,
+  subject,
+  text,
+  messageId,
+  inReplyTo,
+  references = [],
+  env = process.env,
+  createTransport = (options) => nodemailer.createTransport(options),
+}) {
+  const recipient = String(to ?? "").trim().toLowerCase();
+  if (!trustedAirbnbSender(recipient)) throw new Error("Airbnb reply recipient is not trusted.");
+  const user = required("AIRBNB_SUPPORT_GMAIL_USER", env);
+  const transport = createTransport({
+    host: String(env.AIRBNB_SUPPORT_GMAIL_SMTP_HOST ?? "smtp.gmail.com"),
+    port: Number.parseInt(env.AIRBNB_SUPPORT_GMAIL_SMTP_PORT ?? "465", 10),
+    secure: String(env.AIRBNB_SUPPORT_GMAIL_SMTP_SECURE ?? "true") === "true",
+    auth: { user, pass: required("AIRBNB_SUPPORT_GMAIL_APP_PASSWORD", env) },
+    connectionTimeout: positiveInteger(env.AIRBNB_SUPPORT_GMAIL_CONNECTION_TIMEOUT_MS, DEFAULT_CONNECTION_TIMEOUT_MS),
+    socketTimeout: positiveInteger(env.AIRBNB_SUPPORT_GMAIL_SOCKET_TIMEOUT_MS, DEFAULT_SOCKET_TIMEOUT_MS),
+    logger: false,
+  });
+  try {
+    const referenceIds = [...new Set([...references, inReplyTo].map((value) => String(value ?? "").trim()).filter(Boolean))];
+    const info = await transport.sendMail({
+      from: user,
+      to: recipient,
+      subject: String(subject ?? "").trim(),
+      text: String(text ?? "").trim(),
+      messageId,
+      inReplyTo: inReplyTo || undefined,
+      references: referenceIds,
+    });
+    return {
+      messageId: String(info.messageId ?? messageId),
+      acceptedCount: Array.isArray(info.accepted) ? info.accepted.length : null,
+      rejectedCount: Array.isArray(info.rejected) ? info.rejected.length : null,
+    };
+  } finally {
+    transport.close?.();
   }
 }

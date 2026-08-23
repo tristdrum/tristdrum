@@ -12,6 +12,64 @@ function databaseConfiguration(env) {
   return { url, householdId };
 }
 
+function validateHouseholdId(householdId) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(householdId)) {
+    throw new Error("AIRBNB_HOUSEHOLD_ID must be a UUID.");
+  }
+}
+
+function databaseClient(url, postgresFactory, applicationName) {
+  return postgresFactory(url, {
+    max: 2,
+    idle_timeout: 20,
+    connect_timeout: 15,
+    prepare: false,
+    transform: postgresFactory.camel,
+    connection: {
+      application_name: applicationName,
+      statement_timeout: 60_000,
+      lock_timeout: 5_000,
+    },
+  });
+}
+
+export function cleanerLedgerRecords(rows) {
+  return rows.map((row) => ({
+    targetDate: String(row.targetDate),
+    messageHash: row.messageHash,
+    sentAt: row.sentAt ?? row.completedAt,
+    source: "supabase",
+  }));
+}
+
+export async function loadCleanerLedgerRecords({
+  targetDate,
+  env = process.env,
+  postgresFactory = postgres,
+} = {}) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(targetDate ?? ""))) {
+    throw new Error("A YYYY-MM-DD target date is required to load the cleaner ledger.");
+  }
+  const configuration = databaseConfiguration(env);
+  if (!configuration) return { status: "disabled", records: [] };
+  const { householdId, url } = configuration;
+  validateHouseholdId(householdId);
+  const sql = databaseClient(url, postgresFactory, "airbnb-cleaner-ledger");
+  try {
+    const rows = await sql`
+      select target_date, message_hash, sent_at, completed_at
+      from airbnb.cleaner_plans
+      where household_id = ${householdId}
+        and target_date = ${targetDate}
+        and delivery_status in ('sent', 'duplicate_skipped')
+      order by coalesce(sent_at, completed_at) asc, created_at asc
+    `;
+    return { status: "loaded", records: cleanerLedgerRecords(rows) };
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
+
 function hash(value) {
   return createHash("sha256").update(String(value)).digest("hex");
 }
@@ -57,21 +115,8 @@ export async function syncCleanerDatabase({ result, receipt, env = process.env, 
   const configuration = databaseConfiguration(env);
   if (!configuration) return { status: "disabled" };
   const { householdId, url } = configuration;
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(householdId)) {
-    throw new Error("AIRBNB_HOUSEHOLD_ID must be a UUID.");
-  }
-  const sql = postgresFactory(url, {
-    max: 2,
-    idle_timeout: 20,
-    connect_timeout: 15,
-    prepare: false,
-    transform: postgresFactory.camel,
-    connection: {
-      application_name: "airbnb-cleaner",
-      statement_timeout: 60_000,
-      lock_timeout: 5_000,
-    },
-  });
+  validateHouseholdId(householdId);
+  const sql = databaseClient(url, postgresFactory, "airbnb-cleaner");
   try {
     return await sql.begin(async (transaction) => {
       const properties = await transaction`
@@ -243,16 +288,27 @@ export async function syncCleanerDatabase({ result, receipt, env = process.env, 
           ${result.isUpdate}, ${transaction.json(result.unitReports ?? [])},
           ${transaction.json(result.confidence ?? {})}, ${receipt.startedAt},
           ${receipt.startedAt}, ${receipt.completedAt},
-          ${result.status === "sent" ? receipt.completedAt : null}
+          ${["sent", "duplicate_skipped"].includes(result.status) ? receipt.completedAt : null}
         )
         on conflict (household_id, target_date, message_hash)
-        do update set delivery_status = excluded.delivery_status,
+        do update set delivery_status = case
+                        when airbnb.cleaner_plans.delivery_status in ('sent', 'duplicate_skipped')
+                          and excluded.delivery_status not in ('sent', 'duplicate_skipped')
+                          then airbnb.cleaner_plans.delivery_status
+                        else excluded.delivery_status
+                      end,
                       confidence = excluded.confidence,
                       completed_at = excluded.completed_at,
                       sent_at = coalesce(airbnb.cleaner_plans.sent_at, excluded.sent_at)
         returning id
       `;
-      const { databaseSync: _databaseSync, ...receiptForDatabase } = receipt;
+      const databaseSync = {
+        status: "synced",
+        reservationCount,
+        evidenceCount: evidenceByEnvelope.size,
+        cleanerPlanId: planRows[0].id,
+      };
+      const receiptForDatabase = { ...receipt, databaseSync };
       await transaction`
         insert into airbnb.job_runs (
           household_id, service, job_name, run_id, target_date, status,
@@ -267,7 +323,7 @@ export async function syncCleanerDatabase({ result, receipt, env = process.env, 
                       receipt = excluded.receipt,
                       completed_at = excluded.completed_at
       `;
-      return { status: "synced", reservationCount, evidenceCount: evidenceByEnvelope.size, cleanerPlanId: planRows[0].id };
+      return databaseSync;
     });
   } finally {
     await sql.end({ timeout: 5 });

@@ -13,13 +13,16 @@ import {
   sanitizedError,
 } from "@tristdrum/airbnb-db";
 import { collectSixty60Messages } from "./gmail.mjs";
+import { notifyStockManagement } from "./management.mjs";
 import {
   ingestOrderEvidence,
   latestStockRun,
   loadForecastInputs,
   reconcileReservationConsumption,
   storeShoppingList,
+  storeStockCountReview,
 } from "./repository.mjs";
+import { assertStockModeAllowed } from "./runtime.mjs";
 
 const ZONE = "Africa/Johannesburg";
 
@@ -62,10 +65,13 @@ function lookbackDate(now, days) {
 export async function runStockObservation({
   now = () => new Date(),
   collectMessages = collectSixty60Messages,
+  notifyManagement = notifyStockManagement,
   database = null,
   env = process.env,
   fullReview = false,
+  mode = "observation",
 } = {}) {
+  const capabilities = assertStockModeAllowed(mode, env);
   const runId = randomUUID();
   const startedAt = now();
   const ownDatabase = database ?? createAirbnbDatabase({ env, postgresFactory: postgres });
@@ -75,7 +81,9 @@ export async function runStockObservation({
     await recordJobStart(ownDatabase.sql, {
       householdId,
       service: "stock",
-      jobName: fullReview ? "weekly-review" : "observation",
+      jobName: mode === "live"
+        ? "management-alerts"
+        : fullReview ? "weekly-review" : "observation",
       runId,
       startedAt,
       targetDate: localDate(startedAt),
@@ -117,11 +125,21 @@ export async function runStockObservation({
     const projections = projectInventory({ inventoryItems: inputs.inventory, forecast });
     const list = buildShoppingList({ projections });
     const storedList = await storeShoppingList(ownDatabase.sql, { householdId, forecast, list });
+    const countReview = fullReview
+      ? await storeStockCountReview(ownDatabase.sql, {
+        householdId,
+        projections,
+        runDate: startDate,
+      })
+      : null;
+    const managementAlerts = mode === "live"
+      ? await notifyManagement({ sql: ownDatabase.sql, householdId, now, env })
+      : [];
     const receipt = {
       schemaVersion: 1,
       runId,
       status: "success",
-      mode: "observation",
+      mode,
       fullReview,
       startedAt: startedAt.toISOString(),
       completedAt: now().toISOString(),
@@ -145,7 +163,11 @@ export async function runStockObservation({
       estimatedTotalCents: list.estimatedTotalCents,
       meetsFreeDeliveryMinimum: list.meetsFreeDeliveryMinimum,
       shoppingListId: storedList?.id ?? null,
-      externalWritesEnabled: false,
+      stockCountReviewId: countReview?.id ?? null,
+      externalWritesEnabled: mode === "live" && capabilities.managementAlertsEnabled,
+      managementAlertsEnabled: mode === "live" && capabilities.managementAlertsEnabled,
+      managementAlertCount: managementAlerts.length,
+      verifiedManagementAlertCount: managementAlerts.filter((alert) => alert.verified).length,
       orderPlacementAllowed: false,
     };
     await recordJobFinish(ownDatabase.sql, {
@@ -163,7 +185,16 @@ export async function runStockObservation({
         service: "stock",
         runId,
         status: "error",
-        receipt: { schemaVersion: 1, runId, status: "error", error: failure },
+        receipt: {
+          schemaVersion: 1,
+          runId,
+          status: "error",
+          mode,
+          externalWritesEnabled: mode === "live" && capabilities.managementAlertsEnabled,
+          managementAlertsEnabled: mode === "live" && capabilities.managementAlertsEnabled,
+          orderPlacementAllowed: false,
+          error: failure,
+        },
         errorCode: failure.code,
         errorMessage: failure.message,
         completedAt: now().toISOString(),

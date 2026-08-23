@@ -6,7 +6,7 @@ type RpcError = {
   message?: string
 }
 
-export type AirbnbReplyReviewAction = 'save' | 'approve' | 'cancel'
+export type AirbnbReplyReviewAction = 'save' | 'approve' | 'cancel' | 'retry' | 'mark_sent'
 export type AirbnbOrderStatusAction = 'ordered' | 'delivery_due' | 'delivered' | 'cancelled'
 
 export async function loadAirbnbDashboard(householdId: string): Promise<AirbnbDashboardData> {

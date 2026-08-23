@@ -37,7 +37,7 @@ test("health is public and reports shadow mode", async () => {
   assert.equal(response.body.mode, "shadow");
 });
 
-test("support run is authenticated and cannot request live mode", async () => {
+test("support run is authenticated and cannot request live mode without all gates", async () => {
   const unauthorized = await request(createAirbnbSupportServer({ secret: "secret" }), { method: "POST", path: "/run" });
   assert.equal(unauthorized.status, 401);
   const live = await request(createAirbnbSupportServer({ secret: "secret" }), {
@@ -47,7 +47,7 @@ test("support run is authenticated and cannot request live mode", async () => {
     body: { mode: "live" },
   });
   assert.equal(live.status, 400);
-  assert.equal(live.body.error, "shadow_mode_only");
+  assert.equal(live.body.error, "live_mode_disabled");
 });
 
 test("shadow endpoint returns a receipt with external writes disabled", async () => {
@@ -57,4 +57,23 @@ test("shadow endpoint returns a receipt with external writes disabled", async ()
   }), { method: "POST", path: "/run", secret: "secret", body: {} });
   assert.equal(response.status, 200);
   assert.equal(response.body.externalWritesEnabled, false);
+});
+
+test("live endpoint passes mode only after the exact runtime gates are enabled", async () => {
+  const calls = [];
+  const env = {
+    AIRBNB_SUPPORT_EXTERNAL_WRITES_ENABLED: "true",
+    AIRBNB_SUPPORT_LIVE_CONFIRMATION: "ENABLE_AIRBNB_SUPPORT_WRITES",
+    AIRBNB_SUPPORT_REPLY_DELIVERY_ENABLED: "true",
+  };
+  const response = await request(createAirbnbSupportServer({
+    secret: "secret",
+    env,
+    run: async (options) => {
+      calls.push(options.mode);
+      return { status: "success", mode: options.mode, externalWritesEnabled: true };
+    },
+  }), { method: "POST", path: "/run", secret: "secret", body: { mode: "live" } });
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, ["live"]);
 });

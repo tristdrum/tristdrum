@@ -1,0 +1,358 @@
+{
+  "schemaVersion": 1,
+  "description": "Bounded, manually adjudicated synthetic reconstructions of recurring Airbnb guest-support cases.",
+  "anonymization": {
+    "rawMailboxContentCopied": false,
+    "names": "Synthetic alphabetic aliases only",
+    "threadIds": "Reserved 990000xxxx fixture range",
+    "messageIds": "example.test only"
+  },
+  "conversations": [
+    {
+      "id": "greeting",
+      "providerMessageId": "<support-fixture-01@example.test>",
+      "providerThreadId": "9900001001",
+      "subject": "RE: Reservation for Jasmine Studio Stay, Jan 10 - 11",
+      "listingName": "JASMINE STUDIO STAY",
+      "occurredAt": "2025-01-09T08:00:00Z",
+      "bodyLines": [
+        "RESERVATION FOR JASMINE STUDIO STAY, JAN 10 - 11",
+        "For your protection and safety, always communicate through Airbnb.",
+        "GUEST ALPHA",
+        "Guest",
+        "Hello, thank you for hosting me. I am looking forward to the stay.",
+        "Reply",
+        "https://www.airbnb.example/hosting/thread/9900001001?thread_type=home_booking"
+      ],
+      "classification": {
+        "topic": "greeting",
+        "riskTier": "low",
+        "confidence": 0.99,
+        "factsVerified": true,
+        "replyNeeded": true,
+        "draft": "Hello! We are looking forward to hosting you."
+      },
+      "expected": {
+        "directions": ["guest"],
+        "latestName": "GUEST ALPHA",
+        "latestText": "Hello, thank you for hosting me. I am looking forward to the stay.",
+        "autoReply": true,
+        "status": "approved_for_guard",
+        "alertManagement": false
+      }
+    },
+    {
+      "id": "wifi",
+      "providerMessageId": "<support-fixture-02@example.test>",
+      "providerThreadId": "9900001002",
+      "subject": "RE: Reservation for The Spekboom Studio, Jan 12 - 13",
+      "listingName": "THE SPEKBOOM STUDIO",
+      "occurredAt": "2025-01-11T09:00:00Z",
+      "bodyLines": [
+        "RESERVATION FOR THE SPEKBOOM STUDIO, JAN 12 - 13",
+        "For your protection and safety, always communicate through Airbnb.",
+        "GUEST BRAVO",
+        "Booker",
+        "Please resend the Wi-Fi network name and password.",
+        "Reply",
+        "https://www.airbnb.example/hosting/thread/9900001002?thread_type=home_booking"
+      ],
+      "classification": {
+        "topic": "wifi",
+        "riskTier": "low",
+        "confidence": 0.98,
+        "factsVerified": true,
+        "replyNeeded": true,
+        "draft": "I will resend the verified Wi-Fi details now."
+      },
+      "expected": {
+        "directions": ["guest"],
+        "latestName": "GUEST BRAVO",
+        "latestText": "Please resend the Wi-Fi network name and password.",
+        "autoReply": true,
+        "status": "approved_for_guard",
+        "alertManagement": false
+      }
+    },
+    {
+      "id": "directions",
+      "providerMessageId": "<support-fixture-03@example.test>",
+      "providerThreadId": "9900001003",
+      "subject": "RE: Reservation for Bougainvillea Courtyard Studio, Jan 14 - 15",
+      "listingName": "BOUGAINVILLEA COURTYARD STUDIO",
+      "occurredAt": "2025-01-13T10:00:00Z",
+      "bodyLines": [
+        "RESERVATION FOR BOUGAINVILLEA COURTYARD STUDIO, JAN 14 - 15",
+        "For your protection and safety, always communicate through Airbnb.",
+        "GUEST CHARLIE",
+        "Guest",
+        "Could you please send directions from the airport?",
+        "Reply",
+        "https://www.airbnb.example/hosting/thread/9900001003?thread_type=home_booking"
+      ],
+      "classification": {
+        "topic": "directions",
+        "riskTier": "low",
+        "confidence": 0.97,
+        "factsVerified": true,
+        "replyNeeded": true,
+        "draft": "Here are the verified directions to the studio."
+      },
+      "expected": {
+        "directions": ["guest"],
+        "latestName": "GUEST CHARLIE",
+        "latestText": "Could you please send directions from the airport?",
+        "autoReply": true,
+        "status": "approved_for_guard",
+        "alertManagement": false
+      }
+    },
+    {
+      "id": "check-in-time",
+      "providerMessageId": "<support-fixture-04@example.test>",
+      "providerThreadId": "9900001004",
+      "subject": "RE: Reservation for Jasmine Studio Stay, Jan 16 - 17",
+      "listingName": "JASMINE STUDIO STAY",
+      "occurredAt": "2025-01-15T11:00:00Z",
+      "bodyLines": [
+        "RESERVATION FOR JASMINE STUDIO STAY, JAN 16 - 17",
+        "For your protection and safety, always communicate through Airbnb.",
+        "GUEST DELTA",
+        "Booker",
+        "What time may I check in?",
+        "Reply",
+        "https://www.airbnb.example/hosting/thread/9900001004?thread_type=home_booking"
+      ],
+      "classification": {
+        "topic": "check_in_time",
+        "riskTier": "low",
+        "confidence": 0.99,
+        "factsVerified": true,
+        "replyNeeded": true,
+        "draft": "The verified check-in time is 14:00."
+      },
+      "expected": {
+        "directions": ["guest"],
+        "latestName": "GUEST DELTA",
+        "latestText": "What time may I check in?",
+        "autoReply": true,
+        "status": "approved_for_guard",
+        "alertManagement": false
+      }
+    },
+    {
+      "id": "unanswered-request",
+      "providerMessageId": "<support-fixture-05@example.test>",
+      "providerThreadId": "9900001005",
+      "subject": "RE: Reservation for The Spekboom Studio, Jan 18 - 19",
+      "listingName": "THE SPEKBOOM STUDIO",
+      "occurredAt": "2025-01-17T12:00:00Z",
+      "bodyLines": [
+        "RESERVATION FOR THE SPEKBOOM STUDIO, JAN 18 - 19",
+        "For your protection and safety, always communicate through Airbnb.",
+        "GUEST ECHO",
+        "Guest",
+        "Could someone confirm that you received my earlier request?",
+        "GUEST ECHO",
+        "Guest",
+        "I am still waiting for a response.",
+        "Reply",
+        "https://www.airbnb.example/hosting/thread/9900001005?thread_type=home_booking"
+      ],
+      "classification": {
+        "topic": "unknown",
+        "riskTier": "unknown",
+        "confidence": 0.72,
+        "factsVerified": false,
+        "replyNeeded": true,
+        "draft": null
+      },
+      "expected": {
+        "directions": ["guest", "guest"],
+        "latestName": "GUEST ECHO",
+        "latestText": "I am still waiting for a response.",
+        "autoReply": false,
+        "status": "needs_human",
+        "alertManagement": true
+      }
+    },
+    {
+      "id": "booking-question",
+      "providerMessageId": "<support-fixture-06@example.test>",
+      "providerThreadId": "9900001006",
+      "subject": "RE: Reservation for Bougainvillea Courtyard Studio, Jan 20 - 21",
+      "listingName": "BOUGAINVILLEA COURTYARD STUDIO",
+      "occurredAt": "2025-01-19T13:00:00Z",
+      "bodyLines": [
+        "RESERVATION FOR BOUGAINVILLEA COURTYARD STUDIO, JAN 20 - 21",
+        "For your protection and safety, always communicate through Airbnb.",
+        "GUEST FOXTROT",
+        "Booker",
+        "Can you confirm my booking and change it to two nights?",
+        "Reply",
+        "https://www.airbnb.example/hosting/thread/9900001006?thread_type=home_booking"
+      ],
+      "classification": {
+        "topic": "booking",
+        "riskTier": "high",
+        "confidence": 0.99,
+        "factsVerified": false,
+        "replyNeeded": true,
+        "draft": null
+      },
+      "expected": {
+        "directions": ["guest"],
+        "latestName": "GUEST FOXTROT",
+        "latestText": "Can you confirm my booking and change it to two nights?",
+        "autoReply": false,
+        "status": "needs_human",
+        "alertManagement": true
+      }
+    },
+    {
+      "id": "complaint",
+      "providerMessageId": "<support-fixture-07@example.test>",
+      "providerThreadId": "9900001007",
+      "subject": "RE: Reservation for Jasmine Studio Stay, Jan 22 - 23",
+      "listingName": "JASMINE STUDIO STAY",
+      "occurredAt": "2025-01-21T14:00:00Z",
+      "bodyLines": [
+        "RESERVATION FOR JASMINE STUDIO STAY, JAN 22 - 23",
+        "For your protection and safety, always communicate through Airbnb.",
+        "GUEST GOLF",
+        "Guest",
+        "The room is not clean and I need help now.",
+        "Reply",
+        "https://www.airbnb.example/hosting/thread/9900001007?thread_type=home_booking"
+      ],
+      "classification": {
+        "topic": "complaint",
+        "riskTier": "high",
+        "confidence": 0.99,
+        "factsVerified": false,
+        "replyNeeded": true,
+        "draft": null
+      },
+      "expected": {
+        "directions": ["guest"],
+        "latestName": "GUEST GOLF",
+        "latestText": "The room is not clean and I need help now.",
+        "autoReply": false,
+        "status": "needs_human",
+        "alertManagement": true
+      }
+    },
+    {
+      "id": "exception-request",
+      "providerMessageId": "<support-fixture-08@example.test>",
+      "providerThreadId": "9900001008",
+      "subject": "RE: Reservation for The Spekboom Studio, Jan 24 - 25",
+      "listingName": "THE SPEKBOOM STUDIO",
+      "occurredAt": "2025-01-23T15:00:00Z",
+      "bodyLines": [
+        "RESERVATION FOR THE SPEKBOOM STUDIO, JAN 24 - 25",
+        "For your protection and safety, always communicate through Airbnb.",
+        "GUEST HOTEL",
+        "Booker",
+        "Can I check out four hours late without an extra charge?",
+        "Reply",
+        "https://www.airbnb.example/hosting/thread/9900001008?thread_type=home_booking"
+      ],
+      "classification": {
+        "topic": "exception",
+        "riskTier": "high",
+        "confidence": 0.98,
+        "factsVerified": false,
+        "replyNeeded": true,
+        "draft": null
+      },
+      "expected": {
+        "directions": ["guest"],
+        "latestName": "GUEST HOTEL",
+        "latestText": "Can I check out four hours late without an extra charge?",
+        "autoReply": false,
+        "status": "needs_human",
+        "alertManagement": true
+      }
+    },
+    {
+      "id": "host-action-identity-unknown",
+      "providerMessageId": "<support-fixture-09@example.test>",
+      "providerThreadId": "9900001009",
+      "subject": "RE: Reservation for Bougainvillea Courtyard Studio, Jan 26 - 27",
+      "listingName": "BOUGAINVILLEA COURTYARD STUDIO",
+      "occurredAt": "2025-01-25T16:00:00Z",
+      "bodyLines": [
+        "RESERVATION FOR BOUGAINVILLEA COURTYARD STUDIO, JAN 26 - 27",
+        "For your protection and safety, always communicate through Airbnb.",
+        "GUEST INDIA",
+        "Guest",
+        "Could you confirm the check-in time?",
+        "HOST ALPHA",
+        "Host",
+        "Check-in is at the verified standard time.",
+        "GUEST INDIA",
+        "Guest",
+        "Thank you for confirming.",
+        "CO-HOST BRAVO",
+        "Host",
+        "You are welcome.",
+        "Reply",
+        "https://www.airbnb.example/hosting/thread/9900001009?thread_type=home_booking"
+      ],
+      "expected": {
+        "directions": ["guest", "host", "guest", "host"],
+        "latestName": "CO-HOST BRAVO",
+        "latestText": "You are welcome.",
+        "supportCandidate": false,
+        "hostIdentity": null
+      }
+    }
+  ],
+  "sendRaces": [
+    {
+      "id": "newer-human-reply",
+      "sourceFingerprint": "fixture-source-human",
+      "latestFingerprint": "fixture-source-human",
+      "sourceLastEventAt": "2025-02-01T10:00:00Z",
+      "latestEvents": [
+        { "direction": "host", "occurredAt": "2025-02-01T10:01:00Z" }
+      ],
+      "outboundMessageId": "<support-race-human@example.test>",
+      "sentMessageIds": [],
+      "expected": { "action": "handled_by_human", "reason": "newer_host_event" }
+    },
+    {
+      "id": "newer-guest-message",
+      "sourceFingerprint": "fixture-source-guest",
+      "latestFingerprint": "fixture-source-guest-updated",
+      "sourceLastEventAt": "2025-02-02T10:00:00Z",
+      "latestEvents": [
+        { "direction": "guest", "occurredAt": "2025-02-02T10:01:00Z" }
+      ],
+      "outboundMessageId": "<support-race-guest@example.test>",
+      "sentMessageIds": [],
+      "expected": { "action": "cancel_and_reevaluate", "reason": "newer_guest_event" }
+    },
+    {
+      "id": "duplicate-sent-reconciliation",
+      "sourceFingerprint": "fixture-source-sent",
+      "latestFingerprint": "fixture-source-sent",
+      "sourceLastEventAt": "2025-02-03T10:00:00Z",
+      "latestEvents": [],
+      "outboundMessageId": "<support-race-sent@example.test>",
+      "sentMessageIds": ["<support-race-sent@example.test>"],
+      "expected": { "action": "mark_sent", "reason": "sent_message_reconciled" }
+    },
+    {
+      "id": "stable-send",
+      "sourceFingerprint": "fixture-source-stable",
+      "latestFingerprint": "fixture-source-stable",
+      "sourceLastEventAt": "2025-02-04T10:00:00Z",
+      "latestEvents": [],
+      "outboundMessageId": "<support-race-stable@example.test>",
+      "sentMessageIds": [],
+      "expected": { "action": "send", "reason": "canonical_thread_unchanged" }
+    }
+  ]
+}

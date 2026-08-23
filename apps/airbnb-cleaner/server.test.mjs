@@ -44,7 +44,10 @@ function successfulResult(mode = "live", targetDate = "2026-08-07") {
 }
 
 async function withServer(dependencies, callback) {
-  const server = createAirbnbCleanerServer(dependencies);
+  const server = createAirbnbCleanerServer({
+    loadDatabaseLedger: async () => ({ status: "disabled", records: [] }),
+    ...dependencies,
+  });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   try {
@@ -72,6 +75,56 @@ test("health is public while run and status require scheduler authentication", a
     const status = await fetch(`${baseUrl}/status`);
     assert.equal(status.status, 401);
   });
+});
+
+test("a loaded Supabase ledger is authoritative for the report run", async () => {
+  const ledgerRecord = {
+    targetDate: "2026-08-07",
+    messageHash: "0123456789abcdef",
+    sentAt: "2026-08-06T11:30:00.000Z",
+    source: "supabase",
+  };
+  let received;
+  await withServer({
+    sharedLedgerRequired: true,
+    loadDatabaseLedger: async ({ targetDate }) => {
+      assert.equal(targetDate, "2026-08-07");
+      return { status: "loaded", records: [ledgerRecord] };
+    },
+    runReport: async (options) => {
+      received = options;
+      return successfulResult(options.mode, options.targetDate);
+    },
+  }, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/run`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ mode: "live", target: "2026-08-07" }),
+    });
+    assert.equal(response.status, 200);
+  });
+  assert.deepEqual(received.authoritativeLedgerRecords, [ledgerRecord]);
+});
+
+test("live delivery fails closed when its required Supabase ledger is unavailable", async () => {
+  let reportCalled = false;
+  await withServer({
+    sharedLedgerRequired: true,
+    loadDatabaseLedger: async () => ({ status: "disabled", records: [] }),
+    runReport: async () => {
+      reportCalled = true;
+      return successfulResult();
+    },
+  }, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/run`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ mode: "live", target: "2026-08-07" }),
+    });
+    assert.equal(response.status, 500);
+    assert.equal((await response.json()).status, "error");
+  });
+  assert.equal(reportCalled, false);
 });
 
 test("run persists and returns a sanitized receipt", async () => {

@@ -39,6 +39,23 @@ export function withAutomatedReplyFooter(text) {
   return `${body}\n\n${AUTOMATED_REPLY_FOOTER}`;
 }
 
+export function supportEscalationStages({ latestEventAt, now = new Date() }) {
+  const openedAt = Date.parse(latestEventAt);
+  const checkedAt = now instanceof Date ? now.getTime() : Date.parse(now);
+  if (!Number.isFinite(openedAt) || !Number.isFinite(checkedAt)) {
+    throw new Error("Support escalation timestamps are invalid.");
+  }
+  const minutesOpen = Math.max(0, Math.floor((checkedAt - openedAt) / 60_000));
+  const stages = [{ stage: "immediate", minutesOpen, alertType: "guest_escalation", severity: "warning" }];
+  if (minutesOpen >= 45) {
+    stages.push({ stage: "reminder", minutesOpen, alertType: "guest_escalation", severity: "warning" });
+  }
+  if (minutesOpen >= 60) {
+    stages.push({ stage: "overdue", minutesOpen, alertType: "guest_overdue", severity: "critical" });
+  }
+  return stages;
+}
+
 export function finalSendDecision({
   sourceFingerprint,
   latestFingerprint,

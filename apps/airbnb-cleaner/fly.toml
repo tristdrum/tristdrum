@@ -6,6 +6,7 @@ primary_region = "jnb"
 
 [env]
   AIRBNB_CLEANER_HOME = "/data"
+  AIRBNB_CLEANER_SHARED_LEDGER_REQUIRED = "true"
   AIRBNB_WHATSAPP_CHAT_NAME = "Airbnbs"
   PORT = "3000"
   TZ = "Africa/Johannesburg"

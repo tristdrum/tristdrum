@@ -17,6 +17,7 @@ import {
   parseReservation,
   parseISODate,
   planDelivery,
+  runReport,
   subjectMayTouchTarget,
   whatsappSend,
   xhosaGuestCountLabel,
@@ -340,6 +341,25 @@ test("dry-run never appends the ledger", async () => {
   assert.equal(result.status, "dry_run_ok");
   assert.deepEqual(calls.map((call) => call.dryRun), [true]);
   assert.equal(appended.length, 0);
+});
+
+test("Supabase ledger input replaces the volume ledger for planning", async () => {
+  const result = await runReport({
+    mode: "preview",
+    targetDate: "2026-07-28",
+    collectMessagesFn: async () => ({ envelopesFound: 0, messages: [] }),
+    fetchWeatherFn: async () => dryWeather,
+    loadLedgerRecordsFn: () => [{
+      targetDate: "2026-07-28",
+      messageHash: "stale-volume-plan",
+      sentAt: "2026-07-27T11:30:00.000Z",
+    }],
+    authoritativeLedgerRecords: [],
+    workDir: "/tmp",
+  });
+
+  assert.equal(result.isUpdate, false);
+  assert.deepEqual(result.ledger, { authority: "supabase", recordCount: 0 });
 });
 
 test("cleaners-chat history participates in duplicate detection", () => {

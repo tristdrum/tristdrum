@@ -64,7 +64,7 @@ export function parseAirbnbConversationEmail({
   replyTo = null,
   references = [],
 }) {
-  if (!trustedAirbnbSender(from) || String(from).trim().toLowerCase() !== "express@airbnb.com") return null;
+  if (!trustedAirbnbSender(from)) return null;
   const threadId = /\/hosting\/thread\/(\d+)/i.exec(body)?.[1] ?? null;
   if (!threadId || !/^RE:\s*Reservation for /i.test(String(subject ?? ""))) return null;
   const heading = /Reservation for\s+(.+?),\s+(.+?)(?:\n|$)/i.exec(String(body ?? ""));

@@ -1348,6 +1348,7 @@ export async function runReport({
   whatsappSendFn = whatsappSend,
   verifyChatFn = null,
   loadLedgerRecordsFn = loadLedgerRecords,
+  authoritativeLedgerRecords = null,
   appendLedgerFn = appendLedger,
   now = () => new Date(),
   deliveryAttemptId = randomUUID(),
@@ -1361,7 +1362,7 @@ export async function runReport({
   const collected = await collectReservations(targetDate, searchDays, maxRead, collectMessagesFn);
   const weather = await fetchWeatherFn(targetDate);
   const unitReports = classifyUnits(collected.reservations, targetDate);
-  const ledgerRecords = loadLedgerRecordsFn();
+  const ledgerRecords = authoritativeLedgerRecords ?? loadLedgerRecordsFn();
   let chatMessages = [];
   if (mode === "dry-run" || mode === "live") {
     chatMessages = await fetchChatMessagesFn(CHAT_RECONCILIATION_LIMIT);
@@ -1436,6 +1437,10 @@ export async function runReport({
     chatRead: mode === "preview" ? null : { ok: true, messageCount: chatMessages.length },
     reservations: collected.reservations,
     reservationEvidence: collected.evidence,
+    ledger: {
+      authority: authoritativeLedgerRecords === null ? "volume" : "supabase",
+      recordCount: ledgerRecords.length,
+    },
   };
 
   if (!confidence.ok) {

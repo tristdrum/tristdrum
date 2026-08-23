@@ -398,15 +398,34 @@ export async function loadForecastInputs(sql, { householdId, startDate, endDate 
 }
 
 export async function storeShoppingList(sql, { householdId, forecast, list }) {
-  if (!list.items.length) return null;
   const snapshot = {
     startDate: forecast.startDate,
     endDate: forecast.endDate,
     arrivalCount: forecast.arrivals.length,
     demand: forecast.demand.map(({ sku, rawDemand, bufferedDemand }) => ({ sku, rawDemand, bufferedDemand })),
   };
-  const contentHash = contentFingerprint(JSON.stringify({ snapshot, items: list.items }));
   return sql.begin(async (transaction) => {
+    if (!list.items.length) {
+      const superseded = await transaction`
+        update airbnb.shopping_lists
+        set status = 'superseded', updated_at = now()
+        where household_id = ${householdId}
+          and status = 'draft'
+        returning id
+      `;
+      if (superseded.length) {
+        await transaction`
+          update airbnb.alerts
+          set status = 'resolved', resolved_at = now(), updated_at = now()
+          where household_id = ${householdId}
+            and status = 'suppressed'
+            and alert_type = 'stock_low'
+            and nullif(details->>'shoppingListId', '')::uuid = any(${superseded.map((row) => row.id)}::uuid[])
+        `;
+      }
+      return null;
+    }
+    const contentHash = contentFingerprint(JSON.stringify({ snapshot, items: list.items }));
     const rows = await transaction`
       insert into airbnb.shopping_lists (
         household_id, forecast_start, forecast_end, estimated_total_cents,
@@ -424,13 +443,24 @@ export async function storeShoppingList(sql, { householdId, forecast, list }) {
       returning id, status
     `;
     const shoppingList = rows[0];
-    await transaction`
+    const superseded = await transaction`
       update airbnb.shopping_lists
       set status = 'superseded'
       where household_id = ${householdId}
         and id <> ${shoppingList.id}
         and status = 'draft'
+      returning id
     `;
+    if (superseded.length) {
+      await transaction`
+        update airbnb.alerts
+        set status = 'resolved', resolved_at = now(), updated_at = now()
+        where household_id = ${householdId}
+          and status = 'suppressed'
+          and alert_type = 'stock_low'
+          and nullif(details->>'shoppingListId', '')::uuid = any(${superseded.map((row) => row.id)}::uuid[])
+      `;
+    }
     for (const item of list.items) {
       const inventoryRows = await transaction`
         select id from airbnb.inventory_items
@@ -462,9 +492,169 @@ export async function storeShoppingList(sql, { householdId, forecast, list }) {
         ${`${list.items.length} Airbnb stock item${list.items.length === 1 ? "" : "s"} need attention`},
         ${transaction.json({ shoppingListId: shoppingList.id, countsToConfirm: list.countsToConfirm })}
       )
-      on conflict (household_id, dedupe_key) do nothing
+      on conflict (household_id, dedupe_key)
+      do update set status = case
+                      when airbnb.alerts.status = 'resolved' then 'suppressed'
+                      else airbnb.alerts.status
+                    end,
+                    summary = excluded.summary,
+                    details = excluded.details,
+                    resolved_at = case
+                      when airbnb.alerts.status = 'resolved' then null
+                      else airbnb.alerts.resolved_at
+                    end,
+                    updated_at = now()
     `;
     return { id: shoppingList.id, status: shoppingList.status, contentHash };
+  });
+}
+
+export async function storeStockCountReview(sql, { householdId, projections, runDate }) {
+  const countsToConfirm = projections
+    .filter((item) => item.countToConfirm)
+    .map((item) => ({
+      sku: item.sku,
+      displayName: item.displayName,
+      category: item.category,
+      stockUnit: item.stockUnit,
+    }));
+  if (!countsToConfirm.length) return null;
+  const rows = await sql`
+    insert into airbnb.alerts (
+      household_id, alert_type, severity, status, dedupe_key, summary, details
+    ) values (
+      ${householdId}, 'stock_count_review', 'info', 'suppressed',
+      ${`stock-count-review:${runDate}`},
+      ${`${countsToConfirm.length} Airbnb stock counts need confirmation`},
+      ${sql.json({ countsToConfirm, runDate })}
+    )
+    on conflict (household_id, dedupe_key)
+    do update set summary = excluded.summary,
+                  details = excluded.details,
+                  updated_at = now()
+    returning id, status
+  `;
+  return rows[0] ?? null;
+}
+
+export async function loadSuppressedStockAlerts(sql, {
+  householdId,
+  limit = 24,
+  now = new Date(),
+}) {
+  return sql`
+    select
+      alert.id,
+      alert.alert_type,
+      alert.severity,
+      alert.dedupe_key,
+      alert.summary,
+      alert.details,
+      alert.opened_at,
+      case when alert.alert_type = 'stock_low' then (
+        select jsonb_build_object(
+          'id', shopping_list.id,
+          'estimatedTotalCents', shopping_list.estimated_total_cents,
+          'forecastStart', shopping_list.forecast_start,
+          'forecastEnd', shopping_list.forecast_end
+        )
+        from airbnb.shopping_lists shopping_list
+        where shopping_list.household_id = alert.household_id
+          and shopping_list.id = nullif(alert.details->>'shoppingListId', '')::uuid
+      ) else null end as shopping_list,
+      case when alert.alert_type = 'stock_low' then coalesce((
+        select jsonb_agg(jsonb_build_object(
+          'sku', inventory.sku,
+          'displayName', inventory.display_name,
+          'stockUnit', inventory.stock_unit,
+          'quantity', item.quantity,
+          'countToConfirm', item.count_to_confirm
+        ) order by inventory.staple_priority, inventory.display_name)
+        from airbnb.shopping_list_items item
+        join airbnb.inventory_items inventory
+          on inventory.household_id = item.household_id
+         and inventory.id = item.inventory_item_id
+        where item.household_id = alert.household_id
+          and item.shopping_list_id = nullif(alert.details->>'shoppingListId', '')::uuid
+      ), '[]'::jsonb) else '[]'::jsonb end as items
+    from airbnb.alerts alert
+    where alert.household_id = ${householdId}
+      and alert.status = 'suppressed'
+      and alert.alert_type in ('stock_low', 'stock_count_review', 'order_update')
+      and (
+        (
+          alert.alert_type = 'stock_low'
+          and exists (
+            select 1
+            from airbnb.shopping_lists current_list
+            where current_list.household_id = alert.household_id
+              and current_list.id = nullif(alert.details->>'shoppingListId', '')::uuid
+              and current_list.status = 'draft'
+              and current_list.updated_at >= ${now}::timestamptz - interval '1 hour'
+          )
+        )
+        or (
+          alert.alert_type = 'stock_count_review'
+          and alert.updated_at >= ${now}::timestamptz - interval '1 hour'
+        )
+        or (
+          alert.alert_type = 'order_update'
+          and exists (
+            select 1
+            from airbnb.orders current_order
+            where current_order.household_id = alert.household_id
+              and current_order.id = nullif(alert.details->>'orderId', '')::uuid
+              and (
+                (
+                  alert.dedupe_key like 'sixty60:confirmation:%'
+                  and current_order.status = 'confirmation_received'
+                  and current_order.ordered_at >= ${now}::timestamptz - interval '24 hours'
+                )
+                or (
+                  alert.dedupe_key like 'sixty60:invoice:%'
+                  and current_order.inventory_credited_at >= ${now}::timestamptz - interval '24 hours'
+                )
+              )
+          )
+        )
+      )
+    order by alert.opened_at, alert.id
+    limit ${limit}
+  `;
+}
+
+export async function markStockAlertNotified(sql, {
+  householdId,
+  alertId,
+  idempotencyKey,
+  now,
+}) {
+  return sql.begin(async (transaction) => {
+    const rows = await transaction`
+      update airbnb.alerts
+      set status = 'notified', notified_at = ${now}, updated_at = ${now}
+      where household_id = ${householdId}
+        and id = ${alertId}
+        and status = 'suppressed'
+        and alert_type in ('stock_low', 'stock_count_review', 'order_update')
+      returning id, alert_type, dedupe_key
+    `;
+    if (!rows[0]) return null;
+    await transaction`
+      insert into airbnb.audit_events (
+        household_id, actor_type, actor_id, action, entity_type, entity_id, details, occurred_at
+      ) values (
+        ${householdId}, 'worker', 'stock', 'stock_alert_notified', 'alert', ${alertId},
+        ${transaction.json({
+          alertType: rows[0].alertType,
+          alertDedupeKey: rows[0].dedupeKey,
+          idempotencyKey,
+          verifiedReadback: true,
+        })},
+        ${now}
+      )
+    `;
+    return { id: rows[0].id, status: "notified" };
   });
 }
 

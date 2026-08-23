@@ -16,6 +16,7 @@ import {
   projectInventory,
   setupGuestCount,
   supportDisposition,
+  supportEscalationStages,
   trustedAirbnbSender,
   withAutomatedReplyFooter,
 } from "./index.mjs";
@@ -206,6 +207,22 @@ test("automated footer is subtle, exact, and idempotent", () => {
   assert.equal(withAutomatedReplyFooter(message), message);
 });
 
+test("support escalation stages are immediate, reminded at 45 minutes, and overdue at 60", () => {
+  const latestEventAt = "2026-08-21T12:00:00Z";
+  assert.deepEqual(
+    supportEscalationStages({ latestEventAt, now: new Date("2026-08-21T12:44:59Z") }).map((item) => item.stage),
+    ["immediate"],
+  );
+  assert.deepEqual(
+    supportEscalationStages({ latestEventAt, now: new Date("2026-08-21T12:45:00Z") }).map((item) => item.stage),
+    ["immediate", "reminder"],
+  );
+  assert.deepEqual(
+    supportEscalationStages({ latestEventAt, now: new Date("2026-08-21T13:00:00Z") }).map((item) => item.stage),
+    ["immediate", "reminder", "overdue"],
+  );
+});
+
 test("final-send guard never races a newer human or guest reply", () => {
   const base = {
     sourceFingerprint: "original",
@@ -333,6 +350,26 @@ test("Airbnb conversation parser treats every Host event as human without inferr
   assert.deepEqual(parsed.entries.map((entry) => entry.direction), ["guest", "host"]);
   assert.equal(parsed.entries[1].name, "JANE");
   assert.equal(parsed.listingName, "JASMINE STUDIO STAY");
+});
+
+test("Airbnb conversation parser accepts trusted automated copies for supplemental host evidence", () => {
+  const parsed = parseAirbnbConversationEmail({
+    providerMessageId: "mail-automated-1",
+    from: "automated@airbnb.com",
+    subject: "RE: Reservation for Jasmine Studio Stay, Aug 22 - 23",
+    occurredAt: "2026-08-21T16:25:00Z",
+    body: [
+      "RESERVATION FOR JASMINE STUDIO STAY, AUG 22 - 23",
+      "GUEST FIXTURE",
+      "Guest",
+      "Hello",
+      "JANE",
+      "Host",
+      "Welcome",
+      "https://www.airbnb.co.za/hosting/thread/2635168007?thread_type=home_booking",
+    ].join("\n"),
+  });
+  assert.deepEqual(parsed.entries.map((entry) => entry.direction), ["guest", "host"]);
 });
 
 test("identical repeated guest messages retain distinct stable conversation keys", () => {

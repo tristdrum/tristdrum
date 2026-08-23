@@ -3,7 +3,7 @@
 import { timingSafeEqual, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
-import { syncCleanerDatabase } from "./database.mjs";
+import { loadCleanerLedgerRecords, syncCleanerDatabase } from "./database.mjs";
 import { formatISODate, parseISODate, resolveTargetDate, runReport, sendFinalFailureAlert } from "./report.mjs";
 import {
   acquireRunLock,
@@ -106,7 +106,16 @@ async function handleRun(request, response, dependencies) {
   let release = () => {};
   try {
     release = acquireRunLock();
-    const result = await dependencies.runReport({ mode, targetDate, deliveryAttemptId: runId });
+    const databaseLedger = await dependencies.loadDatabaseLedger({ targetDate });
+    if (mode === "live" && dependencies.sharedLedgerRequired && databaseLedger.status !== "loaded") {
+      throw new Error("The required Supabase cleaner ledger is not configured.");
+    }
+    const result = await dependencies.runReport({
+      mode,
+      targetDate,
+      deliveryAttemptId: runId,
+      authoritativeLedgerRecords: databaseLedger.status === "loaded" ? databaseLedger.records : null,
+    });
     const completedAt = dependencies.now().toISOString();
     const receipt = sanitizeRunResult(result, { runId, startedAt, completedAt, finalAttempt });
     try {
@@ -171,6 +180,9 @@ export function createAirbnbCleanerServer(dependencies = {}) {
     runReport: dependencies.runReport ?? runReport,
     sendFinalFailureAlert: dependencies.sendFinalFailureAlert ?? sendFinalFailureAlert,
     syncDatabase: dependencies.syncDatabase ?? syncCleanerDatabase,
+    loadDatabaseLedger: dependencies.loadDatabaseLedger ?? loadCleanerLedgerRecords,
+    sharedLedgerRequired: dependencies.sharedLedgerRequired
+      ?? process.env.AIRBNB_CLEANER_SHARED_LEDGER_REQUIRED === "true",
     now: dependencies.now ?? (() => new Date()),
   };
   return createServer(async (request, response) => {

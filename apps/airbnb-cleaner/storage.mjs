@@ -74,6 +74,7 @@ export function sanitizeRunResult(result, { runId, startedAt, completedAt, final
     legacyMessageHash: result.legacyMessageHash,
     isUpdate: result.isUpdate,
     duplicateSource: result.duplicateSource ?? null,
+    ledger: result.ledger ?? null,
     chatRead: result.chatRead,
     whatsappDryRun: providerSummary(result.whatsappDryRun),
     whatsappLiveSend: providerSummary(result.whatsappLiveSend),

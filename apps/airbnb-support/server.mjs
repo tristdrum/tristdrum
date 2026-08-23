@@ -3,7 +3,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
-import { loadSupportStatus, runSupportShadow } from "./runner.mjs";
+import { loadSupportStatus, runSupport } from "./runner.mjs";
+import { assertSupportModeAllowed, supportRuntimeCapabilities } from "./runtime.mjs";
 
 const PORT = Number.parseInt(process.env.PORT ?? "3000", 10);
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -44,15 +45,24 @@ async function readJson(request) {
 }
 
 export function createAirbnbSupportServer({
-  run = runSupportShadow,
+  run = runSupport,
   status = loadSupportStatus,
   secret = null,
+  env = process.env,
 } = {}) {
   return createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
       if (request.method === "GET" && url.pathname === "/healthz") {
-        json(response, 200, { ok: true, service: "airbnb-support", mode: "shadow" });
+        const capabilities = supportRuntimeCapabilities(env);
+        json(response, 200, {
+          ok: true,
+          service: "airbnb-support",
+          mode: capabilities.mode,
+          replyDeliveryEnabled: capabilities.replyDeliveryEnabled,
+          autonomousRepliesEnabled: capabilities.autonomousRepliesEnabled,
+          managementAlertsEnabled: capabilities.managementAlertsEnabled,
+        });
         return;
       }
       if (!authorized(request, secret ?? expectedSecret())) {
@@ -61,11 +71,16 @@ export function createAirbnbSupportServer({
       }
       if (request.method === "POST" && url.pathname === "/run") {
         const body = await readJson(request);
-        if (body.mode != null && body.mode !== "shadow") {
-          json(response, 400, { error: "shadow_mode_only" });
+        const mode = body.mode ?? "shadow";
+        try {
+          assertSupportModeAllowed(mode, env);
+        } catch (error) {
+          json(response, 400, {
+            error: error.code === "LIVE_MODE_DISABLED" ? "live_mode_disabled" : "invalid_mode",
+          });
           return;
         }
-        json(response, 200, await run());
+        json(response, 200, await run({ mode, env }));
         return;
       }
       if (request.method === "GET" && url.pathname === "/status") {
@@ -90,7 +105,12 @@ const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === proce
 if (isMainModule) {
   const server = createAirbnbSupportServer();
   server.listen(PORT, HOST, () => {
-    console.log(JSON.stringify({ event: "listening", service: "airbnb-support", port: PORT, mode: "shadow" }));
+    console.log(JSON.stringify({
+      event: "listening",
+      service: "airbnb-support",
+      port: PORT,
+      mode: supportRuntimeCapabilities(process.env).mode,
+    }));
   });
   const shutdown = () => server.close(() => process.exit(0));
   process.once("SIGTERM", shutdown);

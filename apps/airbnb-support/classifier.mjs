@@ -107,7 +107,7 @@ export async function classifyGuestMessage({
         },
       },
     }),
-    signal: AbortSignal.timeout(positiveInteger(env.AIRBNB_SUPPORT_OPENAI_TIMEOUT_MS, 30_000)),
+    signal: AbortSignal.timeout(positiveInteger(env.AIRBNB_SUPPORT_OPENAI_TIMEOUT_MS, 10_000)),
   });
   if (!response.ok) throw new Error(`OpenAI classification failed with HTTP ${response.status}.`);
   const raw = JSON.parse(responseText(await response.json()));

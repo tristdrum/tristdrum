@@ -4,6 +4,7 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { loadStockStatus, runStockObservation } from "./runner.mjs";
+import { assertStockModeAllowed, stockRuntimeCapabilities } from "./runtime.mjs";
 
 const PORT = Number.parseInt(process.env.PORT ?? "3000", 10);
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -52,12 +53,20 @@ export function createAirbnbStockServer({
   status = loadStockStatus,
   now = () => new Date(),
   secret = null,
+  env = process.env,
 } = {}) {
   return createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
       if (request.method === "GET" && url.pathname === "/healthz") {
-        json(response, 200, { ok: true, service: "airbnb-stock", mode: "observation" });
+        const capabilities = stockRuntimeCapabilities(env);
+        json(response, 200, {
+          ok: true,
+          service: "airbnb-stock",
+          mode: "observation",
+          managementAlertsEnabled: capabilities.managementAlertsEnabled,
+          orderPlacementAllowed: false,
+        });
         return;
       }
       if (!authorized(request, secret ?? expectedSecret())) {
@@ -66,11 +75,20 @@ export function createAirbnbStockServer({
       }
       if (request.method === "POST" && url.pathname === "/run") {
         const body = await readJson(request);
-        if (body.mode != null && body.mode !== "observation") {
-          json(response, 400, { error: "observation_mode_only" });
+        const mode = body.mode ?? "observation";
+        try {
+          assertStockModeAllowed(mode, env);
+        } catch (error) {
+          json(response, 400, {
+            error: error.code === "LIVE_MODE_DISABLED" ? "live_mode_disabled" : "invalid_mode",
+          });
           return;
         }
-        const receipt = await run({ fullReview: body.fullReview === true || (body.fullReview == null && isTuesday(now())) });
+        const receipt = await run({
+          mode,
+          env,
+          fullReview: body.fullReview === true || (body.fullReview == null && isTuesday(now())),
+        });
         json(response, 200, receipt);
         return;
       }
@@ -93,7 +111,14 @@ const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === proce
 if (isMainModule) {
   const server = createAirbnbStockServer();
   server.listen(PORT, HOST, () => {
-    console.log(JSON.stringify({ event: "listening", service: "airbnb-stock", port: PORT, mode: "observation" }));
+    console.log(JSON.stringify({
+      event: "listening",
+      service: "airbnb-stock",
+      port: PORT,
+      mode: "observation",
+      managementAlertsEnabled: stockRuntimeCapabilities(process.env).managementAlertsEnabled,
+      orderPlacementAllowed: false,
+    }));
   });
   const shutdown = () => server.close(() => process.exit(0));
   process.once("SIGTERM", shutdown);
