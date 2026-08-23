@@ -108,8 +108,8 @@ verification, duplicate checks, independent monitoring, and a rollback window.
   the host as Jane.
 - Generate a stable outbound Message-ID and reconcile Gmail Sent before retrying
   an ambiguous SMTP failure. The final guard also checks recent human replies
-  in Tristan's Sent mailbox before SMTP; support stays dormant until both host
-  round trips are proven.
+  in both Tristan's and Jane's Sent mailboxes before SMTP; support stays dormant
+  until both host round trips are proven.
 
 ## Dashboard
 

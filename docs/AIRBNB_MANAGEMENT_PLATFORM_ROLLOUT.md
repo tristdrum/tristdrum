@@ -63,6 +63,10 @@ whether one or both are pending.
   the 2026-08-24 preflight, so no deploy was attempted.
 - The linked Supabase CLI must authenticate and show only the expected pending
   migration before `db push` is allowed.
+- The native Supabase connector did not expose the linked project
+  `akvlarrmhlbnuvnfpvic` during the 2026-08-24 preflight. It is not an
+  authorized substitute unless that exact project becomes visible and its
+  account scope is verified.
 - OpenAI classification currently returns `insufficient_quota`. Support must
   stay shadow-only and unscheduled until classification succeeds and both
   Tristan and Jane host-reply round trips are proven from the canonical stream.
