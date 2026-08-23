@@ -68,7 +68,43 @@ test("verified Management sends are marked notified exactly once", async () => {
     markNotified: async (_sql, value) => calls.push(["mark", value.alertId]),
     now: () => new Date("2026-08-23T12:05:00.000Z"),
   });
-  assert.equal(loadedLimit, 1);
+  assert.equal(loadedLimit, 24);
   assert.equal(result[0].verified, true);
   assert.deepEqual(calls.map(([name]) => name), ["send", "mark"]);
+});
+
+test("a delayed first notification scans all stages and sends only the overdue alert", async () => {
+  const calls = [];
+  const result = await notifySupportManagement({
+    sql: {},
+    householdId: "22222222-2222-4222-8222-222222222222",
+    loadAlerts: async () => [
+      alert("immediate", "immediate"),
+      alert("reminder", "reminder"),
+      alert("overdue", "overdue"),
+    ],
+    sendMessage: async (message) => {
+      calls.push(message.text);
+      return { verification: { found: true } };
+    },
+    markNotified: async (_sql, value) => calls.push(value.alertId),
+  });
+  assert.equal(result[0].stage, "overdue");
+  assert.match(calls[0], /reply overdue/i);
+  assert.equal(calls[1], "overdue");
+});
+
+test("an unverified Management send is never marked notified", async () => {
+  let marked = false;
+  await assert.rejects(
+    notifySupportManagement({
+      sql: {},
+      householdId: "22222222-2222-4222-8222-222222222222",
+      loadAlerts: async () => [alert("immediate", "immediate")],
+      sendMessage: async () => ({ verification: { found: false } }),
+      markNotified: async () => { marked = true; },
+    }),
+    { code: "MANAGEMENT_READBACK_UNVERIFIED" },
+  );
+  assert.equal(marked, false);
 });

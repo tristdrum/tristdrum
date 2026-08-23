@@ -45,10 +45,13 @@ function renderShoppingList(alert, dashboardUrl) {
   const hasUnresolvedConfirmations = confirmNames.length > 0
     || (Array.isArray(alert.details?.countsToConfirm) && alert.details.countsToConfirm.length > 0);
   const total = currencyLabel(alert.shoppingList?.estimatedTotalCents);
+  const minimumMet = alert.shoppingList?.meetsFreeDeliveryMinimum === true;
+  const estimateComplete = alert.shoppingList?.priceEstimateComplete === true;
   return [
     "*Airbnb stock shopping list*",
     ...(itemLines.length ? itemLines : ["Shopping list is ready in the dashboard."]),
-    ...(total ? [`Estimated total: ${total}`] : []),
+    ...(total ? [`Estimated total: ${total}${estimateComplete ? "" : " plus unpriced items"}`] : []),
+    ...(!minimumMet ? ["Keep the Sixty60 basket at R350 or more for free delivery; aim for about R400."] : []),
     ...(hasUnresolvedConfirmations
       ? [`Count to confirm: ${confirmNames.length ? confirmNames.join(", ") : "see dashboard"}`]
       : []),

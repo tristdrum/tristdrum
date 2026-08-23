@@ -9,3 +9,8 @@ retry behavior, and WhatsApp verification. Supabase `airbnb.cleaner_plans` is th
 delivery-ledger authority; the volume JSONL remains a rollback mirror until the
 post-cutover rollback window closes. Live delivery fails closed when the shared
 ledger cannot be loaded.
+
+Scheduled attempts reuse a content-scoped WhatsApp idempotency key. Final
+failure alerts are sent only to the private destination and count as delivered
+only after exact chat readback. Live failures are mirrored into sanitized
+Supabase job receipts even when plan generation does not complete.

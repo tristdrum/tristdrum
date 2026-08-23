@@ -13,6 +13,13 @@ assert.equal(matches.length, 1, "expected exactly one Airbnb cleaner scheduler m
 const sql = readFileSync(resolve(MIGRATIONS_DIR, matches[0]), "utf8");
 const normalized = sql.replace(/\s+/g, " ").trim();
 const lowered = normalized.toLowerCase();
+const hardeningPath = readdirSync(MIGRATIONS_DIR).find(
+  (name) => name.endsWith("_airbnb_operational_hardening.sql"),
+);
+assert.ok(hardeningPath, "expected Airbnb operational hardening migration");
+const hardeningSql = readFileSync(resolve(MIGRATIONS_DIR, hardeningPath), "utf8");
+const hardeningNormalized = hardeningSql.replace(/\s+/g, " ").trim();
+const hardeningLowered = hardeningNormalized.toLowerCase();
 
 test("scheduler migration defines the proven six attempts and two monitors", () => {
   const attempts = [...sql.matchAll(
@@ -82,4 +89,20 @@ test("independent monitor checks success, blockers, and verified private alerts"
   assert.ok(normalized.includes("'target', %L"));
   assert.ok(normalized.includes("'finalAttempt', %s"));
   assert.ok(normalized.includes("timeout_milliseconds := 180000"));
+});
+
+test("monitor hardening requires readback after every send result and reuses one live key", () => {
+  for (const expected of [
+    "failurealert' ->> 'verifiedfromchat'",
+    "('idempotency-key', idempotency_key)::extensions.http_header",
+    "alert_url || '?limit=20'",
+    "outbound.message ->> 'from_me'",
+    "outbound.message ->> 'text' = alert_text",
+    "'verifiedfromchat', true",
+    "alert was not found in chat after all retries",
+  ]) {
+    assert.ok(hardeningLowered.includes(expected), `missing hardening contract: ${expected}`);
+  }
+  assert.doesNotMatch(hardeningLowered, /idempotency_key\s*\|\|\s*':attempt-'/);
+  assert.doesNotMatch(hardeningLowered, /'alerted',\s*true\s*\)\s*;\s*end/);
 });

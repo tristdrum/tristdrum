@@ -3,12 +3,17 @@
 import { timingSafeEqual, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
-import { loadCleanerLedgerRecords, syncCleanerDatabase } from "./database.mjs";
+import {
+  loadCleanerLedgerRecords,
+  syncCleanerDatabase,
+  syncCleanerFailureDatabase,
+} from "./database.mjs";
 import { formatISODate, parseISODate, resolveTargetDate, runReport, sendFinalFailureAlert } from "./report.mjs";
 import {
   acquireRunLock,
   loadStatus,
   persistRun,
+  redactSensitiveText,
   sanitizeFailure,
   sanitizeRunResult,
 } from "./storage.mjs";
@@ -113,7 +118,6 @@ async function handleRun(request, response, dependencies) {
     const result = await dependencies.runReport({
       mode,
       targetDate,
-      deliveryAttemptId: runId,
       authoritativeLedgerRecords: databaseLedger.status === "loaded" ? databaseLedger.records : null,
     });
     const completedAt = dependencies.now().toISOString();
@@ -125,7 +129,7 @@ async function handleRun(request, response, dependencies) {
       receipt.databaseSync = {
         status: "error",
         code: databaseError.code ?? null,
-        message: String(databaseError.message ?? "Database synchronization failed.").slice(0, 200),
+        message: redactSensitiveText(databaseError.message ?? "Database synchronization failed.").slice(0, 200),
       };
     }
     if (
@@ -140,7 +144,7 @@ async function handleRun(request, response, dependencies) {
           reason: "database_sync",
         });
       } catch (alertError) {
-        receipt.failureAlert = { sent: false, error: String(alertError.message).slice(0, 200) };
+        receipt.failureAlert = { sent: false, error: redactSensitiveText(alertError.message).slice(0, 200) };
       }
     }
     persistRun(receipt);
@@ -149,7 +153,7 @@ async function handleRun(request, response, dependencies) {
         try {
           receipt.failureAlert = await dependencies.sendFinalFailureAlert({ targetDate: result.targetDate, runId });
         } catch (alertError) {
-          receipt.failureAlert = { sent: false, error: String(alertError.message).slice(0, 200) };
+          receipt.failureAlert = { sent: false, error: redactSensitiveText(alertError.message).slice(0, 200) };
         }
         persistRun(receipt);
       }
@@ -164,8 +168,18 @@ async function handleRun(request, response, dependencies) {
       try {
         receipt.failureAlert = await dependencies.sendFinalFailureAlert({ targetDate, runId });
       } catch (alertError) {
-        receipt.failureAlert = { sent: false, error: String(alertError.message).slice(0, 200) };
+        receipt.failureAlert = { sent: false, error: redactSensitiveText(alertError.message).slice(0, 200) };
       }
+    }
+    try {
+      const databaseSync = await dependencies.syncFailureDatabase({ receipt });
+      if (databaseSync?.status !== "disabled") receipt.databaseSync = databaseSync;
+    } catch (databaseError) {
+      receipt.databaseSync = {
+        status: "error",
+        code: databaseError.code ?? null,
+        message: redactSensitiveText(databaseError.message ?? "Database synchronization failed.").slice(0, 200),
+      };
     }
     persistRun(receipt);
     const status = error.code === "RUN_IN_PROGRESS" ? 409 : 500;
@@ -180,6 +194,7 @@ export function createAirbnbCleanerServer(dependencies = {}) {
     runReport: dependencies.runReport ?? runReport,
     sendFinalFailureAlert: dependencies.sendFinalFailureAlert ?? sendFinalFailureAlert,
     syncDatabase: dependencies.syncDatabase ?? syncCleanerDatabase,
+    syncFailureDatabase: dependencies.syncFailureDatabase ?? syncCleanerFailureDatabase,
     loadDatabaseLedger: dependencies.loadDatabaseLedger ?? loadCleanerLedgerRecords,
     sharedLedgerRequired: dependencies.sharedLedgerRequired
       ?? process.env.AIRBNB_CLEANER_SHARED_LEDGER_REQUIRED === "true",

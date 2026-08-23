@@ -61,8 +61,8 @@ verification, duplicate checks, independent monitoring, and a rollback window.
 
 - Infer stock from verified 1 Bowie Sixty60 purchases, confirmed guest
   consumption, manual adjustments, and relevant Jane or maid messages.
-- Run a full review every Tuesday at 09:00 SAST and a silent daily depletion
-  forecast at 09:00.
+- Run a full review every Tuesday at 09:05 SAST and a silent daily depletion
+  forecast at 09:00, so the two jobs cannot contend for the stock worker lock.
 - Poll Jane's Sixty60 emails every 30 minutes from 07:00 to 21:00 SAST.
 - Forecast seven days of confirmed demand plus a 25 percent buffer. Trigger a
   shopping list when an item is projected to run out within three days.

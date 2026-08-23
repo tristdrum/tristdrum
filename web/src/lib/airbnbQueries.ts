@@ -22,23 +22,32 @@ export async function loadAirbnbDashboard(householdId: string): Promise<AirbnbDa
   return parseAirbnbDashboardSnapshot(data)
 }
 
-export async function recordAirbnbStockAdjustment(input: {
+export async function recordAirbnbStockCount(input: {
   householdId: string
   inventoryItemId: string
-  quantityDelta: number
+  quantityOnHand: number
   note: string | null
 }): Promise<void> {
   const { error } = await supabase.rpc(
-    'airbnb_record_stock_adjustment' as never,
+    'airbnb_record_stock_count' as never,
     {
       target_household_id: input.householdId,
       target_inventory_item_id: input.inventoryItemId,
-      quantity_delta: input.quantityDelta,
+      quantity_on_hand: input.quantityOnHand,
       note: input.note,
     } as never,
   ) as { error: RpcError | null }
 
-  if (error) throw new Error(airbnbMutationErrorMessage(error, 'The stock adjustment could not be saved.'))
+  if (error) throw new Error(airbnbMutationErrorMessage(error, 'The physical stock count could not be saved.'))
+}
+
+export async function markAirbnbShoppingListOrdered(shoppingListId: string): Promise<void> {
+  const { error } = await supabase.rpc(
+    'airbnb_mark_shopping_list_ordered' as never,
+    { target_shopping_list_id: shoppingListId } as never,
+  ) as { error: RpcError | null }
+
+  if (error) throw new Error(airbnbMutationErrorMessage(error, 'The shopping list could not be marked ordered.'))
 }
 
 export async function reviewAirbnbReply(input: {

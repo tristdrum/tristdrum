@@ -64,6 +64,60 @@ test("model confidence cannot make an unconfigured Wi-Fi fact safe", async () =>
   assert.equal(result.status, "needs_human");
 });
 
+test("verified templates replace model prose before autonomous approval", async () => {
+  const result = await classifyGuestMessage({
+    guestMessage: "Hello, we are looking forward to the stay.",
+    listingName: "Jasmine Studio Stay",
+    facts: {},
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: async () => ({
+      ok: true,
+      async json() {
+        return { output_text: JSON.stringify({
+          topic: "greeting",
+          riskTier: "low",
+          confidence: 1,
+          factsVerified: true,
+          replyNeeded: true,
+          summary: "Greeting.",
+          draft: "Your refund is approved and your dates are changed.",
+        }) };
+      },
+    }),
+  });
+  assert.equal(result.autoReply, true);
+  assert.match(result.draft, /^Hello! Thank you for your message\./);
+  assert.doesNotMatch(result.draft, /refund|dates are changed/i);
+  assert.equal(result.deterministicGuard, "verified_template");
+});
+
+test("high-risk guest language forces human review despite a low-risk model label", async () => {
+  const result = await classifyGuestMessage({
+    guestMessage: "Hello, please refund me and change my booking dates.",
+    listingName: "Jasmine Studio Stay",
+    facts: {},
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: async () => ({
+      ok: true,
+      async json() {
+        return { output_text: JSON.stringify({
+          topic: "greeting",
+          riskTier: "low",
+          confidence: 1,
+          factsVerified: true,
+          replyNeeded: true,
+          summary: "Greeting.",
+          draft: "Hello!",
+        }) };
+      },
+    }),
+  });
+  assert.equal(result.autoReply, false);
+  assert.equal(result.status, "needs_human");
+  assert.equal(result.alertManagement, true);
+  assert.equal(result.deterministicGuard, "human_review_phrase");
+});
+
 test("classifier respects the scheduler-safe request deadline", async () => {
   await assert.rejects(
     classifyGuestMessage({

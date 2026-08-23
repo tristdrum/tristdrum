@@ -15,6 +15,7 @@ import {
   propertyForListing,
   projectInventory,
   setupGuestCount,
+  stockObservationSkus,
   supportDisposition,
   supportEscalationStages,
   trustedAirbnbSender,
@@ -155,6 +156,32 @@ test("shopping list waits for a three-day runout and uses only durable buffer st
   assert.deepEqual(futureOnly.items, []);
 });
 
+test("unknown shopping-list prices never claim the free-delivery minimum", () => {
+  const list = buildShoppingList({
+    projections: [{
+      sku: "guest_chocolate",
+      displayName: "Chocolates",
+      requiredQuantity: 6,
+      targetUnitPriceCents: null,
+      urgent: true,
+      countStatus: "confirm",
+    }],
+  });
+  assert.equal(list.priceEstimateComplete, false);
+  assert.equal(list.meetsFreeDeliveryMinimum, false);
+  assert.equal(list.minimumCents, 35_000);
+  assert.equal(list.targetCents, 40_000);
+});
+
+test("WhatsApp stock observations require shortage wording and return only matching SKUs", () => {
+  assert.deepEqual(
+    stockObservationSkus("We are almost out of towels and need more guest soap"),
+    ["hand_soap", "towel_set"],
+  );
+  assert.deepEqual(stockObservationSkus("I cleaned the mugs and glasses"), []);
+  assert.deepEqual(stockObservationSkus("Please buy dish soap"), ["dishwashing_liquid"]);
+});
+
 test("Sixty60 confirmations are provisional and only a 1 Bowie invoice credits stock", () => {
   assert.deepEqual(decideOrderEvidence({ kind: "confirmation" }), {
     addressStatus: "unknown",
@@ -205,6 +232,18 @@ test("automated footer is subtle, exact, and idempotent", () => {
   const message = withAutomatedReplyFooter("The Wi-Fi details are in your check-in message.");
   assert.ok(message.endsWith(AUTOMATED_REPLY_FOOTER));
   assert.equal(withAutomatedReplyFooter(message), message);
+});
+
+test("support auto-reply templates use verified facts rather than model prose", async () => {
+  const { supportMessageRequiresHuman, verifiedSupportDraft } = await import("./support.mjs");
+  assert.equal(verifiedSupportDraft("greeting", {}), "Hello! Thank you for your message. We look forward to hosting you.");
+  assert.equal(
+    verifiedSupportDraft("address", { address: "1 Verified Street" }),
+    "The address is 1 Verified Street.",
+  );
+  assert.equal(verifiedSupportDraft("wifi", {}), null);
+  assert.equal(supportMessageRequiresHuman("Hello, can I get a refund and change my dates?"), true);
+  assert.equal(supportMessageRequiresHuman("Hello, we are looking forward to the stay."), false);
 });
 
 test("support escalation stages are immediate, reminded at 45 minutes, and overdue at 60", () => {

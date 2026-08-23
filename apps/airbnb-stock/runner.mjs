@@ -13,12 +13,15 @@ import {
   sanitizedError,
 } from "@tristdrum/airbnb-db";
 import { collectSixty60Messages } from "./gmail.mjs";
+import { collectStockWhatsAppObservations } from "./whatsapp.mjs";
 import { notifyStockManagement } from "./management.mjs";
 import {
   ingestOrderEvidence,
+  ingestStockWhatsAppObservation,
   latestStockRun,
   loadForecastInputs,
   loadKnownSixty60MessageIds,
+  markStaleCountsForConfirmation,
   reconcileReservationConsumption,
   storeShoppingList,
   storeStockCountReview,
@@ -66,6 +69,7 @@ function lookbackDate(now, days) {
 export async function runStockObservation({
   now = () => new Date(),
   collectMessages = collectSixty60Messages,
+  collectWhatsAppObservations = collectStockWhatsAppObservations,
   notifyManagement = notifyStockManagement,
   database = null,
   env = process.env,
@@ -114,8 +118,29 @@ export async function runStockObservation({
       }));
     }
 
+    let whatsappEvidence = { status: "disabled", messagesFound: 0, observations: [] };
+    let whatsappReadError = null;
+    try {
+      whatsappEvidence = await collectWhatsAppObservations({ env });
+    } catch (error) {
+      whatsappReadError = sanitizedError(error);
+    }
+    const whatsappEvidenceResults = [];
+    for (const observation of whatsappEvidence.observations) {
+      whatsappEvidenceResults.push(await ingestStockWhatsAppObservation(ownDatabase.sql, {
+        householdId,
+        observation,
+      }));
+    }
+
     const startDate = localDate(startedAt);
     const planningWindow = stockPlanningWindow(startDate);
+    const staleDays = Math.max(1, Number.parseInt(env.AIRBNB_STOCK_COUNT_STALE_DAYS ?? "30", 10) || 30);
+    const staleCutoff = new Date(startedAt.getTime() - staleDays * 86_400_000);
+    const staleCounts = await markStaleCountsForConfirmation(ownDatabase.sql, {
+      householdId,
+      cutoffAt: staleCutoff,
+    });
     const consumption = await reconcileReservationConsumption(ownDatabase.sql, {
       householdId,
       throughDate: planningWindow.consumptionThroughDate,
@@ -154,6 +179,10 @@ export async function runStockObservation({
       emailsFound: collected.envelopesFound,
       emailsSkippedKnown: collected.envelopesSkippedKnown ?? 0,
       evidenceProcessed: evidenceResults.length,
+      whatsappMessagesFound: whatsappEvidence.messagesFound,
+      whatsappObservationsFound: whatsappEvidence.observations.length,
+      whatsappObservationsIngested: whatsappEvidenceResults.filter((result) => result.status === "ingested").length,
+      whatsappReadError,
       invoiceCount: evidenceResults.filter((result) => result.kind === "invoice").length,
       creditedInvoiceCount: evidenceResults.filter((result) => result.inventoryCredited).length,
       ignoredInvoiceCount: evidenceResults.filter((result) => result.ignored).length,
@@ -167,9 +196,11 @@ export async function runStockObservation({
       inventoryItemCount: inputs.inventory.length,
       urgentItemCount: projections.filter((item) => item.urgent).length,
       countToConfirmCount: projections.filter((item) => item.countToConfirm).length,
+      staleCountCount: staleCounts.length,
       shoppingListItemCount: list.items.length,
       estimatedTotalCents: list.estimatedTotalCents,
       meetsFreeDeliveryMinimum: list.meetsFreeDeliveryMinimum,
+      priceEstimateComplete: list.priceEstimateComplete,
       shoppingListId: storedList?.id ?? null,
       stockCountReviewId: countReview?.id ?? null,
       externalWritesEnabled: mode === "live" && capabilities.managementAlertsEnabled,

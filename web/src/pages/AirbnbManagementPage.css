@@ -434,6 +434,46 @@
   white-space: pre-wrap;
 }
 
+.airbnb-conversation-context {
+  display: grid;
+  gap: 0.45rem;
+  max-height: 280px;
+  overflow: auto;
+  padding: 0.65rem;
+  border: 1px solid var(--airbnb-border);
+  border-radius: 5px;
+  background: var(--airbnb-surface-soft);
+}
+
+.airbnb-conversation-message {
+  display: grid;
+  gap: 0.2rem;
+  padding-left: 0.55rem;
+  border-left: 2px solid var(--airbnb-border-strong);
+}
+
+.airbnb-conversation-message--guest {
+  border-left-color: var(--airbnb-blue);
+}
+
+.airbnb-conversation-message--host {
+  border-left-color: var(--airbnb-green);
+}
+
+.airbnb-conversation-message span {
+  color: var(--airbnb-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.airbnb-conversation-message p {
+  margin: 0;
+  color: var(--airbnb-text);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
 .airbnb-review-row textarea,
 .airbnb-inline-form input,
 .airbnb-inline-form select {
@@ -570,6 +610,14 @@
   margin: 0;
   padding: 0 1rem 0.85rem;
   list-style: none;
+}
+
+.airbnb-shopping-minimum {
+  margin: 0;
+  padding: 0 1rem 0.8rem;
+  color: #f5dda0;
+  font-size: 0.74rem;
+  font-weight: 650;
 }
 
 .airbnb-shopping-items li {

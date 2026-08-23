@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, appendFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1010,9 +1010,8 @@ export async function applyDelivery({
   return result;
 }
 
-export function deliveryIdempotencyKey({ targetDate, chatId, messageHash: hash, deliveryAttemptId }) {
-  if (!deliveryAttemptId) throw new Error("A delivery attempt id is required.");
-  return `airbnb-cleaners:${formatISODate(targetDate)}:${chatId}:${hash}:${deliveryAttemptId}`;
+export function deliveryIdempotencyKey({ targetDate, chatId, messageHash: hash }) {
+  return `airbnb-cleaners:${formatISODate(targetDate)}:${chatId}:${hash}`;
 }
 
 export function confidenceCheck({ reservations, unitReports, weather, envelopesRead, unmatchedUpdateCount = 0 }) {
@@ -1127,9 +1126,16 @@ export async function whatsappSend(
   throw lastError ?? new Error(`WhatsApp ${dryRun ? "dry-run" : "send"} failed.`);
 }
 
-export async function sendFinalFailureAlert({ targetDate, runId, reason = "delivery" }) {
-  const alertChatId = String(process.env.AIRBNB_WHATSAPP_ALERT_CHAT_ID ?? "").trim();
-  const cleanersChatId = whatsappConfig().chatId;
+export async function sendFinalFailureAlert(
+  { targetDate, runId, reason = "delivery" },
+  {
+    env = process.env,
+    whatsappSendFn = whatsappSend,
+    fetchChatMessagesFn = fetchChatMessages,
+  } = {},
+) {
+  const alertChatId = String(env.AIRBNB_WHATSAPP_ALERT_CHAT_ID ?? "").trim();
+  const cleanersChatId = whatsappConfig(env).chatId;
   if (!alertChatId) throw new Error("Private failure-alert chat is not configured.");
   if (alertChatId === cleanersChatId) throw new Error("Failure alerts may not target the cleaners chat.");
   const text = reason === "database_sync"
@@ -1144,18 +1150,28 @@ export async function sendFinalFailureAlert({ targetDate, runId, reason = "deliv
       "Check the private Fly status endpoint and sanitized run receipt.",
     ].join("\n");
   const idempotencyKey = `airbnb-cleaner-failure:${reason}:${targetDate}:${runId}`;
-  await whatsappSend({ text, dryRun: true, idempotencyKey, targetChatId: alertChatId });
-  const sent = await whatsappSend({ text, dryRun: false, idempotencyKey, targetChatId: alertChatId });
-  return { sent: true, attempts: sent.attempts };
+  await whatsappSendFn({ text, dryRun: true, idempotencyKey, targetChatId: alertChatId });
+  const sent = await whatsappSendFn({ text, dryRun: false, idempotencyKey, targetChatId: alertChatId });
+  const verification = await verifyChatMessage(text, {
+    fetchMessagesFn: (limit) => fetchChatMessagesFn(limit, { env, targetChatId: alertChatId }),
+  });
+  if (!verification.found) throw new Error("Private cleaner failure alert was not found in chat readback.");
+  return {
+    sent: true,
+    attempts: sent.attempts,
+    verifiedFromChat: true,
+    verificationAttempts: verification.attempts,
+  };
 }
 
 export async function fetchChatMessages(
   limit = CHAT_RECONCILIATION_LIMIT,
-  { env = process.env, fetchFn = fetch, waitFn = wait } = {}
+  { env = process.env, fetchFn = fetch, waitFn = wait, targetChatId = null } = {}
 ) {
   const { baseUrl, apiKey, accountId, chatId } = whatsappConfig(env);
+  const destinationChatId = targetChatId ?? chatId;
   const url = new URL(
-    `/api/v1/whatsapp/accounts/${encodeURIComponent(accountId)}/chats/${encodeURIComponent(chatId)}/messages`,
+    `/api/v1/whatsapp/accounts/${encodeURIComponent(accountId)}/chats/${encodeURIComponent(destinationChatId)}/messages`,
     baseUrl
   );
   url.searchParams.set("limit", String(limit));
@@ -1351,7 +1367,6 @@ export async function runReport({
   authoritativeLedgerRecords = null,
   appendLedgerFn = appendLedger,
   now = () => new Date(),
-  deliveryAttemptId = randomUUID(),
   workDir = WORK_DIR,
 } = {}) {
   if (!["preview", "dry-run", "live"].includes(mode)) throw new Error("Invalid report mode.");
@@ -1394,7 +1409,6 @@ export async function runReport({
     targetDate,
     chatId: chatIdForKey,
     messageHash: hash,
-    deliveryAttemptId,
   });
 
   const result = {

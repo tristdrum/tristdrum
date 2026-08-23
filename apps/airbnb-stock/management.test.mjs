@@ -12,7 +12,11 @@ function stockAlert() {
     dedupeKey: "stock:2026-08-24:fixture",
     summary: "2 Airbnb stock items need attention",
     details: { countsToConfirm: ["coffee"] },
-    shoppingList: { estimatedTotalCents: 40020 },
+    shoppingList: {
+      estimatedTotalCents: 40020,
+      priceEstimateComplete: true,
+      meetsFreeDeliveryMinimum: true,
+    },
     items: [
       { displayName: "Guest chocolates", quantity: "6.000", countToConfirm: false },
       { displayName: "Coffee sachets", quantity: "2.500", countToConfirm: true },
@@ -28,6 +32,19 @@ test("shopping-list alerts use stored quantities and flag counts to confirm", ()
   assert.match(text, /Estimated total: R400\.20/);
   assert.match(text, /Count to confirm: Coffee sachets/);
   assert.match(text, /Review: https:\/\/www\.tristdrum\.com\/dashboard\/airbnb$/);
+});
+
+test("shopping-list alerts state the minimum when prices cannot prove it", () => {
+  const alert = stockAlert();
+  alert.shoppingList = {
+    estimatedTotalCents: 12_000,
+    priceEstimateComplete: false,
+    meetsFreeDeliveryMinimum: false,
+  };
+  const text = renderStockManagementAlert(alert);
+  assert.match(text, /Estimated total: R120\.00 plus unpriced items/);
+  assert.match(text, /R350 or more/);
+  assert.match(text, /aim for about R400/);
 });
 
 test("shopping-list alerts never guess a missing item quantity", () => {

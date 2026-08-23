@@ -7,9 +7,14 @@ import {
   recordJobFinish,
   recordJobStart,
 } from "@tristdrum/airbnb-db";
-import { loadCleanerLedgerRecords, syncCleanerDatabase } from "../airbnb-cleaner/database.mjs";
+import {
+  loadCleanerLedgerRecords,
+  syncCleanerDatabase,
+  syncCleanerFailureDatabase,
+} from "../airbnb-cleaner/database.mjs";
 import {
   ingestOrderEvidence,
+  ingestStockWhatsAppObservation,
   loadSuppressedStockAlerts,
   reconcileReservationConsumption,
   storeShoppingList,
@@ -254,6 +259,37 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
       from airbnb.audit_events
       where household_id = ${householdId} and entity_id = ${stockAuditEntityId}
     `)[0].count, 1);
+    const stockObservation = {
+      providerMessageId: `integration-whatsapp-${randomUUID()}`,
+      chatScope: "maids",
+      senderName: "Integration maid",
+      occurredAt: "2026-08-21T20:01:00.000Z",
+      contentHash: "f".repeat(64),
+      matchedSkus: ["integration_chocolate"],
+    };
+    assert.deepEqual(await ingestStockWhatsAppObservation(stock.sql, {
+      householdId,
+      observation: stockObservation,
+    }), { status: "ingested", matchedItemCount: 1 });
+    assert.deepEqual(await ingestStockWhatsAppObservation(stock.sql, {
+      householdId,
+      observation: stockObservation,
+    }), { status: "duplicate", matchedItemCount: 0 });
+    const observationState = (await admin`
+      select
+        (select count(*)::integer from airbnb.evidence
+          where household_id = ${householdId}
+            and provider_message_id = ${stockObservation.providerMessageId}) as evidence_count,
+        (select count_status from airbnb.inventory_items
+          where household_id = ${householdId} and id = ${inventoryItemId}) as count_status,
+        (select count(*)::integer from airbnb.inventory_movements
+          where household_id = ${householdId} and source_type = 'whatsapp') as movement_count
+    `)[0];
+    assert.deepEqual({ ...observationState }, {
+      evidence_count: 1,
+      count_status: "confirm",
+      movement_count: 0,
+    });
     await assert.rejects(stock.sql`
       insert into airbnb.audit_events (
         household_id, actor_type, actor_id, action, entity_type, entity_id
@@ -322,6 +358,28 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
       where service = 'cleaner' and run_id = ${confirmed.receipt.runId}
     `)[0];
     assert.equal(mirroredRun.receipt.databaseSync.status, "synced");
+    const failureRunId = randomUUID();
+    assert.equal((await syncCleanerFailureDatabase({
+      receipt: {
+        schemaVersion: 1,
+        runId: failureRunId,
+        status: "error",
+        mode: "live",
+        targetDate: "2026-08-22",
+        startedAt: "2026-08-21T18:03:00.000Z",
+        completedAt: "2026-08-21T18:03:01.000Z",
+        error: { code: "INTEGRATION_FAILURE", message: "Sanitized integration failure" },
+      },
+      env: cleanerEnv,
+    })).status, "synced");
+    const mirroredFailure = (await admin`
+      select status, error_code, receipt
+      from airbnb.job_runs
+      where service = 'cleaner' and run_id = ${failureRunId}
+    `)[0];
+    assert.equal(mirroredFailure.status, "error");
+    assert.equal(mirroredFailure.error_code, "INTEGRATION_FAILURE");
+    assert.equal(mirroredFailure.receipt.databaseSync.status, "synced");
     let mirrored = await admin`
       select booking_status, revision, adults, children, infants
       from airbnb.reservations

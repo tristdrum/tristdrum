@@ -1,4 +1,9 @@
-import { supportDisposition, withAutomatedReplyFooter } from "@tristdrum/airbnb-core";
+import {
+  supportDisposition,
+  supportMessageRequiresHuman,
+  verifiedSupportDraft,
+  withAutomatedReplyFooter,
+} from "@tristdrum/airbnb-core";
 
 export const CLASSIFICATION_SCHEMA = Object.freeze({
   type: "object",
@@ -111,9 +116,17 @@ export async function classifyGuestMessage({
   });
   if (!response.ok) throw new Error(`OpenAI classification failed with HTTP ${response.status}.`);
   const raw = JSON.parse(responseText(await response.json()));
+  const deterministicDraft = verifiedSupportDraft(raw.topic, facts);
+  const requiresHuman = supportMessageRequiresHuman(guestMessage);
   const classification = {
     ...raw,
-    factsVerified: raw.factsVerified === true && factAvailable(raw.topic, facts),
+    riskTier: requiresHuman ? "high" : raw.riskTier,
+    factsVerified: !requiresHuman
+      && raw.factsVerified === true
+      && factAvailable(raw.topic, facts)
+      && deterministicDraft != null,
+    draft: deterministicDraft ?? raw.draft,
+    deterministicGuard: requiresHuman ? "human_review_phrase" : deterministicDraft ? "verified_template" : "no_verified_template",
   };
   const disposition = supportDisposition(classification);
   return {

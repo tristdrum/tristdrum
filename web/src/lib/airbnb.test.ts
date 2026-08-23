@@ -227,8 +227,8 @@ describe('Airbnb operational summaries', () => {
         reservation({ id: 'later', checkIn: '2026-09-10', checkOut: '2026-09-11' }),
       ],
       guestThreads: [
-        { id: 'due', guestName: 'One', status: 'open', riskTier: 'low', lastGuestAt: '2026-08-21T10:00:00Z', lastHostAt: '2026-08-21T09:00:00Z', latestMessage: 'Question' },
-        { id: 'handled', guestName: 'Two', status: 'open', riskTier: 'low', lastGuestAt: '2026-08-21T08:00:00Z', lastHostAt: '2026-08-21T09:00:00Z', latestMessage: 'Thanks' },
+        { id: 'due', guestName: 'One', status: 'open', riskTier: 'low', lastGuestAt: '2026-08-21T10:00:00Z', lastHostAt: '2026-08-21T09:00:00Z', latestMessage: 'Question', recentMessages: [] },
+        { id: 'handled', guestName: 'Two', status: 'open', riskTier: 'low', lastGuestAt: '2026-08-21T08:00:00Z', lastHostAt: '2026-08-21T09:00:00Z', latestMessage: 'Thanks', recentMessages: [] },
       ],
       inventory: [
         { id: 'milk', sku: 'milk', displayName: 'Milk', category: 'guest_supply', stockUnit: 'cartons', consumptionBasis: 'per_stay', quantityPerBasis: 1, targetUnitPriceCents: null, countStatus: 'confirm', lastCountedAt: null, quantityOnHand: 4, lastMovementAt: null },

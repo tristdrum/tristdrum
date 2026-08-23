@@ -83,6 +83,41 @@ async function readMessages({ env, fetchFn }) {
   return Array.isArray(body?.messages) ? body.messages : [];
 }
 
+export async function readWhatsAppChatMessages({
+  chatId,
+  limit = 100,
+  env = process.env,
+  fetchFn = fetch,
+}) {
+  const normalizedChatId = String(chatId ?? "").trim();
+  if (!normalizedChatId.endsWith("@g.us")) throw new Error("WhatsApp stock evidence must come from a group.");
+  const baseUrl = required("MINCOOL_CUSTOMER_WHATSAPP_API_BASE_URL", env);
+  const apiKey = required("MINCOOL_CUSTOMER_WHATSAPP_API_KEY", env);
+  const accountId = required("AIRBNB_WHATSAPP_ACCOUNT_ID", env);
+  const boundedLimit = Math.min(100, positiveInteger(limit, 100));
+  const url = new URL(
+    `/api/v1/whatsapp/accounts/${encodeURIComponent(accountId)}/chats/${encodeURIComponent(normalizedChatId)}/messages`,
+    baseUrl,
+  );
+  url.searchParams.set("limit", String(boundedLimit));
+  const response = await fetchFn(url, {
+    headers: { "X-Min-API-Key": apiKey },
+    signal: AbortSignal.timeout(positiveInteger(env.AIRBNB_WHATSAPP_TIMEOUT_MS, DEFAULT_TIMEOUT_MS)),
+  });
+  const body = await responseJson(response);
+  if (!response.ok) throw new Error(`WhatsApp evidence read failed with HTTP ${response.status}.`);
+  return (Array.isArray(body?.messages) ? body.messages : []).map((message) => ({
+    providerMessageId: String(message.message_id ?? message.id ?? "").trim(),
+    chatId: String(message.chat_id ?? normalizedChatId).trim(),
+    fromMe: message.from_me === true,
+    senderName: String(message.sender_name ?? "").trim() || null,
+    text: String(message.text ?? "").trim(),
+    transcript: String(message.transcript ?? "").trim(),
+    preview: String(message.preview ?? "").trim(),
+    occurredAt: String(message.timestamp ?? "").trim(),
+  })).filter((message) => message.providerMessageId);
+}
+
 export async function sendVerifiedManagementMessage({
   text,
   idempotencyKey,

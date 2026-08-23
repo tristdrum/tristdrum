@@ -18,6 +18,7 @@ import {
   parseISODate,
   planDelivery,
   runReport,
+  sendFinalFailureAlert,
   subjectMayTouchTarget,
   whatsappSend,
   xhosaGuestCountLabel,
@@ -447,12 +448,14 @@ test("candidate envelopes require a verified Airbnb sender domain", () => {
   assert.equal(candidateEnvelope({ from: { name: "Airbnb", addr: "alerts@evilairbnb.com" }, subject }), false);
 });
 
-test("scheduled delivery attempts use distinct provider idempotency keys", () => {
+test("scheduled delivery attempts reuse a content-scoped provider idempotency key", () => {
   const shared = { targetDate, chatId: "cleaners-chat", messageHash: "message-hash" };
   const first = deliveryIdempotencyKey({ ...shared, deliveryAttemptId: "run-1" });
   const retry = deliveryIdempotencyKey({ ...shared, deliveryAttemptId: "run-2" });
 
-  assert.notEqual(first, retry);
+  assert.equal(first, retry);
+  assert.notEqual(first, deliveryIdempotencyKey({ ...shared, messageHash: "changed-message" }));
+  assert.notEqual(first, deliveryIdempotencyKey({ ...shared, chatId: "different-chat" }));
 });
 
 test("live WhatsApp sends defer retry to a reconciled scheduler run", async () => {
@@ -542,4 +545,41 @@ test("cleaners-chat reads retry transient provider failures", async () => {
   assert.equal(calls.length, 2);
   assert.match(calls[0], /limit=20/);
   assert.deepEqual(messages, [{ text: "latest" }]);
+});
+
+test("private final-failure alerts require exact chat readback", async () => {
+  const targetDate = "2026-08-24";
+  const runId = "fixture-run";
+  const expectedText = [
+    `Airbnb cleaner report failed after the final cloud retry for ${targetDate}.`,
+    `Run: ${runId}`,
+    "Check the private Fly status endpoint and sanitized run receipt.",
+  ].join("\n");
+  const calls = [];
+  const result = await sendFinalFailureAlert(
+    { targetDate, runId },
+    {
+      env: {
+        MINCOOL_CUSTOMER_WHATSAPP_API_BASE_URL: "https://customer-api.example",
+        MINCOOL_CUSTOMER_WHATSAPP_API_KEY: "test-key",
+        AIRBNB_WHATSAPP_ACCOUNT_ID: "account-id",
+        AIRBNB_WHATSAPP_CHAT_ID: "cleaners@g.us",
+        AIRBNB_WHATSAPP_ALERT_CHAT_ID: "management@g.us",
+      },
+      whatsappSendFn: async (request) => {
+        calls.push(["send", request.dryRun, request.targetChatId, request.idempotencyKey]);
+        return { attempts: 1 };
+      },
+      fetchChatMessagesFn: async (limit, options) => {
+        calls.push(["read", limit, options.targetChatId]);
+        return [{ from_me: true, text: expectedText }];
+      },
+    },
+  );
+
+  assert.equal(result.verifiedFromChat, true);
+  assert.deepEqual(calls.map((call) => call[0]), ["send", "send", "read"]);
+  assert.ok(calls.every((call) => call[0] !== "send" || call[2] === "management@g.us"));
+  assert.equal(calls[2][2], "management@g.us");
+  assert.equal(calls[0][3], calls[1][3]);
 });

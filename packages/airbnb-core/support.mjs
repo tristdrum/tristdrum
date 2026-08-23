@@ -13,6 +13,55 @@ export const AUTO_REPLY_TOPICS = Object.freeze(new Set([
   "resend_standard_info",
 ]));
 
+const HUMAN_REVIEW_PATTERNS = Object.freeze([
+  /\b(?:book|booking|reservation request|accept|decline|availability|available)\b/i,
+  /\b(?:refund|discount|price|pricing|rate|money|payment|charge|fee|waive)\b/i,
+  /\b(?:cancel|cancellation|change (?:my|the) dates?|move (?:my|the) stay|extend)\b/i,
+  /\b(?:early check[ -]?in|late check[ -]?out|exception|special request)\b/i,
+  /\b(?:complaint|dirty|broken|not working|damage|noise|unhappy|disappointed)\b/i,
+  /\b(?:unsafe|danger|emergency|injur|fire|police|security issue)\b/i,
+]);
+
+function factText(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+export function supportMessageRequiresHuman(message) {
+  const text = String(message ?? "").trim();
+  return HUMAN_REVIEW_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+export function verifiedSupportDraft(topic, facts = {}) {
+  if (topic === "greeting") return "Hello! Thank you for your message. We look forward to hosting you.";
+  if (topic === "thanks") return "You are very welcome. We hope you enjoy your stay.";
+  if (topic === "address") {
+    const address = factText(facts.address);
+    return address ? `The address is ${address}.` : null;
+  }
+  if (topic === "directions") {
+    const directions = factText(facts.directions);
+    return directions ? `Directions: ${directions}` : null;
+  }
+  if (topic === "parking") {
+    const parking = factText(facts.parking);
+    return parking ? `Parking: ${parking}` : null;
+  }
+  if (topic === "check_in_time") {
+    const checkInTime = factText(facts.checkInTime);
+    return checkInTime ? `Standard check-in is from ${checkInTime}.` : null;
+  }
+  if (topic === "check_out_time") {
+    const checkOutTime = factText(facts.checkOutTime);
+    return checkOutTime ? `Standard check-out is by ${checkOutTime}.` : null;
+  }
+  if (topic === "resend_standard_info") return factText(facts.standardInfo);
+  if (topic === "wifi") {
+    const wifi = factText(facts.wifi);
+    return wifi ? `Wi-Fi: ${wifi}` : null;
+  }
+  return null;
+}
+
 export function supportDisposition(classification) {
   const topic = String(classification?.topic ?? "unknown");
   const confidence = Number(classification?.confidence ?? 0);

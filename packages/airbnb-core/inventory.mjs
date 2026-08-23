@@ -29,7 +29,43 @@ const BUFFER_STAPLE_SKUS = new Set([
   "multipurpose_cleaner",
   "dishwashing_liquid",
   "laundry_detergent",
+  "hand_soap",
 ]);
+
+const STOCK_OBSERVATION_PATTERNS = Object.freeze([
+  ["guest_chocolate", /\b(?:chocolates?|choc(?:olate)? bars?|kit ?kats?|lunch bars?|bar[- ]?ones?)\b/i],
+  ["water_500ml", /\b(?:bottled water|water bottles?|500\s*ml water|waters?)\b/i],
+  ["milk_250ml", /\b(?:milk|milk cartons?)\b/i],
+  ["wrapped_rusk", /\b(?:rusks?|wrapped rusks?)\b/i],
+  ["coffee_portion", /\b(?:coffee|coffee sachets?|coffee sticks?)\b/i],
+  ["sugar_portion", /\b(?:sugar|sugar sachets?|sugar sticks?)\b/i],
+  ["toilet_roll", /\b(?:toilet rolls?|toilet paper|toilet tissue)\b/i],
+  ["refuse_bag", /\b(?:refuse|bin|garbage) bags?\b/i],
+  ["bleach", /\bbleach\b/i],
+  ["multipurpose_cleaner", /\b(?:multi(?:purpose| purpose)|all purpose) clean(?:er|ing)?\b/i],
+  ["dishwashing_liquid", /\b(?:dishwashing|dish washing|dish) (?:liquid|soap)\b/i],
+  ["laundry_detergent", /\b(?:laundry detergent|washing powder|washing liquid)\b/i],
+  ["hand_soap", /\b(?:hand soap|hand wash|body wash|guest soap|soap)\b/i],
+  ["bath_mat", /\bbath mats?\b/i],
+  ["linen_set", /\b(?:linen|sheets?|duvet covers?|pillowcases?)\b/i],
+  ["towel_set", /\b(?:towels?|towel sets?)\b/i],
+  ["mug", /\bmugs?\b/i],
+  ["drinking_glass", /\b(?:drinking glasses?|tumblers?|glasses?)\b/i],
+]);
+
+const STOCK_SHORTAGE_PATTERN = /\b(?:almost\s+(?:done|finished|out)|broken|buy|finished|finishing|few\s+left|low|missing|more|need|no\s+more|none|out\s+of|replace|restock|run(?:ning)?\s+out|short(?:age)?|stock)\b/i;
+
+export function stockObservationSkus(value) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!text || !STOCK_SHORTAGE_PATTERN.test(text)) return [];
+  const matches = STOCK_OBSERVATION_PATTERNS
+    .filter(([, pattern]) => pattern.test(text))
+    .map(([sku]) => sku);
+  if (matches.includes("dishwashing_liquid")) {
+    return [...new Set(matches.filter((sku) => sku !== "hand_soap"))];
+  }
+  return [...new Set(matches)];
+}
 
 function dateKey(value) {
   if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
@@ -203,10 +239,14 @@ export function buildShoppingList({
   }
 
   const totalCents = estimatedTotal();
+  const priceEstimateComplete = selected.every((item) => item.estimatedUnitPriceCents != null);
   return {
     items: selected,
     estimatedTotalCents: totalCents,
-    meetsFreeDeliveryMinimum: totalCents >= minimumCents,
+    priceEstimateComplete,
+    meetsFreeDeliveryMinimum: priceEstimateComplete && totalCents >= minimumCents,
+    minimumCents,
+    targetCents,
     countsToConfirm: selected.filter((item) => item.countToConfirm).map((item) => item.sku),
     orderPlacementAllowed: false,
   };

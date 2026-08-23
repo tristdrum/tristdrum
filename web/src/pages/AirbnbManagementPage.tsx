@@ -50,7 +50,8 @@ import {
 } from '../lib/airbnb'
 import {
   loadAirbnbDashboard,
-  recordAirbnbStockAdjustment,
+  markAirbnbShoppingListOrdered,
+  recordAirbnbStockCount,
   reviewAirbnbReply,
   updateAirbnbOrderStatus,
   type AirbnbOrderStatusAction,
@@ -87,6 +88,7 @@ export default function AirbnbManagementPage() {
       setData(snapshot)
       setError(null)
     } catch (loadError) {
+      setData(null)
       setError(loadError instanceof Error ? loadError.message : 'The Airbnb management snapshot could not be loaded.')
     } finally {
       setRefreshing(false)
@@ -237,15 +239,20 @@ export default function AirbnbManagementPage() {
                 shoppingLists={data.shoppingLists}
                 orders={data.orders}
                 actionBusy={actionBusy}
-                onAdjustStock={(inventoryItemId, quantityDelta, note) => performAction(
+                onRecordStockCount={(inventoryItemId, quantityOnHand, note) => performAction(
                   `stock:${inventoryItemId}`,
-                  'Stock evidence updated.',
-                  () => recordAirbnbStockAdjustment({
+                  'Physical stock count recorded.',
+                  () => recordAirbnbStockCount({
                     householdId: membership.householdId,
                     inventoryItemId,
-                    quantityDelta,
+                    quantityOnHand,
                     note,
                   }),
+                )}
+                onMarkShoppingListOrdered={(shoppingListId) => performAction(
+                  `shopping-list:${shoppingListId}`,
+                  'Shopping list marked ordered.',
+                  () => markAirbnbShoppingListOrdered(shoppingListId),
                 )}
                 onUpdateOrder={(orderId, status, deliveryDueAt) => performAction(
                   `order:${orderId}`,
@@ -459,14 +466,16 @@ function StockSection({
   shoppingLists,
   orders,
   actionBusy,
-  onAdjustStock,
+  onRecordStockCount,
+  onMarkShoppingListOrdered,
   onUpdateOrder,
 }: {
   inventory: AirbnbInventoryItem[]
   shoppingLists: AirbnbShoppingList[]
   orders: AirbnbOrder[]
   actionBusy: string | null
-  onAdjustStock: (inventoryItemId: string, quantityDelta: number, note: string | null) => Promise<void>
+  onRecordStockCount: (inventoryItemId: string, quantityOnHand: number, note: string | null) => Promise<void>
+  onMarkShoppingListOrdered: (shoppingListId: string) => Promise<void>
   onUpdateOrder: (orderId: string, status: AirbnbOrderStatusAction, deliveryDueAt: string | null) => Promise<void>
 }) {
   const sortedInventory = [...inventory].sort((left, right) => {
@@ -486,7 +495,7 @@ function StockSection({
                 key={item.id}
                 item={item}
                 busy={actionBusy === `stock:${item.id}`}
-                onAdjust={onAdjustStock}
+                onRecordCount={onRecordStockCount}
               />
             ))}
           </div>
@@ -499,7 +508,14 @@ function StockSection({
         <PanelHeading eyebrow="Paste into Checkers Sixty60" title="Restocking lists" />
         {shoppingLists.length ? (
           <div className="airbnb-table-list">
-            {shoppingLists.map((shoppingList) => <ShoppingListRow key={shoppingList.id} shoppingList={shoppingList} />)}
+            {shoppingLists.map((shoppingList) => (
+              <ShoppingListRow
+                key={shoppingList.id}
+                shoppingList={shoppingList}
+                busy={actionBusy === `shopping-list:${shoppingList.id}`}
+                onMarkOrdered={onMarkShoppingListOrdered}
+              />
+            ))}
           </div>
         ) : (
           <InlineEmpty>No restocking list has been generated yet.</InlineEmpty>
@@ -647,7 +663,16 @@ function ReplyReviewRow({
         <StatusBadge value={delivery.riskTier} />
         <StatusBadge value={delivery.status} />
       </div>
-      {delivery.latestGuestMessage ? <blockquote>{delivery.latestGuestMessage}</blockquote> : null}
+      {delivery.recentMessages.length ? (
+        <div className="airbnb-conversation-context" aria-label="Recent conversation context">
+          {delivery.recentMessages.map((message) => (
+            <div key={message.id} className={`airbnb-conversation-message airbnb-conversation-message--${message.direction}`}>
+              <span>{humanizeAirbnbValue(message.direction)} · {formatAirbnbDateTime(message.sentAt)}</span>
+              <p>{message.body}</p>
+            </div>
+          ))}
+        </div>
+      ) : delivery.latestGuestMessage ? <blockquote>{delivery.latestGuestMessage}</blockquote> : null}
       <textarea
         value={text}
         onChange={(event) => setText(event.target.value)}
@@ -695,22 +720,22 @@ function ReplyReviewRow({
 function InventoryAdjustmentRow({
   item,
   busy,
-  onAdjust,
+  onRecordCount,
 }: {
   item: AirbnbInventoryItem
   busy: boolean
-  onAdjust: (inventoryItemId: string, quantityDelta: number, note: string | null) => Promise<void>
+  onRecordCount: (inventoryItemId: string, quantityOnHand: number, note: string | null) => Promise<void>
 }) {
   const [editing, setEditing] = useState(false)
   const [quantity, setQuantity] = useState('')
   const [note, setNote] = useState('')
   const numericQuantity = Number(quantity)
-  const validQuantity = Number.isFinite(numericQuantity) && numericQuantity !== 0
+  const validQuantity = quantity.trim() !== '' && Number.isFinite(numericQuantity) && numericQuantity >= 0
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!validQuantity) return
-    await onAdjust(item.id, numericQuantity, note.trim() || null)
+    await onRecordCount(item.id, numericQuantity, note.trim() || null)
     setQuantity('')
     setNote('')
     setEditing(false)
@@ -743,8 +768,8 @@ function InventoryAdjustmentRow({
       {editing ? (
         <form className="airbnb-inline-form" onSubmit={(event) => void submit(event)}>
           <label>
-            <span>Change by ({item.stockUnit})</span>
-            <input type="number" step="any" value={quantity} onChange={(event) => setQuantity(event.target.value)} required />
+            <span>Counted quantity ({item.stockUnit})</span>
+            <input type="number" min="0" step="any" value={quantity} onChange={(event) => setQuantity(event.target.value)} required />
           </label>
           <label className="airbnb-form-grow">
             <span>Evidence note</span>
@@ -752,7 +777,7 @@ function InventoryAdjustmentRow({
           </label>
           <button type="submit" className="is-primary" disabled={busy || !validQuantity}>
             <Save size={15} aria-hidden />
-            <span>Save adjustment</span>
+            <span>Save count</span>
           </button>
         </form>
       ) : null}
@@ -760,11 +785,26 @@ function InventoryAdjustmentRow({
   )
 }
 
-function ShoppingListRow({ shoppingList }: { shoppingList: AirbnbShoppingList }) {
+function ShoppingListRow({
+  shoppingList,
+  busy,
+  onMarkOrdered,
+}: {
+  shoppingList: AirbnbShoppingList
+  busy: boolean
+  onMarkOrdered: (shoppingListId: string) => Promise<void>
+}) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
-  const listText = shoppingList.items
+  const itemText = shoppingList.items
     .map((item) => `${formatQuantity(item.quantity)} ${item.stockUnit} ${item.displayName}${item.countToConfirm ? ' (confirm count)' : ''}`)
     .join('\n')
+  const minimumInstruction = shoppingList.meetsFreeDeliveryMinimum
+    ? ''
+    : '\n\nKeep the Sixty60 basket at R350 or more for free delivery; aim for about R400 with useful guest or cleaning staples.'
+  const listText = `${itemText}${minimumInstruction}`.trim()
+  const estimateLabel = shoppingList.priceEstimateComplete
+    ? formatZar(shoppingList.estimatedTotalCents)
+    : `${formatZar(shoppingList.estimatedTotalCents)} plus unpriced items`
 
   const copyList = async () => {
     try {
@@ -780,14 +820,28 @@ function ShoppingListRow({ shoppingList }: { shoppingList: AirbnbShoppingList })
       <div className="airbnb-shopping-list-heading">
         <div className="airbnb-row-primary">
           <strong>{formatAirbnbDate(shoppingList.forecastStart, true)} to {formatAirbnbDate(shoppingList.forecastEnd, true)}</strong>
-          <span>{shoppingList.bufferPercent}% buffer · {shoppingList.triggerHorizonDays}-day trigger · {formatZar(shoppingList.estimatedTotalCents)}</span>
+          <span>{shoppingList.bufferPercent}% buffer · {shoppingList.triggerHorizonDays}-day trigger · {estimateLabel}</span>
         </div>
         <StatusBadge value={shoppingList.status} />
         <button type="button" onClick={() => void copyList()} disabled={!shoppingList.items.length}>
           {copyState === 'copied' ? <ClipboardCheck size={15} aria-hidden /> : <Copy size={15} aria-hidden />}
           <span>{copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy list'}</span>
         </button>
+        {shoppingList.status !== 'ordered' ? (
+          <button
+            type="button"
+            className="is-primary"
+            onClick={() => void onMarkOrdered(shoppingList.id)}
+            disabled={busy || !shoppingList.items.length}
+          >
+            <Check size={15} aria-hidden />
+            <span>{busy ? 'Saving' : 'Mark ordered'}</span>
+          </button>
+        ) : null}
       </div>
+      {!shoppingList.meetsFreeDeliveryMinimum ? (
+        <p className="airbnb-shopping-minimum">Keep the Sixty60 basket at R350 or more for free delivery; aim for about R400.</p>
+      ) : null}
       {shoppingList.items.length ? (
         <ul className="airbnb-shopping-items">
           {shoppingList.items.map((item) => (

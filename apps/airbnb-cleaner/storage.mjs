@@ -33,6 +33,14 @@ function providerSummary(value) {
   };
 }
 
+export function redactSensitiveText(value) {
+  return String(value ?? "")
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+\/-]+=*/gi, "$1 [redacted]")
+    .replace(/\b(api[_ -]?key|token|password|secret)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
+    .replace(/\b(postgres(?:ql)?):\/\/[^\s/@]+(?::[^\s/@]*)?@/gi, "$1://[redacted]@")
+    .slice(0, 500);
+}
+
 function isSuccessfulReceipt(receipt) {
   return receipt?.status === "sent" || receipt?.status === "duplicate_skipped";
 }
@@ -95,7 +103,7 @@ export function sanitizeFailure(error, { runId, targetDate, mode, finalAttempt, 
     error: {
       name: error?.name ?? "Error",
       code: error?.code ?? null,
-      message: String(error?.message ?? "Unknown failure").slice(0, 500),
+      message: redactSensitiveText(error?.message ?? "Unknown failure"),
     },
   };
 }

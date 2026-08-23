@@ -130,7 +130,7 @@ test("live delivery fails closed when its required Supabase ledger is unavailabl
 test("run persists and returns a sanitized receipt", async () => {
   await withServer({
     runReport: async ({ mode, deliveryAttemptId }) => {
-      assert.match(deliveryAttemptId, /^[0-9a-f-]{36}$/);
+      assert.equal(deliveryAttemptId, undefined);
       return successfulResult(mode);
     },
   }, async (baseUrl) => {
@@ -154,8 +154,13 @@ test("run persists and returns a sanitized receipt", async () => {
 
 test("only a final failed attempt sends the private failure alert", async () => {
   const alerts = [];
+  const mirroredFailures = [];
   const dependencies = {
     runReport: async () => { throw new Error("safe test failure"); },
+    syncFailureDatabase: async ({ receipt }) => {
+      mirroredFailures.push(receipt);
+      return { status: "synced", jobRunId: `job-${mirroredFailures.length}` };
+    },
     sendFinalFailureAlert: async (value) => {
       alerts.push(value);
       return { sent: true, attempts: 1 };
@@ -173,6 +178,8 @@ test("only a final failed attempt sends the private failure alert", async () => 
   });
   assert.equal(alerts.length, 1);
   assert.equal(alerts[0].targetDate, "2026-08-07");
+  assert.equal(mirroredFailures.length, 2);
+  assert.equal(mirroredFailures.every((receipt) => receipt.status === "error"), true);
 });
 
 test("a final successful delivery privately alerts when its database mirror still fails", async () => {

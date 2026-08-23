@@ -30,6 +30,14 @@ export type AirbnbGuestThread = {
   lastGuestAt: string | null
   lastHostAt: string | null
   latestMessage: string | null
+  recentMessages: AirbnbGuestMessageSummary[]
+}
+
+export type AirbnbGuestMessageSummary = {
+  id: string
+  direction: string
+  body: string
+  sentAt: string | null
 }
 
 export type AirbnbReplyDelivery = {
@@ -38,6 +46,7 @@ export type AirbnbReplyDelivery = {
   guestName: string | null
   listingName: string | null
   latestGuestMessage: string | null
+  recentMessages: AirbnbGuestMessageSummary[]
   sourceLastEventAt: string | null
   topic: string | null
   riskTier: string
@@ -108,6 +117,8 @@ export type AirbnbShoppingList = {
   bufferPercent: number
   triggerHorizonDays: number
   estimatedTotalCents: number | null
+  priceEstimateComplete: boolean
+  meetsFreeDeliveryMinimum: boolean
   postedAt: string | null
   createdAt: string | null
   items: AirbnbShoppingListItem[]
@@ -460,6 +471,7 @@ function parseGuestThread(value: unknown): AirbnbGuestThread | null {
     lastGuestAt: readString(row.lastGuestAt),
     lastHostAt: readString(row.lastHostAt),
     latestMessage: readString(row.latestMessage),
+    recentMessages: readRows(row.recentMessages, parseGuestMessageSummary),
   }
 }
 
@@ -475,6 +487,7 @@ function parseReplyDelivery(value: unknown): AirbnbReplyDelivery | null {
     guestName: readString(row.guestName),
     listingName: readString(row.listingName),
     latestGuestMessage: readString(row.latestGuestMessage),
+    recentMessages: readRows(row.recentMessages, parseGuestMessageSummary),
     sourceLastEventAt: readString(row.sourceLastEventAt),
     topic: readString(row.topic),
     riskTier: readString(row.riskTier) ?? 'unknown',
@@ -487,6 +500,19 @@ function parseReplyDelivery(value: unknown): AirbnbReplyDelivery | null {
     sentAt: readString(row.sentAt),
     createdAt: readString(row.createdAt),
     updatedAt: readString(row.updatedAt),
+  }
+}
+
+function parseGuestMessageSummary(value: unknown): AirbnbGuestMessageSummary | null {
+  const row = asRecord(value)
+  const id = readString(row.id)
+  const body = readString(row.body)
+  if (!id || !body) return null
+  return {
+    id,
+    direction: readString(row.direction) ?? 'system',
+    body,
+    sentAt: readString(row.sentAt),
   }
 }
 
@@ -545,6 +571,8 @@ function parseShoppingList(value: unknown): AirbnbShoppingList | null {
     bufferPercent: readNumber(row.bufferPercent) ?? 0,
     triggerHorizonDays: readNumber(row.triggerHorizonDays) ?? 3,
     estimatedTotalCents: readNumber(row.estimatedTotalCents),
+    priceEstimateComplete: readBoolean(row.priceEstimateComplete, false),
+    meetsFreeDeliveryMinimum: readBoolean(row.meetsFreeDeliveryMinimum, false),
     postedAt: readString(row.postedAt),
     createdAt: readString(row.createdAt),
     items: readRows(row.items, parseShoppingListItem),

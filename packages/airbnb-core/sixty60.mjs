@@ -33,8 +33,10 @@ export function classifyInventorySku(description) {
   if (/\b(multipurpose|multi purpose|all purpose)\b/.test(name) && /\bclean/.test(name)) return "multipurpose_cleaner";
   if (/\b(dishwashing|dish washing|dishwasher)\b/.test(name) && /\b(liquid|soap|gel)\b/.test(name)) return "dishwashing_liquid";
   if (/\b(laundry|washing powder|washing liquid|detergent)\b/.test(name)) return "laundry_detergent";
+  if (/\b(hand wash|hand soap|body wash|guest soap)\b/.test(name)) return "hand_soap";
   if (/\bbath\s*mat\b/.test(name)) return "bath_mat";
   if (/\blinen\b/.test(name) && /\b(set|sheet|duvet|pillowcase)\b/.test(name)) return "linen_set";
+  if (/\btowels?\b/.test(name)) return "towel_set";
   if (/\bmug\b/.test(name)) return "mug";
   if (/\b(drinking|tumbler|highball)\b/.test(name) && /\bglass/.test(name)) return "drinking_glass";
   return null;

@@ -285,6 +285,71 @@ export async function loadKnownSixty60MessageIds(sql, { householdId, since }) {
   return rows.map((row) => row.providerMessageId);
 }
 
+export async function ingestStockWhatsAppObservation(sql, { householdId, observation }) {
+  return sql.begin(async (transaction) => {
+    const evidenceRows = await transaction`
+      insert into airbnb.evidence (
+        household_id, mailbox_scope, provider, provider_message_id, sender_address,
+        subject, evidence_kind, evidence_subtype, occurred_at, content_hash, normalized_payload
+      ) values (
+        ${householdId}, 'whatsapp', 'whatsapp', ${observation.providerMessageId}, null,
+        ${observation.chatScope === "maids" ? "Airbnb Maids stock observation" : "Airbnb Management stock observation"},
+        'stock_observation', ${observation.chatScope}, ${observation.occurredAt},
+        ${observation.contentHash},
+        ${transaction.json({
+          chatScope: observation.chatScope,
+          senderName: observation.senderName,
+          matchedSkus: observation.matchedSkus,
+          action: "count_to_confirm",
+        })}
+      )
+      on conflict (household_id, mailbox_scope, provider, provider_message_id) do nothing
+      returning id
+    `;
+    if (!evidenceRows[0]) return { status: "duplicate", matchedItemCount: 0 };
+
+    const items = await transaction`
+      update airbnb.inventory_items
+      set count_status = 'confirm'
+      where household_id = ${householdId}
+        and active
+        and sku = any(${observation.matchedSkus}::text[])
+      returning id, sku
+    `;
+    await transaction`
+      insert into airbnb.audit_events (
+        household_id, actor_type, actor_id, action, entity_type, entity_id, details, occurred_at
+      ) values (
+        ${householdId}, 'worker', 'stock', 'stock_observation_ingested', 'evidence',
+        ${evidenceRows[0].id},
+        ${transaction.json({
+          chatScope: observation.chatScope,
+          matchedSkus: items.map((item) => item.sku),
+          quantityChanged: false,
+        })},
+        ${observation.occurredAt}
+      )
+    `;
+    return { status: "ingested", matchedItemCount: items.length };
+  });
+}
+
+export async function markStaleCountsForConfirmation(sql, {
+  householdId,
+  cutoffAt,
+}) {
+  const rows = await sql`
+    update airbnb.inventory_items
+    set count_status = 'confirm'
+    where household_id = ${householdId}
+      and active
+      and count_status = 'confirmed'
+      and (last_counted_at is null or last_counted_at < ${cutoffAt})
+    returning id, sku
+  `;
+  return rows.map((row) => row.sku);
+}
+
 export async function reconcileReservationConsumption(sql, { householdId, throughDate, lookbackDays = 180 }) {
   const [reservations, inventory] = await Promise.all([
     sql`
@@ -410,11 +475,19 @@ export async function loadForecastInputs(sql, { householdId, startDate, endDate 
 }
 
 export async function storeShoppingList(sql, { householdId, forecast, list }) {
+  const priceEstimateComplete = list.priceEstimateComplete
+    ?? list.items.every((item) => item.estimatedUnitPriceCents != null);
+  const meetsFreeDeliveryMinimum = list.meetsFreeDeliveryMinimum
+    ?? (priceEstimateComplete && Number(list.estimatedTotalCents ?? 0) >= 35_000);
   const snapshot = {
     startDate: forecast.startDate,
     endDate: forecast.endDate,
     arrivalCount: forecast.arrivals.length,
     demand: forecast.demand.map(({ sku, rawDemand, bufferedDemand }) => ({ sku, rawDemand, bufferedDemand })),
+    priceEstimateComplete,
+    meetsFreeDeliveryMinimum,
+    minimumCents: list.minimumCents ?? 35_000,
+    targetCents: list.targetCents ?? 40_000,
   };
   return sql.begin(async (transaction) => {
     if (!list.items.length) {
@@ -441,13 +514,17 @@ export async function storeShoppingList(sql, { householdId, forecast, list }) {
     const rows = await transaction`
       insert into airbnb.shopping_lists (
         household_id, forecast_start, forecast_end, estimated_total_cents,
+        price_estimate_complete, meets_free_delivery_minimum,
         demand_snapshot, content_hash
       ) values (
         ${householdId}, ${forecast.startDate}, ${forecast.endDate}, ${list.estimatedTotalCents},
+        ${priceEstimateComplete}, ${meetsFreeDeliveryMinimum},
         ${transaction.json(snapshot)}, ${contentHash}
       )
       on conflict (household_id, content_hash)
       do update set updated_at = now(),
+                    price_estimate_complete = excluded.price_estimate_complete,
+                    meets_free_delivery_minimum = excluded.meets_free_delivery_minimum,
                     status = case
                       when airbnb.shopping_lists.status = 'superseded' then 'draft'
                       else airbnb.shopping_lists.status
@@ -567,6 +644,8 @@ export async function loadSuppressedStockAlerts(sql, {
         select jsonb_build_object(
           'id', shopping_list.id,
           'estimatedTotalCents', shopping_list.estimated_total_cents,
+          'priceEstimateComplete', shopping_list.price_estimate_complete,
+          'meetsFreeDeliveryMinimum', shopping_list.meets_free_delivery_minimum,
           'forecastStart', shopping_list.forecast_start,
           'forecastEnd', shopping_list.forecast_end
         )

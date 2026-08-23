@@ -329,3 +329,39 @@ export async function syncCleanerDatabase({ result, receipt, env = process.env, 
     await sql.end({ timeout: 5 });
   }
 }
+
+export async function syncCleanerFailureDatabase({
+  receipt,
+  env = process.env,
+  postgresFactory = postgres,
+}) {
+  if (receipt?.mode !== "live") return { status: "disabled" };
+  const configuration = databaseConfiguration(env);
+  if (!configuration) return { status: "disabled" };
+  const { householdId, url } = configuration;
+  validateHouseholdId(householdId);
+  const sql = databaseClient(url, postgresFactory, "airbnb-cleaner-failure");
+  try {
+    const databaseSync = { status: "synced" };
+    const rows = await sql`
+      insert into airbnb.job_runs (
+        household_id, service, job_name, run_id, target_date, status,
+        receipt, error_code, error_message, started_at, completed_at
+      ) values (
+        ${householdId}, 'cleaner', 'scheduled-report', ${receipt.runId}, ${receipt.targetDate},
+        'error', ${sql.json({ ...receipt, databaseSync })}, ${receipt.error?.code ?? null},
+        ${receipt.error?.message ?? "Cleaner run failed."}, ${receipt.startedAt}, ${receipt.completedAt}
+      )
+      on conflict (service, run_id)
+      do update set status = excluded.status,
+                    receipt = excluded.receipt,
+                    error_code = excluded.error_code,
+                    error_message = excluded.error_message,
+                    completed_at = excluded.completed_at
+      returning id
+    `;
+    return { ...databaseSync, jobRunId: rows[0].id };
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}

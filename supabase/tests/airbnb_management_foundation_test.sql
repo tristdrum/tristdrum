@@ -1,6 +1,6 @@
 begin;
 
-select plan(41);
+select plan(45);
 
 insert into auth.users (id, email)
 values ('00000000-0000-0000-0000-00000000a001', 'airbnb-dashboard-test@example.invalid');
@@ -44,13 +44,16 @@ insert into airbnb.inventory_items (
 );
 
 insert into airbnb.shopping_lists (
-  id, household_id, forecast_start, forecast_end, estimated_total_cents, content_hash
+  id, household_id, forecast_start, forecast_end, estimated_total_cents,
+  price_estimate_complete, meets_free_delivery_minimum, content_hash
 ) values (
   '00000000-0000-0000-0000-00000000e001',
   '00000000-0000-0000-0000-00000000b001',
   current_date,
   current_date + 7,
   35000,
+  true,
+  true,
   'fixture-shopping-list'
 );
 
@@ -75,6 +78,33 @@ insert into airbnb.guest_threads (
   'Fixture Guest',
   now()
 );
+
+insert into airbnb.guest_messages (
+  id, household_id, thread_id, provider_message_id, provider_thread_id,
+  direction, body_normalized, content_hash, provider_sent_at
+) values
+  (
+    '00000000-0000-0000-0000-00000000f101',
+    '00000000-0000-0000-0000-00000000b001',
+    '00000000-0000-0000-0000-00000000f001',
+    'fixture-guest-message',
+    'fixture-thread',
+    'guest',
+    'Fixture guest question',
+    'fixture-guest-message-hash',
+    now() - interval '1 minute'
+  ),
+  (
+    '00000000-0000-0000-0000-00000000f102',
+    '00000000-0000-0000-0000-00000000b001',
+    '00000000-0000-0000-0000-00000000f001',
+    'fixture-host-message',
+    'fixture-thread',
+    'host',
+    'Fixture host response',
+    'fixture-host-message-hash',
+    now()
+  );
 
 insert into airbnb.reply_deliveries (
   id, household_id, thread_id, source_fingerprint, source_last_event_at,
@@ -132,19 +162,20 @@ insert into airbnb.job_runs (
   'fixture-observe',
   'fixture-run',
   'success',
-  '{"externalWrites": false}'::jsonb,
+  '{"externalWrites": false, "nested": {"apiKey": "must-not-leak", "safe": "visible"}}'::jsonb,
   now(),
   now()
 );
 
 insert into airbnb.audit_events (
-  household_id, actor_type, action, entity_type, entity_id
+  household_id, actor_type, action, entity_type, entity_id, details
 ) values (
   '00000000-0000-0000-0000-00000000b001',
   'system',
   'fixture_created',
   'fixture',
-  'fixture-1'
+  'fixture-1',
+  '{"secret":"must-not-leak","safe":"visible"}'::jsonb
 );
 
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000a001', true);
@@ -321,8 +352,13 @@ select ok(
   and has_function_privilege('authenticated', 'public.airbnb_dashboard_snapshot(uuid)', 'EXECUTE')
   and not has_function_privilege('authenticated', 'private.airbnb_dashboard_snapshot_base(uuid)', 'EXECUTE')
   and not has_function_privilege('service_role', 'private.airbnb_dashboard_snapshot_base(uuid)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'private.airbnb_redact_jsonb(jsonb)', 'EXECUTE')
   and not has_function_privilege('anon', 'public.airbnb_record_stock_adjustment(uuid,uuid,numeric,text)', 'EXECUTE')
-  and has_function_privilege('authenticated', 'public.airbnb_record_stock_adjustment(uuid,uuid,numeric,text)', 'EXECUTE'),
+  and has_function_privilege('authenticated', 'public.airbnb_record_stock_adjustment(uuid,uuid,numeric,text)', 'EXECUTE')
+  and not has_function_privilege('anon', 'public.airbnb_record_stock_count(uuid,uuid,numeric,text)', 'EXECUTE')
+  and has_function_privilege('authenticated', 'public.airbnb_record_stock_count(uuid,uuid,numeric,text)', 'EXECUTE')
+  and not has_function_privilege('anon', 'public.airbnb_mark_shopping_list_ordered(uuid)', 'EXECUTE')
+  and has_function_privilege('authenticated', 'public.airbnb_mark_shopping_list_ordered(uuid)', 'EXECUTE'),
   'dashboard and stock RPCs are authenticated-only'
 );
 
@@ -353,12 +389,18 @@ select ok(
 
 select ok(
   jsonb_array_length(public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'replyDeliveries') = 1
+  and jsonb_array_length(public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'replyDeliveries'->0->'recentMessages') = 2
   and jsonb_array_length(public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'shoppingLists') = 1
+  and public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'shoppingLists'->0->>'meetsFreeDeliveryMinimum' = 'true'
   and jsonb_array_length(public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'orders') = 1
   and public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'orders'->0->>'addressStatus' = 'bowie_1'
   and jsonb_array_length(public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'evidence') = 1
   and jsonb_array_length(public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'auditEvents') = 1
-  and public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'jobRuns'->0->'receipt'->>'externalWrites' = 'false',
+  and public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'jobRuns'->0->'receipt'->>'externalWrites' = 'false'
+  and public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'jobRuns'->0->'receipt'->'nested'->>'safe' = 'visible'
+  and not (public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'jobRuns'->0->'receipt'->'nested' ? 'apiKey')
+  and public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'auditEvents'->0->'details'->>'safe' = 'visible'
+  and not (public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'auditEvents'->0->'details' ? 'secret'),
   'authorized dashboard snapshot returns operational rows and sanitized receipts'
 );
 
@@ -383,6 +425,75 @@ select ok(
       and action = 'stock_adjusted'
   ),
   'stock adjustment changes the balance and appends an audit event'
+);
+
+select is(
+  public.airbnb_record_stock_count(
+    '00000000-0000-0000-0000-00000000b001',
+    '00000000-0000-0000-0000-00000000d001',
+    7,
+    'Physical fixture count'
+  )->>'countStatus',
+  'confirmed',
+  'physical stock count records a confirmed absolute quantity'
+);
+
+select ok(
+  (select quantity_on_hand
+   from airbnb.inventory_balances
+   where household_id = '00000000-0000-0000-0000-00000000b001'
+     and id = '00000000-0000-0000-0000-00000000d001') = 7
+  and exists (
+    select 1 from airbnb.inventory_items
+    where household_id = '00000000-0000-0000-0000-00000000b001'
+      and id = '00000000-0000-0000-0000-00000000d001'
+      and count_status = 'confirmed'
+      and last_counted_at is not null
+  )
+  and exists (
+    select 1 from airbnb.audit_events
+    where household_id = '00000000-0000-0000-0000-00000000b001'
+      and action = 'stock_counted'
+      and details->>'quantityOnHand' = '7'
+  ),
+  'physical count reconciles the balance, clears confirmation, and appends audit evidence'
+);
+
+insert into airbnb.alerts (
+  household_id, alert_type, severity, status, dedupe_key, summary, details
+) values (
+  '00000000-0000-0000-0000-00000000b001',
+  'stock_low',
+  'warning',
+  'notified',
+  'fixture-shopping-list-alert',
+  'Fixture list needs ordering',
+  '{"shoppingListId":"00000000-0000-0000-0000-00000000e001"}'::jsonb
+);
+
+select is(
+  public.airbnb_mark_shopping_list_ordered('00000000-0000-0000-0000-00000000e001')->>'status',
+  'ordered',
+  'household reviewer can mark a copied shopping list ordered'
+);
+
+select ok(
+  exists (
+    select 1 from airbnb.shopping_lists
+    where id = '00000000-0000-0000-0000-00000000e001'
+      and status = 'ordered'
+  )
+  and exists (
+    select 1 from airbnb.alerts
+    where dedupe_key = 'fixture-shopping-list-alert'
+      and status = 'resolved'
+  )
+  and exists (
+    select 1 from airbnb.audit_events
+    where action = 'shopping_list_ordered'
+      and entity_id = '00000000-0000-0000-0000-00000000e001'
+  ),
+  'ordered acknowledgement resolves the list alert and remains auditable'
 );
 
 select is(

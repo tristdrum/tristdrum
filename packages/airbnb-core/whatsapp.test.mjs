@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { sendVerifiedManagementMessage } from "./whatsapp.mjs";
+import { readWhatsAppChatMessages, sendVerifiedManagementMessage } from "./whatsapp.mjs";
 
 const env = {
   MINCOOL_CUSTOMER_WHATSAPP_API_BASE_URL: "https://min.example",
@@ -44,4 +44,39 @@ test("Management alerts can never target the cleaners chat", async () => {
     }),
     /may not target the cleaners chat/,
   );
+});
+
+test("WhatsApp evidence reads return a bounded normalized message shape without writing", async () => {
+  let request;
+  const messages = await readWhatsAppChatMessages({
+    chatId: "cleaners@g.us",
+    limit: 500,
+    env,
+    fetchFn: async (url, options = {}) => {
+      request = { url: String(url), options };
+      return new Response(JSON.stringify({
+        messages: [{
+          id: "provider-1",
+          chat_id: "cleaners@g.us",
+          from_me: false,
+          sender_name: "Cleaner",
+          text: "Need more towels",
+          timestamp: "2026-08-24T09:00:00+02:00",
+          provider_private_field: "not returned",
+        }],
+      }), { status: 200 });
+    },
+  });
+  assert.equal(request.options.method, undefined);
+  assert.match(request.url, /limit=100/);
+  assert.deepEqual(messages, [{
+    providerMessageId: "provider-1",
+    chatId: "cleaners@g.us",
+    fromMe: false,
+    senderName: "Cleaner",
+    text: "Need more towels",
+    transcript: "",
+    preview: "",
+    occurredAt: "2026-08-24T09:00:00+02:00",
+  }]);
 });

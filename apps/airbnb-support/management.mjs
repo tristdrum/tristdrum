@@ -54,20 +54,26 @@ export async function notifySupportManagement({
   const limit = Number.isFinite(configuredLimit) && configuredLimit > 0
     ? Math.min(configuredLimit, 1)
     : 1;
+  const scanLimit = Math.max(24, limit);
   const alerts = latestSupportAlerts(await loadAlerts(sql, {
     householdId,
-    limit,
-  }));
+    limit: scanLimit,
+  })).slice(0, limit);
   const results = [];
   for (const alert of alerts) {
     const text = renderSupportManagementAlert(alert, env.AIRBNB_DASHBOARD_URL);
     const idempotencyKey = `airbnb-support-alert:${contentFingerprint(alert.dedupeKey)}`;
     const delivery = await sendMessage({ text, idempotencyKey, env });
+    if (delivery.verification?.found !== true) {
+      throw Object.assign(new Error("Support Management alert readback was not verified."), {
+        code: "MANAGEMENT_READBACK_UNVERIFIED",
+      });
+    }
     await markNotified(sql, { householdId, alertId: alert.id, now: now() });
     results.push({
       alertId: alert.id,
       stage: alert.details?.stage ?? null,
-      verified: delivery.verification?.found === true,
+      verified: true,
     });
   }
   return results;
