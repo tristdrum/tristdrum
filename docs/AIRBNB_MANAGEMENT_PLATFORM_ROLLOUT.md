@@ -51,6 +51,11 @@ The reviewed production delta is
 unchanged from its published commit; linked migration status must determine
 whether one or both are pending.
 
+- Reviewed application source commit:
+  `61770444fbc074bb2abc15a2a2059e8cc07933c1`.
+- Expected follow-up migration SHA-256:
+  `3052bff38e55e881e980c79654f1c352fec233d64a6d64119c8cdf6732da54b7`.
+
 ## Open gates
 
 - The personal Fly helper must pass `auth whoami` and read-only status for all
