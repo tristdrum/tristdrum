@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  appendOnlyReconciliation,
   learnedUnitPrices,
   requiredStateMovement,
   reservationConsumptionRequirements,
@@ -14,6 +15,19 @@ test("Bowie invoice prices become per-stock-unit estimates", () => {
   ]);
   assert.equal(prices.get("water_500ml"), 775);
   assert.equal(prices.has(null), false);
+});
+
+test("pack prices use provider unit price rather than an ambiguous line total", () => {
+  const prices = learnedUnitPrices([
+    {
+      inventorySku: "guest_chocolate",
+      quantity: 2,
+      creditedQuantity: 18,
+      unitPriceCents: 5999,
+      lineTotalCents: 5999,
+    },
+  ]);
+  assert.equal(prices.get("guest_chocolate"), 667);
 });
 
 test("reservation consumption counts adults and children, excludes infants, and keeps per-stay items singular", () => {
@@ -41,4 +55,21 @@ test("reservation stock transitions stay idempotent across cancellation and re-c
   }), null);
   assert.equal(requiredStateMovement({ targetQuantity: 0, priorNetQuantity: -2 }), 2);
   assert.equal(requiredStateMovement({ targetQuantity: -2, priorNetQuantity: 0 }), -2);
+});
+
+test("invoice reconciliation remains exact when normalized quantities cycle", () => {
+  const movements = [{ dedupeKey: "legacy", quantityDelta: 1 }];
+  for (const targetQuantity of [0, 1, 2, 1]) {
+    const reconciliation = appendOnlyReconciliation({ targetQuantity, movements });
+    assert.ok(reconciliation);
+    movements.push({
+      dedupeKey: `basis:${reconciliation.basisFingerprint}:target:${targetQuantity}`,
+      quantityDelta: reconciliation.transitionQuantity,
+    });
+    assert.equal(
+      movements.reduce((total, movement) => total + movement.quantityDelta, 0),
+      targetQuantity,
+    );
+  }
+  assert.equal(appendOnlyReconciliation({ targetQuantity: 1, movements }), null);
 });

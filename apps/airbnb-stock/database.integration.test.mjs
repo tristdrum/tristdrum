@@ -8,7 +8,7 @@ import {
   recordJobStart,
 } from "@tristdrum/airbnb-db";
 import { syncCleanerDatabase } from "../airbnb-cleaner/database.mjs";
-import { reconcileReservationConsumption } from "./repository.mjs";
+import { ingestOrderEvidence, reconcileReservationConsumption } from "./repository.mjs";
 
 const adminUrl = process.env.AIRBNB_INTEGRATION_DATABASE_URL;
 const householdId = randomUUID();
@@ -109,6 +109,19 @@ async function provisionLocalFixtures(admin) {
     )
     on conflict (household_id, sku) do update set quantity_per_basis = excluded.quantity_per_basis
     returning id
+  `;
+  await admin`
+    insert into airbnb.inventory_items (
+      household_id, sku, display_name, category, stock_unit,
+      consumption_basis, quantity_per_basis, count_status
+    ) values (
+      ${householdId}, 'guest_chocolate', 'Guest chocolates',
+      'guest_supply', 'each', 'manual', 0, 'confirm'
+    )
+    on conflict (household_id, sku)
+    do update set display_name = excluded.display_name,
+                  consumption_basis = excluded.consumption_basis,
+                  quantity_per_basis = excluded.quantity_per_basis
   `;
   return inventoryRows[0].id;
 }
@@ -385,6 +398,104 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
     `;
     assert.equal(crossServiceAlertUpdate.length, 0);
     await assert.rejects(support.sql`select id from airbnb.audit_events`, { code: "42501" });
+
+    const orderNumber = randomUUID();
+    const invoiceMessage = {
+      providerMessageId: `integration-invoice-${orderNumber}`,
+      from: "no-reply@checkers.sixty60.co.za",
+      subject: `Sixty60 invoice for order ${orderNumber}`,
+      occurredAt: "2026-08-21T19:30:00.000Z",
+    };
+    const invoice = {
+      kind: "invoice",
+      providerOrderId: orderNumber,
+      deliveryAddress: "1 Bowie Street, Nahoon",
+      totalCents: 7_999,
+      eta: null,
+      delivered: "21 August 2026, 21:30",
+      items: [{
+        description: "Regal Assorted Chocolate Treats 400g",
+        quantity: 1,
+        unitPriceCents: 7_999,
+        lineTotalCents: 7_999,
+        inventorySku: "guest_chocolate",
+        inventoryQuantityKnown: true,
+        creditedQuantity: 1,
+      }],
+    };
+    await ingestOrderEvidence(stock.sql, {
+      householdId,
+      message: invoiceMessage,
+      parsed: invoice,
+    });
+    let invoiceCredits = await admin`
+      select count(*) as count, coalesce(sum(movement.quantity_delta), 0) as quantity
+      from airbnb.inventory_movements movement
+      join airbnb.orders ordering
+        on ordering.household_id = movement.household_id
+       and ordering.id = movement.order_id
+      where movement.household_id = ${householdId}
+        and ordering.provider_order_id = ${orderNumber}
+        and movement.source_type = 'invoice'
+    `;
+    assert.deepEqual({
+      count: Number(invoiceCredits[0].count),
+      quantity: Number(invoiceCredits[0].quantity),
+    }, { count: 1, quantity: 1 });
+    await ingestOrderEvidence(stock.sql, {
+      householdId,
+      message: invoiceMessage,
+      parsed: {
+        ...invoice,
+        items: invoice.items.map((item) => ({
+          ...item,
+          inventoryQuantityKnown: false,
+          creditedQuantity: 0,
+        })),
+      },
+    });
+    invoiceCredits = await admin`
+      select count(*) as count, coalesce(sum(movement.quantity_delta), 0) as quantity
+      from airbnb.inventory_movements movement
+      join airbnb.orders ordering
+        on ordering.household_id = movement.household_id
+       and ordering.id = movement.order_id
+      where movement.household_id = ${householdId}
+        and ordering.provider_order_id = ${orderNumber}
+        and movement.source_type = 'invoice'
+    `;
+    assert.deepEqual({
+      count: Number(invoiceCredits[0].count),
+      quantity: Number(invoiceCredits[0].quantity),
+    }, { count: 2, quantity: 0 });
+    for (const [creditedQuantity, expectedMovementCount] of [[1, 3], [2, 4], [1, 5], [1, 5]]) {
+      await ingestOrderEvidence(stock.sql, {
+        householdId,
+        message: invoiceMessage,
+        parsed: {
+          ...invoice,
+          items: invoice.items.map((item) => ({
+            ...item,
+            inventoryQuantityKnown: true,
+            creditedQuantity,
+          })),
+        },
+      });
+      invoiceCredits = await admin`
+        select count(*) as count, coalesce(sum(movement.quantity_delta), 0) as quantity
+        from airbnb.inventory_movements movement
+        join airbnb.orders ordering
+          on ordering.household_id = movement.household_id
+         and ordering.id = movement.order_id
+        where movement.household_id = ${householdId}
+          and ordering.provider_order_id = ${orderNumber}
+          and movement.source_type = 'invoice'
+      `;
+      assert.deepEqual({
+        count: Number(invoiceCredits[0].count),
+        quantity: Number(invoiceCredits[0].quantity),
+      }, { count: expectedMovementCount, quantity: creditedQuantity });
+    }
 
     const evidenceId = randomUUID();
     const reservationId = randomUUID();

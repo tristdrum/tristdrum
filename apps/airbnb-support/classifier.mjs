@@ -29,6 +29,11 @@ function required(name, env) {
   return value;
 }
 
+function positiveInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function responseText(response) {
   if (typeof response.output_text === "string") return response.output_text;
   for (const output of response.output ?? []) {
@@ -102,7 +107,7 @@ export async function classifyGuestMessage({
         },
       },
     }),
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(positiveInteger(env.AIRBNB_SUPPORT_OPENAI_TIMEOUT_MS, 30_000)),
   });
   if (!response.ok) throw new Error(`OpenAI classification failed with HTTP ${response.status}.`);
   const raw = JSON.parse(responseText(await response.json()));

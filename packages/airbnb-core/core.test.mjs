@@ -10,6 +10,7 @@ import {
   finalSendDecision,
   forecastInventoryDemand,
   parseAirbnbConversationEmail,
+  parseSixty60LineItems,
   parseSixty60Message,
   propertyForListing,
   projectInventory,
@@ -222,6 +223,38 @@ test("Sixty60 ignores other senders and unrelated household groceries", () => {
   assert.equal(parseSixty60Message({ from: "offers@example.com", subject: "Sixty60 invoice", body: "Order No 123456" }), null);
   assert.equal(classifyInventorySku("Selati Golden Brown Sugar 2kg"), null);
   assert.equal(classifyInventorySku("Individually wrapped buttermilk rusks 20 Pack"), "wrapped_rusk");
+  assert.equal(classifyInventorySku("Bakers Choc-kits Classic Chocolate Oat Biscuits 200g"), null);
+  assert.equal(classifyInventorySku("Magnum Death By Chocolate Flavoured Ice Cream 100ml"), null);
+  assert.equal(classifyInventorySku("Staffords Magicmelt Choc Chips Box 250g"), null);
+  assert.equal(classifyInventorySku("TV Bar Chocolate Slab 80g"), null);
+});
+
+test("Sixty60 converts only verified guest-chocolate packs into individual portions", () => {
+  const items = parseSixty60LineItems([
+    "Product Detail Price (per item) Total",
+    "KitKat Mini Chocolate Bars 180g Qty 2 R 59.99 R 119.98",
+    "KitKat Mini Chocolate Bars 2 x 180g Qty 1 R 119.98 R 119.98",
+    "Cadbury Lunch Bar Mini Milk Chocolate Bars 168g Qty 1 R 59.99 R 59.99",
+    "Nestle Bar-One Minis Chocolate Bar 189g Qty 1 R 59.99 R 59.99",
+    "Nosh Chocolate Bar 56g Qty 1 R 14.99 R 14.99",
+    "Nosh Chocolate Bars 4 x 56g Qty 1 R 49.99 R 49.99",
+    "Tex Minis Chocolate Bars 9 x 20g Qty 1 R 59.99 R 59.99",
+    "Regal Assorted Chocolate Treats 400g Qty 1 R 79.99 R 79.99",
+    "Product sub-total R 394.94",
+  ].join(" "));
+  assert.deepEqual(items.map((item) => [
+    item.creditedQuantity,
+    item.inventoryQuantityKnown,
+  ]), [
+    [18, true],
+    [18, true],
+    [8, true],
+    [9, true],
+    [1, true],
+    [4, true],
+    [9, true],
+    [0, false],
+  ]);
 });
 
 test("Airbnb conversation parser treats every Host event as human without inferring identity", () => {

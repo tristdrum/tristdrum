@@ -131,6 +131,10 @@ export async function runStockObservation({
       invoiceCount: evidenceResults.filter((result) => result.kind === "invoice").length,
       creditedInvoiceCount: evidenceResults.filter((result) => result.inventoryCredited).length,
       ignoredInvoiceCount: evidenceResults.filter((result) => result.ignored).length,
+      unquantifiedItemCount: evidenceResults.reduce(
+        (total, result) => total + result.unquantifiedItemCount,
+        0,
+      ),
       consumptionMovementCount: consumption.applied,
       reversedConsumptionCount: consumption.reversed,
       reservationCount: inputs.reservations.length,

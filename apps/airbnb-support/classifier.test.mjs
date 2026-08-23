@@ -63,3 +63,21 @@ test("model confidence cannot make an unconfigured Wi-Fi fact safe", async () =>
   assert.equal(result.autoReply, false);
   assert.equal(result.status, "needs_human");
 });
+
+test("classifier respects the scheduler-safe request deadline", async () => {
+  await assert.rejects(
+    classifyGuestMessage({
+      guestMessage: "Hello?",
+      listingName: "Jasmine Studio Stay",
+      facts: {},
+      env: {
+        OPENAI_API_KEY: "test-key",
+        AIRBNB_SUPPORT_OPENAI_TIMEOUT_MS: "10",
+      },
+      fetchFn: (_url, { signal }) => new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+    }),
+    { name: "TimeoutError" },
+  );
+});

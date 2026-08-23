@@ -5,7 +5,9 @@ export function learnedUnitPrices(items) {
   for (const item of items) {
     if (!item.inventorySku || item.creditedQuantity <= 0 || item.lineTotalCents == null) continue;
     const total = totals.get(item.inventorySku) ?? { totalCents: 0, quantity: 0 };
-    total.totalCents += item.lineTotalCents;
+    total.totalCents += item.unitPriceCents == null
+      ? item.lineTotalCents
+      : item.unitPriceCents * Number(item.quantity ?? 1);
     total.quantity += item.creditedQuantity;
     totals.set(item.inventorySku, total);
   }
@@ -40,6 +42,25 @@ export function requiredStateMovement({ targetQuantity, priorNetQuantity, curren
   return requiredQuantity;
 }
 
+export function appendOnlyReconciliation({ targetQuantity, movements }) {
+  const currentQuantity = movements.reduce(
+    (total, movement) => total + Number(movement.quantityDelta),
+    0,
+  );
+  const transitionQuantity = Number(targetQuantity) - currentQuantity;
+  if (transitionQuantity === 0) return null;
+  const basis = movements
+    .map((movement) => ({
+      dedupeKey: movement.dedupeKey,
+      quantityDelta: Number(movement.quantityDelta),
+    }))
+    .sort((left, right) => left.dedupeKey.localeCompare(right.dedupeKey));
+  return {
+    transitionQuantity,
+    basisFingerprint: contentFingerprint(JSON.stringify(basis)),
+  };
+}
+
 export async function ingestOrderEvidence(sql, { householdId, message, parsed, deliveryDueAt = null }) {
   const decision = decideOrderEvidence({ kind: parsed.kind, deliveryAddress: parsed.deliveryAddress });
   const payload = {
@@ -53,6 +74,7 @@ export async function ingestOrderEvidence(sql, { householdId, message, parsed, d
       description: item.description,
       quantity: item.quantity,
       inventorySku: item.inventorySku,
+      inventoryQuantityKnown: item.inventoryQuantityKnown,
       creditedQuantity: item.creditedQuantity,
       unitPriceCents: item.unitPriceCents,
       lineTotalCents: item.lineTotalCents,
@@ -156,23 +178,37 @@ export async function ingestOrderEvidence(sql, { householdId, message, parsed, d
         if (!item.inventorySku || item.creditedQuantity <= 0) continue;
         creditedBySku.set(item.inventorySku, (creditedBySku.get(item.inventorySku) ?? 0) + item.creditedQuantity);
       }
-      for (const [sku, quantity] of creditedBySku) {
+      const existingCredits = await transaction`
+        select distinct inventory.sku
+        from airbnb.inventory_movements movement
+        join airbnb.inventory_items inventory
+          on inventory.household_id = movement.household_id
+         and inventory.id = movement.inventory_item_id
+        where movement.household_id = ${householdId}
+          and movement.order_id = ${order.id}
+          and movement.source_type = 'invoice'
+      `;
+      const reconciledSkus = new Set([
+        ...creditedBySku.keys(),
+        ...existingCredits.map((movement) => movement.sku),
+      ]);
+      for (const sku of reconciledSkus) {
+        const quantity = creditedBySku.get(sku) ?? 0;
         const inventoryItemId = inventoryBySku.get(sku);
         if (!inventoryItemId) continue;
-        await transaction`
-          insert into airbnb.inventory_movements (
-            household_id, inventory_item_id, movement_type, quantity_delta, confidence,
-            source_type, source_id, dedupe_key, order_id, occurred_at
-          ) values (
-            ${householdId}, ${inventoryItemId}, 'purchase', ${quantity}, 'confirmed',
-            'invoice', ${evidenceId}, ${`sixty60:${parsed.providerOrderId}:${sku}`}, ${order.id}, ${message.occurredAt}
-          )
-          on conflict (household_id, dedupe_key)
-          do update set quantity_delta = excluded.quantity_delta,
-                        source_id = excluded.source_id,
-                        order_id = excluded.order_id,
-                        occurred_at = excluded.occurred_at
+        const movementRows = await transaction`
+          select dedupe_key, quantity_delta
+          from airbnb.inventory_movements
+          where household_id = ${householdId}
+            and order_id = ${order.id}
+            and inventory_item_id = ${inventoryItemId}
+            and source_type = 'invoice'
+          order by dedupe_key
         `;
+        const reconciliation = appendOnlyReconciliation({
+          targetQuantity: quantity,
+          movements: movementRows,
+        });
         const unitPriceCents = unitPrices.get(sku);
         if (unitPriceCents != null) {
           await transaction`
@@ -182,6 +218,25 @@ export async function ingestOrderEvidence(sql, { householdId, message, parsed, d
               and id = ${inventoryItemId}
           `;
         }
+        if (!reconciliation) continue;
+        const { transitionQuantity, basisFingerprint } = reconciliation;
+        const stateKey = [
+          `sixty60:${parsed.providerOrderId}:${sku}:normalized`,
+          `target:${Number(quantity)}`,
+          `basis:${basisFingerprint}`,
+        ].join(":");
+        await transaction`
+          insert into airbnb.inventory_movements (
+            household_id, inventory_item_id, movement_type, quantity_delta, confidence,
+            source_type, source_id, dedupe_key, order_id, occurred_at, note
+          ) values (
+            ${householdId}, ${inventoryItemId},
+            ${transitionQuantity > 0 ? "purchase" : "adjustment"},
+            ${transitionQuantity}, 'confirmed', 'invoice', ${evidenceId}, ${stateKey},
+            ${order.id}, ${message.occurredAt}, 'Normalized Sixty60 package quantity'
+          )
+          on conflict (household_id, dedupe_key) do nothing
+        `;
       }
       await transaction`
         update airbnb.orders
@@ -211,6 +266,9 @@ export async function ingestOrderEvidence(sql, { householdId, message, parsed, d
       ignored: decision.ignore,
       managementAlertCandidate: decision.alertManagement,
       relevantItemCount: parsed.items.filter((item) => item.inventorySku).length,
+      unquantifiedItemCount: parsed.items.filter(
+        (item) => item.inventorySku && item.inventoryQuantityKnown === false,
+      ).length,
     };
   });
 }

@@ -18,7 +18,10 @@ export function classifyInventorySku(description) {
   const name = normalizeWhitespace(description).toLowerCase();
   if (/\bwater\b/.test(name) && /500\s*ml/.test(name)) return "water_500ml";
   if (/\bmilk\b/.test(name) && /(250|500)\s*ml/.test(name)) return "milk_250ml";
-  if (/\b(chocolate|choc|kitkat|kit kat|lunch bar|tempo|tex)\b/.test(name)) return "guest_chocolate";
+  if (
+    /\b(chocolate|choc|kitkat|kit kat|lunch bar|bar-one|bar one|tempo|tex|nosh|tv bar)\b/.test(name)
+    && !/\b(biscuits?|cookies?|ice cream|choc(?:olate)? chips?|slab|powder|spread|cake)\b/.test(name)
+  ) return "guest_chocolate";
   if (/\brusk/.test(name) && /(?:individually|single|wrapped|portion)/.test(name)) return "wrapped_rusk";
   if (/\bcoffee\b/.test(name) && /(?:stick|sachet|portion|single)/.test(name)) return "coffee_portion";
   if (/\bsugar\b/.test(name) && /(?:stick|sachet|portion|single)/.test(name)) return "sugar_portion";
@@ -37,15 +40,34 @@ export function classifyInventorySku(description) {
 
 function packageMultiplier(description, sku) {
   const name = normalizeWhitespace(description).toLowerCase();
-  const multiplied = /\b(\d+)\s*x\s*(?:\d+(?:\.\d+)?\s*)?(?:ml|l|g|kg)\b/.exec(name);
-  if (multiplied) return Number.parseInt(multiplied[1], 10);
   const pack = /\b(\d+)\s*(?:pack|pk|pieces|piece|rolls|sachets|sticks)\b/.exec(name);
   if (pack && [
-    "guest_chocolate", "water_500ml", "milk_250ml", "wrapped_rusk",
+    "water_500ml", "milk_250ml", "wrapped_rusk",
     "coffee_portion", "sugar_portion", "toilet_roll", "refuse_bag",
   ].includes(sku)) {
     return Number.parseInt(pack[1], 10);
   }
+  if (sku === "guest_chocolate") {
+    const multipliedBars = /\b(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*g\b/.exec(name);
+    const outerPackCount = multipliedBars ? Number.parseInt(multipliedBars[1], 10) : 1;
+    const multipliedWeight = multipliedBars ? Number.parseFloat(multipliedBars[2]) : null;
+    // Exact retail weights are part of the identity; unknown sharing bags fail closed below.
+    if (/\bkit\s*kat\b.*\bminis?\b.*\b180\s*g\b/.test(name)) {
+      return 9 * (multipliedWeight === 180 ? outerPackCount : 1);
+    }
+    if (/\blunch bar\b.*\bminis?\b.*\b168\s*g\b/.test(name)) {
+      return 8 * (multipliedWeight === 168 ? outerPackCount : 1);
+    }
+    if (/\bbar[- ]?one\b.*\bminis?\b.*\b189\s*g\b/.test(name)) {
+      return 9 * (multipliedWeight === 189 ? outerPackCount : 1);
+    }
+    if (multipliedBars) return outerPackCount;
+    if (pack) return Number.parseInt(pack[1], 10);
+    if (/\b(minis?|assorted|selection|treats?|bag)\b/.test(name)) return null;
+    return 1;
+  }
+  const multiplied = /\b(\d+)\s*x\s*(?:\d+(?:\.\d+)?\s*)?(?:ml|l|g|kg)\b/.exec(name);
+  if (multiplied) return Number.parseInt(multiplied[1], 10);
   return 1;
 }
 
@@ -75,13 +97,15 @@ export function parseSixty60LineItems(body, kind = "invoice") {
     if (!description || /^(?:product|delivery|eta)\b/i.test(description)) continue;
     const sku = classifyInventorySku(description);
     const quantity = Number.parseFloat(match[2]);
+    const multiplier = sku ? packageMultiplier(description, sku) : null;
     items.push({
       description,
       quantity,
       unitPriceCents: cents(match[3]),
       lineTotalCents: cents(match[4] ?? match[3]),
       inventorySku: sku,
-      creditedQuantity: sku ? quantity * packageMultiplier(description, sku) : 0,
+      inventoryQuantityKnown: sku != null && multiplier != null,
+      creditedQuantity: multiplier == null ? 0 : quantity * multiplier,
     });
   }
   return items;
