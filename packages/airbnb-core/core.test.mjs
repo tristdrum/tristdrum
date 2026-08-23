@@ -240,6 +240,7 @@ test("Sixty60 converts only verified guest-chocolate packs into individual porti
     "Nosh Chocolate Bar 56g Qty 1 R 14.99 R 14.99",
     "Nosh Chocolate Bars 4 x 56g Qty 1 R 49.99 R 49.99",
     "Tex Minis Chocolate Bars 9 x 20g Qty 1 R 59.99 R 59.99",
+    "NESCAF Gold Cappuccino Sticks 20 x 18g Qty 1 R 144.99 R 144.99",
     "Regal Assorted Chocolate Treats 400g Qty 1 R 79.99 R 79.99",
     "Product sub-total R 394.94",
   ].join(" "));
@@ -254,6 +255,7 @@ test("Sixty60 converts only verified guest-chocolate packs into individual porti
     [1, true],
     [4, true],
     [9, true],
+    [20, true],
     [0, false],
   ]);
 });
