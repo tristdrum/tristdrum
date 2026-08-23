@@ -29,6 +29,7 @@ function candidateSubject(subject) {
 export async function collectSixty60Messages({
   since,
   maxRead = 400,
+  knownProviderMessageIds = [],
   env = process.env,
   createClient = (options) => new ImapFlow(options),
 }) {
@@ -58,23 +59,34 @@ export async function collectSixty60Messages({
         occurredAt: message.internalDate?.toISOString?.() ?? null,
         from: sender,
         subject,
+        providerMessageId: String(message.envelope?.messageId ?? "").trim() || `imap:${message.uid}`,
       });
     }
     const selected = candidates
       .sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt))
       .slice(-maxRead);
+    const knownIds = new Set(
+      [...knownProviderMessageIds]
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean),
+    );
+    const unseen = selected.filter((envelope) => !knownIds.has(envelope.providerMessageId));
     const messages = [];
-    for (const envelope of selected) {
+    for (const envelope of unseen) {
       const message = await client.fetchOne(envelope.uid, { source: true }, { uid: true });
       if (!message?.source) continue;
       const parsed = await simpleParser(message.source, { skipHtmlToText: true, skipTextToHtml: true });
       messages.push({
         ...envelope,
-        providerMessageId: parsed.messageId ?? `imap:${envelope.uid}`,
+        providerMessageId: parsed.messageId ?? envelope.providerMessageId,
         body: readableBody(parsed),
       });
     }
-    return { messages, envelopesFound: selected.length };
+    return {
+      messages,
+      envelopesFound: selected.length,
+      envelopesSkippedKnown: selected.length - unseen.length,
+    };
   } finally {
     lock?.release();
     if (client.usable) await client.logout();

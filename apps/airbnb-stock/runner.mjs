@@ -18,6 +18,7 @@ import {
   ingestOrderEvidence,
   latestStockRun,
   loadForecastInputs,
+  loadKnownSixty60MessageIds,
   reconcileReservationConsumption,
   storeShoppingList,
   storeStockCountReview,
@@ -90,9 +91,15 @@ export async function runStockObservation({
     });
     started = true;
     const lookbackDays = Number.parseInt(env.AIRBNB_STOCK_LOOKBACK_DAYS ?? "120", 10);
+    const since = lookbackDate(startedAt, lookbackDays);
+    const knownProviderMessageIds = await loadKnownSixty60MessageIds(ownDatabase.sql, {
+      householdId,
+      since,
+    });
     const collected = await collectMessages({
-      since: lookbackDate(startedAt, lookbackDays),
+      since,
       maxRead: Number.parseInt(env.AIRBNB_STOCK_MAX_EMAILS ?? "400", 10),
+      knownProviderMessageIds,
       env,
     });
     const evidenceResults = [];
@@ -145,6 +152,7 @@ export async function runStockObservation({
       completedAt: now().toISOString(),
       planningWindow,
       emailsFound: collected.envelopesFound,
+      emailsSkippedKnown: collected.envelopesSkippedKnown ?? 0,
       evidenceProcessed: evidenceResults.length,
       invoiceCount: evidenceResults.filter((result) => result.kind === "invoice").length,
       creditedInvoiceCount: evidenceResults.filter((result) => result.inventoryCredited).length,

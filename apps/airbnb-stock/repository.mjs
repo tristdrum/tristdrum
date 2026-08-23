@@ -273,6 +273,18 @@ export async function ingestOrderEvidence(sql, { householdId, message, parsed, d
   });
 }
 
+export async function loadKnownSixty60MessageIds(sql, { householdId, since }) {
+  const rows = await sql`
+    select provider_message_id
+    from airbnb.evidence
+    where household_id = ${householdId}
+      and mailbox_scope = 'jane'
+      and provider = 'sixty60'
+      and occurred_at >= ${since}
+  `;
+  return rows.map((row) => row.providerMessageId);
+}
+
 export async function reconcileReservationConsumption(sql, { householdId, throughDate, lookbackDays = 180 }) {
   const [reservations, inventory] = await Promise.all([
     sql`
