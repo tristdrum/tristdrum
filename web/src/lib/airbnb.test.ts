@@ -13,8 +13,8 @@ const properties: AirbnbProperty[] = [
   {
     id: 'unit-1',
     unitNumber: 1,
-    listingName: 'Jasmine Studio Stay',
-    commonName: 'Jasmine',
+    listingName: 'Bougainvillea Courtyard Studio',
+    commonName: 'Bougainvillea',
     facts: {},
     status: 'active',
   },
@@ -29,8 +29,8 @@ const properties: AirbnbProperty[] = [
   {
     id: 'unit-3',
     unitNumber: 3,
-    listingName: 'Bougainvillea Courtyard Studio',
-    commonName: 'Bougainvillea',
+    listingName: 'Jasmine Studio Stay',
+    commonName: 'Jasmine',
     facts: {},
     status: 'active',
   },
@@ -56,11 +56,15 @@ const dashboard = (overrides: Partial<AirbnbDashboardData>): AirbnbDashboardData
   properties,
   reservations: [],
   guestThreads: [],
+  replyDeliveries: [],
   cleanerPlans: [],
   inventory: [],
+  shoppingLists: [],
   orders: [],
   alerts: [],
   jobRuns: [],
+  evidence: [],
+  auditEvents: [],
   loadedAt: '2026-08-21T12:00:00Z',
   ...overrides,
 })
@@ -90,6 +94,41 @@ describe('parseAirbnbDashboardSnapshot', () => {
       }],
       reservations: [{ invalid: true }],
       guestThreads: 'not-an-array',
+      replyDeliveries: [{
+        id: 'reply-1',
+        threadId: 'thread-1',
+        guestName: 'Guest',
+        listingName: 'Bougainvillea Courtyard Studio',
+        draftText: 'Hello there',
+        footer: 'Automated reply on behalf of your hosts.',
+        status: 'needs_approval',
+      }],
+      shoppingLists: [{
+        id: 'list-1',
+        forecastStart: '2026-08-21',
+        forecastEnd: '2026-08-28',
+        status: 'draft',
+        bufferPercent: 25,
+        triggerHorizonDays: 3,
+        estimatedTotalCents: 40020,
+        items: [{
+          id: 'list-item-1',
+          inventoryItemId: 'milk',
+          displayName: 'Milk',
+          stockUnit: 'cartons',
+          quantity: 12,
+          reason: 'Forecast demand',
+          countToConfirm: true,
+        }],
+      }],
+      jobRuns: [{
+        id: 'run-1',
+        service: 'stock',
+        jobName: 'observe',
+        status: 'success',
+        receipt: { externalWrites: false },
+      }],
+      generatedAt: '2026-08-21T11:59:00Z',
     }, '2026-08-21T12:00:00Z')
 
     expect(parsed.properties.map((property) => property.commonName)).toEqual(['Jasmine'])
@@ -109,6 +148,14 @@ describe('parseAirbnbDashboardSnapshot', () => {
     }])
     expect(parsed.reservations).toEqual([])
     expect(parsed.guestThreads).toEqual([])
+    expect(parsed.replyDeliveries[0]?.id).toBe('reply-1')
+    expect(parsed.replyDeliveries[0]?.status).toBe('needs_approval')
+    expect(parsed.replyDeliveries[0]?.draftText).toBe('Hello there')
+    expect(parsed.shoppingLists[0]?.items[0]?.inventoryItemId).toBe('milk')
+    expect(parsed.shoppingLists[0]?.items[0]?.quantity).toBe(12)
+    expect(parsed.shoppingLists[0]?.items[0]?.countToConfirm).toBe(true)
+    expect(parsed.jobRuns[0]?.receipt).toEqual({ externalWrites: false })
+    expect(parsed.loadedAt).toBe('2026-08-21T11:59:00Z')
   })
 })
 
@@ -173,8 +220,8 @@ describe('Airbnb operational summaries', () => {
         { id: 'resolved', type: 'order_update', severity: 'info', status: 'resolved', summary: 'Delivered', openedAt: null, notifiedAt: null },
       ],
       jobRuns: [
-        { id: 'failed', service: 'cleaner', jobName: 'midday', status: 'error', targetDate: null, startedAt: null, completedAt: null, errorCode: 'MAILBOX' },
-        { id: 'ok', service: 'stock', jobName: 'observe', status: 'success', targetDate: null, startedAt: null, completedAt: null, errorCode: null },
+        { id: 'failed', service: 'cleaner', jobName: 'midday', status: 'error', targetDate: null, startedAt: null, completedAt: null, errorCode: 'MAILBOX', receipt: {} },
+        { id: 'ok', service: 'stock', jobName: 'observe', status: 'success', targetDate: null, startedAt: null, completedAt: null, errorCode: null, receipt: {} },
       ],
     })
 
@@ -191,8 +238,8 @@ describe('Airbnb operational summaries', () => {
   it('uses only the latest receipt for each worker job when counting failures', () => {
     const data = dashboard({
       jobRuns: [
-        { id: 'old-failure', service: 'cleaner', jobName: 'midday', status: 'error', targetDate: null, startedAt: '2026-08-21T08:00:00Z', completedAt: '2026-08-21T08:01:00Z', errorCode: 'MAILBOX' },
-        { id: 'recovered', service: 'cleaner', jobName: 'midday', status: 'success', targetDate: null, startedAt: '2026-08-21T10:00:00Z', completedAt: '2026-08-21T10:01:00Z', errorCode: null },
+        { id: 'old-failure', service: 'cleaner', jobName: 'midday', status: 'error', targetDate: null, startedAt: '2026-08-21T08:00:00Z', completedAt: '2026-08-21T08:01:00Z', errorCode: 'MAILBOX', receipt: {} },
+        { id: 'recovered', service: 'cleaner', jobName: 'midday', status: 'success', targetDate: null, startedAt: '2026-08-21T10:00:00Z', completedAt: '2026-08-21T10:01:00Z', errorCode: null, receipt: {} },
       ],
     })
 

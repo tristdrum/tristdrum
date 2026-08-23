@@ -1,19 +1,27 @@
-import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ComponentType, type FormEvent } from 'react'
 import {
   Activity,
   AlertTriangle,
   BedDouble,
   CalendarDays,
   CheckCircle2,
+  Check,
+  ClipboardCheck,
   CircleAlert,
   Clock3,
+  Copy,
+  Database,
+  FileJson2,
   House,
   LayoutDashboard,
   MessageSquareText,
+  PencilLine,
   PackageSearch,
   RefreshCw,
+  Save,
   ShoppingCart,
   Sparkles,
+  X,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useFinanceAccess } from '../auth/useFinanceAccess'
@@ -28,7 +36,6 @@ import {
   isGuestReplyDue,
   listCleaningMovements,
   todayInJohannesburg,
-  type AirbnbAlert,
   type AirbnbCleanerPlan,
   type AirbnbDashboardData,
   type AirbnbGuestThread,
@@ -36,14 +43,24 @@ import {
   type AirbnbJobRun,
   type AirbnbOrder,
   type AirbnbProperty,
+  type AirbnbReplyDelivery,
   type AirbnbReservation,
+  type AirbnbShoppingList,
   type AirbnbUnitDay,
 } from '../lib/airbnb'
-import { loadAirbnbDashboard } from '../lib/airbnbQueries'
+import {
+  loadAirbnbDashboard,
+  recordAirbnbStockAdjustment,
+  reviewAirbnbReply,
+  updateAirbnbOrderStatus,
+  type AirbnbOrderStatusAction,
+  type AirbnbReplyReviewAction,
+} from '../lib/airbnbQueries'
 import './AirbnbManagementPage.css'
 
 type AirbnbSection = 'overview' | 'guests' | 'cleaning' | 'stock' | 'system'
 type Icon = ComponentType<{ size?: number; strokeWidth?: number; 'aria-hidden'?: boolean }>
+type AirbnbActionNotice = { tone: 'success' | 'error'; message: string }
 
 const sections: Array<{ id: AirbnbSection; label: string; icon: Icon }> = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -59,6 +76,8 @@ export default function AirbnbManagementPage() {
   const [data, setData] = useState<AirbnbDashboardData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(true)
+  const [actionBusy, setActionBusy] = useState<string | null>(null)
+  const [actionNotice, setActionNotice] = useState<AirbnbActionNotice | null>(null)
   const today = todayInJohannesburg()
 
   const refresh = useCallback(async () => {
@@ -73,6 +92,27 @@ export default function AirbnbManagementPage() {
       setRefreshing(false)
     }
   }, [membership.householdId])
+
+  const performAction = useCallback(async (
+    actionKey: string,
+    successMessage: string,
+    action: () => Promise<void>,
+  ) => {
+    setActionBusy(actionKey)
+    setActionNotice(null)
+    try {
+      await action()
+      await refresh()
+      setActionNotice({ tone: 'success', message: successMessage })
+    } catch (actionError) {
+      setActionNotice({
+        tone: 'error',
+        message: actionError instanceof Error ? actionError.message : 'The Airbnb change could not be saved.',
+      })
+    } finally {
+      setActionBusy(null)
+    }
+  }, [refresh])
 
   useEffect(() => {
     void refresh()
@@ -155,6 +195,16 @@ export default function AirbnbManagementPage() {
           </section>
         ) : null}
 
+        {actionNotice ? (
+          <section className={`airbnb-notice airbnb-notice--${actionNotice.tone}`} role="status">
+            {actionNotice.tone === 'success' ? <CheckCircle2 size={20} aria-hidden /> : <CircleAlert size={20} aria-hidden />}
+            <div><strong>{actionNotice.message}</strong></div>
+            <button type="button" onClick={() => setActionNotice(null)} aria-label="Dismiss notification" title="Dismiss notification">
+              <X size={16} aria-hidden />
+            </button>
+          </section>
+        ) : null}
+
         {!data && refreshing ? <AirbnbLoadingState /> : null}
 
         {data && isEmpty ? (
@@ -168,10 +218,43 @@ export default function AirbnbManagementPage() {
         {data && !isEmpty && overview ? (
           <div role="tabpanel" aria-label={sections.find((section) => section.id === activeSection)?.label}>
             {activeSection === 'overview' ? <OverviewSection data={data} overview={overview} today={today} /> : null}
-            {activeSection === 'guests' ? <GuestsSection data={data} today={today} /> : null}
+            {activeSection === 'guests' ? (
+              <GuestsSection
+                data={data}
+                today={today}
+                actionBusy={actionBusy}
+                onReviewReply={(deliveryId, action, editedText) => performAction(
+                  `reply:${deliveryId}`,
+                  action === 'approve' ? 'Reply approved.' : action === 'cancel' ? 'Reply cancelled.' : 'Reply draft saved.',
+                  () => reviewAirbnbReply({ deliveryId, action, editedText }),
+                )}
+              />
+            ) : null}
             {activeSection === 'cleaning' ? <CleaningSection data={data} today={today} /> : null}
-            {activeSection === 'stock' ? <StockSection inventory={data.inventory} orders={data.orders} /> : null}
-            {activeSection === 'system' ? <SystemSection alerts={data.alerts} jobRuns={data.jobRuns} /> : null}
+            {activeSection === 'stock' ? (
+              <StockSection
+                inventory={data.inventory}
+                shoppingLists={data.shoppingLists}
+                orders={data.orders}
+                actionBusy={actionBusy}
+                onAdjustStock={(inventoryItemId, quantityDelta, note) => performAction(
+                  `stock:${inventoryItemId}`,
+                  'Stock evidence updated.',
+                  () => recordAirbnbStockAdjustment({
+                    householdId: membership.householdId,
+                    inventoryItemId,
+                    quantityDelta,
+                    note,
+                  }),
+                )}
+                onUpdateOrder={(orderId, status, deliveryDueAt) => performAction(
+                  `order:${orderId}`,
+                  'Order status updated.',
+                  () => updateAirbnbOrderStatus({ orderId, status, deliveryDueAt }),
+                )}
+              />
+            ) : null}
+            {activeSection === 'system' ? <SystemSection data={data} /> : null}
           </div>
         ) : null}
       </div>
@@ -244,7 +327,17 @@ function OverviewSection({
   )
 }
 
-function GuestsSection({ data, today }: { data: AirbnbDashboardData; today: string }) {
+function GuestsSection({
+  data,
+  today,
+  actionBusy,
+  onReviewReply,
+}: {
+  data: AirbnbDashboardData
+  today: string
+  actionBusy: string | null
+  onReviewReply: (deliveryId: string, action: AirbnbReplyReviewAction, editedText: string | null) => Promise<void>
+}) {
   const threads = [...data.guestThreads].sort((left, right) => {
     const dueDifference = Number(isGuestReplyDue(right)) - Number(isGuestReplyDue(left))
     return dueDifference || Date.parse(right.lastGuestAt ?? right.lastHostAt ?? '') - Date.parse(left.lastGuestAt ?? left.lastHostAt ?? '')
@@ -257,6 +350,24 @@ function GuestsSection({ data, today }: { data: AirbnbDashboardData; today: stri
 
   return (
     <div className="airbnb-stack">
+      <section className="airbnb-panel">
+        <PanelHeading eyebrow="Human review" title="Reply drafts" />
+        {data.replyDeliveries.length ? (
+          <div className="airbnb-table-list">
+            {data.replyDeliveries.map((delivery) => (
+              <ReplyReviewRow
+                key={delivery.id}
+                delivery={delivery}
+                busy={actionBusy === `reply:${delivery.id}`}
+                onReview={onReviewReply}
+              />
+            ))}
+          </div>
+        ) : (
+          <InlineEmpty>No guest reply drafts are waiting for review.</InlineEmpty>
+        )}
+      </section>
+
       <section className="airbnb-panel">
         <PanelHeading eyebrow="Conversation monitor" title="Guest threads" />
         {threads.length ? (
@@ -343,7 +454,21 @@ function CleaningSection({ data, today }: { data: AirbnbDashboardData; today: st
   )
 }
 
-function StockSection({ inventory, orders }: { inventory: AirbnbInventoryItem[]; orders: AirbnbOrder[] }) {
+function StockSection({
+  inventory,
+  shoppingLists,
+  orders,
+  actionBusy,
+  onAdjustStock,
+  onUpdateOrder,
+}: {
+  inventory: AirbnbInventoryItem[]
+  shoppingLists: AirbnbShoppingList[]
+  orders: AirbnbOrder[]
+  actionBusy: string | null
+  onAdjustStock: (inventoryItemId: string, quantityDelta: number, note: string | null) => Promise<void>
+  onUpdateOrder: (orderId: string, status: AirbnbOrderStatusAction, deliveryDueAt: string | null) => Promise<void>
+}) {
   const sortedInventory = [...inventory].sort((left, right) => {
     const leftNeedsCount = Number(left.countStatus !== 'confirmed' || left.quantityOnHand <= 0)
     const rightNeedsCount = Number(right.countStatus !== 'confirmed' || right.quantityOnHand <= 0)
@@ -357,18 +482,12 @@ function StockSection({ inventory, orders }: { inventory: AirbnbInventoryItem[];
         {sortedInventory.length ? (
           <div className="airbnb-table-list">
             {sortedInventory.map((item) => (
-              <div className="airbnb-row airbnb-row--inventory" key={item.id}>
-                <div className="airbnb-row-primary">
-                  <strong>{item.displayName}</strong>
-                  <span>{humanizeAirbnbValue(item.category)} · {humanizeAirbnbValue(item.consumptionBasis)}</span>
-                </div>
-                <div className="airbnb-quantity">
-                  <strong>{formatQuantity(item.quantityOnHand)}</strong>
-                  <span>{item.stockUnit}</span>
-                </div>
-                <span>Counted {formatAirbnbDateTime(item.lastCountedAt)}</span>
-                <StatusBadge value={item.countStatus} />
-              </div>
+              <InventoryAdjustmentRow
+                key={item.id}
+                item={item}
+                busy={actionBusy === `stock:${item.id}`}
+                onAdjust={onAdjustStock}
+              />
             ))}
           </div>
         ) : (
@@ -377,19 +496,27 @@ function StockSection({ inventory, orders }: { inventory: AirbnbInventoryItem[];
       </section>
 
       <section className="airbnb-panel">
+        <PanelHeading eyebrow="Paste into Checkers Sixty60" title="Restocking lists" />
+        {shoppingLists.length ? (
+          <div className="airbnb-table-list">
+            {shoppingLists.map((shoppingList) => <ShoppingListRow key={shoppingList.id} shoppingList={shoppingList} />)}
+          </div>
+        ) : (
+          <InlineEmpty>No restocking list has been generated yet.</InlineEmpty>
+        )}
+      </section>
+
+      <section className="airbnb-panel">
         <PanelHeading eyebrow="Checkers Sixty60" title="Recent orders" />
         {orders.length ? (
           <div className="airbnb-table-list">
             {orders.map((order) => (
-              <div className="airbnb-row airbnb-row--order" key={order.id}>
-                <ShoppingCart size={18} aria-hidden />
-                <div className="airbnb-row-primary">
-                  <strong>{order.providerOrderId ? `Order ${order.providerOrderId}` : 'Order reference pending'}</strong>
-                  <span>{formatZar(order.totalCents)} · {order.addressStatus === 'bowie_1' ? '1 Bowie delivery' : humanizeAirbnbValue(order.addressStatus)}</span>
-                </div>
-                <span>{order.deliveryDueAt ? `Due ${formatAirbnbDateTime(order.deliveryDueAt)}` : `Ordered ${formatAirbnbDateTime(order.orderedAt)}`}</span>
-                <StatusBadge value={order.status} />
-              </div>
+              <OrderStatusRow
+                key={order.id}
+                order={order}
+                busy={actionBusy === `order:${order.id}`}
+                onUpdate={onUpdateOrder}
+              />
             ))}
           </div>
         ) : (
@@ -400,14 +527,14 @@ function StockSection({ inventory, orders }: { inventory: AirbnbInventoryItem[];
   )
 }
 
-function SystemSection({ alerts, jobRuns }: { alerts: AirbnbAlert[]; jobRuns: AirbnbJobRun[] }) {
+function SystemSection({ data }: { data: AirbnbDashboardData }) {
   return (
     <div className="airbnb-stack">
       <section className="airbnb-panel">
         <PanelHeading eyebrow="Automation receipts" title="Recent worker runs" />
-        {jobRuns.length ? (
+        {data.jobRuns.length ? (
           <div className="airbnb-table-list">
-            {jobRuns.map((run) => <JobRunRow key={run.id} run={run} />)}
+            {data.jobRuns.map((run) => <JobRunRow key={run.id} run={run} />)}
           </div>
         ) : (
           <InlineEmpty>No worker run receipts have synced yet.</InlineEmpty>
@@ -416,9 +543,9 @@ function SystemSection({ alerts, jobRuns }: { alerts: AirbnbAlert[]; jobRuns: Ai
 
       <section className="airbnb-panel">
         <PanelHeading eyebrow="Operations" title="Alert history" />
-        {alerts.length ? (
+        {data.alerts.length ? (
           <div className="airbnb-table-list">
-            {alerts.map((alert) => (
+            {data.alerts.map((alert) => (
               <div className="airbnb-row airbnb-row--alert" key={alert.id}>
                 <StatusBadge value={alert.severity} />
                 <div className="airbnb-row-primary">
@@ -434,6 +561,296 @@ function SystemSection({ alerts, jobRuns }: { alerts: AirbnbAlert[]; jobRuns: Ai
           <InlineEmpty icon={CheckCircle2}>No alert history is available in this snapshot.</InlineEmpty>
         )}
       </section>
+
+      <div className="airbnb-two-column airbnb-two-column--equal">
+        <section className="airbnb-panel">
+          <PanelHeading eyebrow="Source trail" title="Recent evidence" />
+          {data.evidence.length ? (
+            <div className="airbnb-table-list">
+              {data.evidence.slice(0, 40).map((evidence) => (
+                <div className="airbnb-row airbnb-row--evidence" key={evidence.id}>
+                  <Database size={18} aria-hidden />
+                  <div className="airbnb-row-primary">
+                    <strong>{evidence.subject ?? humanizeAirbnbValue(evidence.subtype ?? evidence.kind)}</strong>
+                    <span>{humanizeAirbnbValue(evidence.provider)} · {humanizeAirbnbValue(evidence.mailboxScope)}</span>
+                  </div>
+                  <span>{formatAirbnbDateTime(evidence.occurredAt)}</span>
+                  <StatusBadge value={evidence.kind} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <InlineEmpty>No source evidence has synced yet.</InlineEmpty>
+          )}
+        </section>
+
+        <section className="airbnb-panel">
+          <PanelHeading eyebrow="Append-only history" title="Audit events" />
+          {data.auditEvents.length ? (
+            <div className="airbnb-table-list">
+              {data.auditEvents.slice(0, 40).map((event) => (
+                <div className="airbnb-row airbnb-row--audit" key={event.id}>
+                  <FileJson2 size={18} aria-hidden />
+                  <div className="airbnb-row-primary">
+                    <strong>{humanizeAirbnbValue(event.action)}</strong>
+                    <span>{humanizeAirbnbValue(event.entityType)} · {humanizeAirbnbValue(event.actorType)}</span>
+                  </div>
+                  <span>{formatAirbnbDateTime(event.occurredAt)}</span>
+                  {Object.keys(event.details).length ? (
+                    <details className="airbnb-json-details">
+                      <summary>Details</summary>
+                      <pre>{formatJson(event.details)}</pre>
+                    </details>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <InlineEmpty>No audited operator actions have been recorded yet.</InlineEmpty>
+          )}
+        </section>
+      </div>
+    </div>
+  )
+}
+
+function ReplyReviewRow({
+  delivery,
+  busy,
+  onReview,
+}: {
+  delivery: AirbnbReplyDelivery
+  busy: boolean
+  onReview: (deliveryId: string, action: AirbnbReplyReviewAction, editedText: string | null) => Promise<void>
+}) {
+  const [text, setText] = useState(delivery.finalText ?? delivery.draftText ?? '')
+  const reviewable = ['draft', 'needs_approval', 'approved', 'failed'].includes(delivery.status)
+
+  useEffect(() => {
+    setText(delivery.finalText ?? delivery.draftText ?? '')
+  }, [delivery.draftText, delivery.finalText])
+
+  const submit = async (action: AirbnbReplyReviewAction) => {
+    await onReview(delivery.id, action, action === 'cancel' ? null : text.trim() || null)
+  }
+
+  return (
+    <article className="airbnb-review-row">
+      <div className="airbnb-review-meta">
+        <div className="airbnb-row-primary">
+          <strong>{delivery.guestName ?? 'Guest name unavailable'}</strong>
+          <span>{delivery.listingName ?? 'Studio to confirm'} · {delivery.topic ? humanizeAirbnbValue(delivery.topic) : 'Topic unclassified'}</span>
+        </div>
+        <span>{formatAirbnbDateTime(delivery.sourceLastEventAt)}</span>
+        <StatusBadge value={delivery.riskTier} />
+        <StatusBadge value={delivery.status} />
+      </div>
+      {delivery.latestGuestMessage ? <blockquote>{delivery.latestGuestMessage}</blockquote> : null}
+      <textarea
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        disabled={!reviewable || busy}
+        rows={4}
+        aria-label={`Reply draft for ${delivery.guestName ?? 'guest'}`}
+      />
+      <p className="airbnb-reply-footer">{delivery.footer}</p>
+      {reviewable ? (
+        <div className="airbnb-actions">
+          <button type="button" onClick={() => void submit('save')} disabled={busy || !text.trim()}>
+            <Save size={15} aria-hidden />
+            <span>Save</span>
+          </button>
+          <button type="button" className="is-primary" onClick={() => void submit('approve')} disabled={busy || !text.trim()}>
+            <Check size={15} aria-hidden />
+            <span>Approve</span>
+          </button>
+          <button type="button" className="is-danger" onClick={() => void submit('cancel')} disabled={busy}>
+            <X size={15} aria-hidden />
+            <span>Cancel</span>
+          </button>
+        </div>
+      ) : null}
+    </article>
+  )
+}
+
+function InventoryAdjustmentRow({
+  item,
+  busy,
+  onAdjust,
+}: {
+  item: AirbnbInventoryItem
+  busy: boolean
+  onAdjust: (inventoryItemId: string, quantityDelta: number, note: string | null) => Promise<void>
+}) {
+  const [editing, setEditing] = useState(false)
+  const [quantity, setQuantity] = useState('')
+  const [note, setNote] = useState('')
+  const numericQuantity = Number(quantity)
+  const validQuantity = Number.isFinite(numericQuantity) && numericQuantity !== 0
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!validQuantity) return
+    await onAdjust(item.id, numericQuantity, note.trim() || null)
+    setQuantity('')
+    setNote('')
+    setEditing(false)
+  }
+
+  return (
+    <div className="airbnb-operational-row">
+      <div className="airbnb-row airbnb-row--inventory">
+        <div className="airbnb-row-primary">
+          <strong>{item.displayName}</strong>
+          <span>{humanizeAirbnbValue(item.category)} · {humanizeAirbnbValue(item.consumptionBasis)}</span>
+        </div>
+        <div className="airbnb-quantity">
+          <strong>{formatQuantity(item.quantityOnHand)}</strong>
+          <span>{item.stockUnit}</span>
+        </div>
+        <span>Counted {formatAirbnbDateTime(item.lastCountedAt)}</span>
+        <StatusBadge value={item.countStatus} />
+        <button
+          type="button"
+          className="airbnb-icon-button airbnb-icon-button--inline"
+          onClick={() => setEditing((current) => !current)}
+          disabled={busy}
+          aria-label={`Adjust ${item.displayName}`}
+          title={`Adjust ${item.displayName}`}
+        >
+          {editing ? <X size={15} aria-hidden /> : <PencilLine size={15} aria-hidden />}
+        </button>
+      </div>
+      {editing ? (
+        <form className="airbnb-inline-form" onSubmit={(event) => void submit(event)}>
+          <label>
+            <span>Change by ({item.stockUnit})</span>
+            <input type="number" step="any" value={quantity} onChange={(event) => setQuantity(event.target.value)} required />
+          </label>
+          <label className="airbnb-form-grow">
+            <span>Evidence note</span>
+            <input type="text" value={note} onChange={(event) => setNote(event.target.value)} placeholder="Physical count or correction" />
+          </label>
+          <button type="submit" className="is-primary" disabled={busy || !validQuantity}>
+            <Save size={15} aria-hidden />
+            <span>Save adjustment</span>
+          </button>
+        </form>
+      ) : null}
+    </div>
+  )
+}
+
+function ShoppingListRow({ shoppingList }: { shoppingList: AirbnbShoppingList }) {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const listText = shoppingList.items
+    .map((item) => `${formatQuantity(item.quantity)} ${item.stockUnit} ${item.displayName}${item.countToConfirm ? ' (confirm count)' : ''}`)
+    .join('\n')
+
+  const copyList = async () => {
+    try {
+      await navigator.clipboard.writeText(listText)
+      setCopyState('copied')
+    } catch {
+      setCopyState('failed')
+    }
+  }
+
+  return (
+    <article className="airbnb-shopping-list-row">
+      <div className="airbnb-shopping-list-heading">
+        <div className="airbnb-row-primary">
+          <strong>{formatAirbnbDate(shoppingList.forecastStart, true)} to {formatAirbnbDate(shoppingList.forecastEnd, true)}</strong>
+          <span>{shoppingList.bufferPercent}% buffer · {shoppingList.triggerHorizonDays}-day trigger · {formatZar(shoppingList.estimatedTotalCents)}</span>
+        </div>
+        <StatusBadge value={shoppingList.status} />
+        <button type="button" onClick={() => void copyList()} disabled={!shoppingList.items.length}>
+          {copyState === 'copied' ? <ClipboardCheck size={15} aria-hidden /> : <Copy size={15} aria-hidden />}
+          <span>{copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy list'}</span>
+        </button>
+      </div>
+      {shoppingList.items.length ? (
+        <ul className="airbnb-shopping-items">
+          {shoppingList.items.map((item) => (
+            <li key={item.id}>
+              <strong>{formatQuantity(item.quantity)} {item.stockUnit} {item.displayName}</strong>
+              <span>{item.reason}</span>
+              {item.countToConfirm ? <StatusBadge value="confirm" /> : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <InlineEmpty>This forecast did not require any purchases.</InlineEmpty>
+      )}
+    </article>
+  )
+}
+
+function OrderStatusRow({
+  order,
+  busy,
+  onUpdate,
+}: {
+  order: AirbnbOrder
+  busy: boolean
+  onUpdate: (orderId: string, status: AirbnbOrderStatusAction, deliveryDueAt: string | null) => Promise<void>
+}) {
+  const [editing, setEditing] = useState(false)
+  const [status, setStatus] = useState<AirbnbOrderStatusAction>(suggestOrderStatus(order.status))
+  const [deliveryDueAt, setDeliveryDueAt] = useState(toDatetimeLocal(order.deliveryDueAt))
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const dueAt = deliveryDueAt ? new Date(deliveryDueAt).toISOString() : null
+    await onUpdate(order.id, status, dueAt)
+    setEditing(false)
+  }
+
+  return (
+    <div className="airbnb-operational-row">
+      <div className="airbnb-row airbnb-row--order">
+        <ShoppingCart size={18} aria-hidden />
+        <div className="airbnb-row-primary">
+          <strong>{order.providerOrderId ? `Order ${order.providerOrderId}` : 'Order reference pending'}</strong>
+          <span>{formatZar(order.totalCents)} · {order.addressStatus === 'bowie_1' ? '1 Bowie delivery' : humanizeAirbnbValue(order.addressStatus)}</span>
+        </div>
+        <span>{order.deliveryDueAt ? `Due ${formatAirbnbDateTime(order.deliveryDueAt)}` : `Ordered ${formatAirbnbDateTime(order.orderedAt)}`}</span>
+        <StatusBadge value={order.status} />
+        {order.addressStatus === 'bowie_1' ? (
+          <button
+            type="button"
+            className="airbnb-icon-button airbnb-icon-button--inline"
+            onClick={() => setEditing((current) => !current)}
+            disabled={busy}
+            aria-label="Update order status"
+            title="Update order status"
+          >
+            {editing ? <X size={15} aria-hidden /> : <PencilLine size={15} aria-hidden />}
+          </button>
+        ) : null}
+      </div>
+      {editing && order.addressStatus === 'bowie_1' ? (
+        <form className="airbnb-inline-form" onSubmit={(event) => void submit(event)}>
+          <label>
+            <span>Status</span>
+            <select value={status} onChange={(event) => setStatus(event.target.value as AirbnbOrderStatusAction)}>
+              <option value="ordered">Ordered</option>
+              <option value="delivery_due">Delivery due</option>
+              <option value="delivered">Delivered</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </label>
+          <label className="airbnb-form-grow">
+            <span>Delivery due</span>
+            <input type="datetime-local" value={deliveryDueAt} onChange={(event) => setDeliveryDueAt(event.target.value)} />
+          </label>
+          <button type="submit" className="is-primary" disabled={busy}>
+            <Save size={15} aria-hidden />
+            <span>Save status</span>
+          </button>
+        </form>
+      ) : null}
     </div>
   )
 }
@@ -501,6 +918,12 @@ function JobRunRow({ run }: { run: AirbnbJobRun }) {
       <span>{run.completedAt ? `Completed ${formatAirbnbDateTime(run.completedAt)}` : 'Still running'}</span>
       <StatusBadge value={run.status} />
       {run.errorCode ? <code>{run.errorCode}</code> : null}
+      {Object.keys(run.receipt).length ? (
+        <details className="airbnb-json-details">
+          <summary>Receipt</summary>
+          <pre>{formatJson(run.receipt)}</pre>
+        </details>
+      ) : null}
     </div>
   )
 }
@@ -609,13 +1032,46 @@ function formatQuantity(value: number): string {
   return new Intl.NumberFormat('en-ZA', { maximumFractionDigits: 2 }).format(value)
 }
 
+function formatJson(value: Record<string, unknown>): string {
+  return JSON.stringify(value, null, 2)
+}
+
+function suggestOrderStatus(status: string): AirbnbOrderStatusAction {
+  if (status === 'suggested') return 'ordered'
+  if (status === 'delivery_due') return 'delivered'
+  if (status === 'delivered') return 'delivered'
+  if (status === 'cancelled') return 'cancelled'
+  return 'delivery_due'
+}
+
+function toDatetimeLocal(value: string | null): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return ''
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Johannesburg',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date)
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`
+}
+
 function snapshotIsEmpty(data: AirbnbDashboardData): boolean {
   return data.properties.length === 0
     && data.reservations.length === 0
     && data.guestThreads.length === 0
+    && data.replyDeliveries.length === 0
     && data.cleanerPlans.length === 0
     && data.inventory.length === 0
+    && data.shoppingLists.length === 0
     && data.orders.length === 0
     && data.alerts.length === 0
     && data.jobRuns.length === 0
+    && data.evidence.length === 0
+    && data.auditEvents.length === 0
 }

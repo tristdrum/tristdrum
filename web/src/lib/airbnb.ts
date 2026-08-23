@@ -32,6 +32,26 @@ export type AirbnbGuestThread = {
   latestMessage: string | null
 }
 
+export type AirbnbReplyDelivery = {
+  id: string
+  threadId: string
+  guestName: string | null
+  listingName: string | null
+  latestGuestMessage: string | null
+  sourceLastEventAt: string | null
+  topic: string | null
+  riskTier: string
+  classification: Record<string, unknown>
+  draftText: string | null
+  finalText: string | null
+  footer: string
+  status: string
+  cancellationReason: string | null
+  sentAt: string | null
+  createdAt: string | null
+  updatedAt: string | null
+}
+
 export type AirbnbCleanerPlan = {
   id: string
   targetDate: string
@@ -66,6 +86,31 @@ export type AirbnbOrder = {
   addressStatus: string
   deliveryDueAt: string | null
   orderedAt: string | null
+  createdAt: string | null
+}
+
+export type AirbnbShoppingListItem = {
+  id: string
+  inventoryItemId: string
+  displayName: string
+  stockUnit: string
+  quantity: number
+  estimatedUnitPriceCents: number | null
+  reason: string
+  countToConfirm: boolean
+}
+
+export type AirbnbShoppingList = {
+  id: string
+  forecastStart: string
+  forecastEnd: string
+  status: string
+  bufferPercent: number
+  triggerHorizonDays: number
+  estimatedTotalCents: number | null
+  postedAt: string | null
+  createdAt: string | null
+  items: AirbnbShoppingListItem[]
 }
 
 export type AirbnbAlert = {
@@ -87,17 +132,44 @@ export type AirbnbJobRun = {
   startedAt: string | null
   completedAt: string | null
   errorCode: string | null
+  receipt: Record<string, unknown>
+}
+
+export type AirbnbEvidence = {
+  id: string
+  mailboxScope: string
+  provider: string
+  kind: string
+  subtype: string | null
+  subject: string | null
+  occurredAt: string | null
+  ingestedAt: string | null
+  contentHash: string
+}
+
+export type AirbnbAuditEvent = {
+  id: string
+  actorType: string
+  action: string
+  entityType: string
+  entityId: string | null
+  details: Record<string, unknown>
+  occurredAt: string | null
 }
 
 export type AirbnbDashboardData = {
   properties: AirbnbProperty[]
   reservations: AirbnbReservation[]
   guestThreads: AirbnbGuestThread[]
+  replyDeliveries: AirbnbReplyDelivery[]
   cleanerPlans: AirbnbCleanerPlan[]
   inventory: AirbnbInventoryItem[]
+  shoppingLists: AirbnbShoppingList[]
   orders: AirbnbOrder[]
   alerts: AirbnbAlert[]
   jobRuns: AirbnbJobRun[]
+  evidence: AirbnbEvidence[]
+  auditEvents: AirbnbAuditEvent[]
   loadedAt: string
 }
 
@@ -137,12 +209,16 @@ export function parseAirbnbDashboardSnapshot(
     properties: readRows(snapshot.properties, parseProperty),
     reservations: readRows(snapshot.reservations, parseReservation),
     guestThreads: readRows(snapshot.guestThreads, parseGuestThread),
+    replyDeliveries: readRows(snapshot.replyDeliveries, parseReplyDelivery),
     cleanerPlans: readRows(snapshot.cleanerPlans, parseCleanerPlan),
     inventory: readRows(snapshot.inventory, parseInventoryItem),
+    shoppingLists: readRows(snapshot.shoppingLists, parseShoppingList),
     orders: readRows(snapshot.orders, parseOrder),
     alerts: readRows(snapshot.alerts, parseAlert),
     jobRuns: readRows(snapshot.jobRuns, parseJobRun),
-    loadedAt,
+    evidence: readRows(snapshot.evidence, parseEvidence),
+    auditEvents: readRows(snapshot.auditEvents, parseAuditEvent),
+    loadedAt: readString(snapshot.generatedAt) ?? loadedAt,
   }
 }
 
@@ -383,6 +459,33 @@ function parseGuestThread(value: unknown): AirbnbGuestThread | null {
   }
 }
 
+function parseReplyDelivery(value: unknown): AirbnbReplyDelivery | null {
+  const row = asRecord(value)
+  const id = readString(row.id)
+  const threadId = readString(row.threadId)
+  if (!id || !threadId) return null
+
+  return {
+    id,
+    threadId,
+    guestName: readString(row.guestName),
+    listingName: readString(row.listingName),
+    latestGuestMessage: readString(row.latestGuestMessage),
+    sourceLastEventAt: readString(row.sourceLastEventAt),
+    topic: readString(row.topic),
+    riskTier: readString(row.riskTier) ?? 'unknown',
+    classification: asRecord(row.classification),
+    draftText: readString(row.draftText),
+    finalText: readString(row.finalText),
+    footer: readString(row.footer) ?? 'Automated reply on behalf of your hosts.',
+    status: readString(row.status) ?? 'draft',
+    cancellationReason: readString(row.cancellationReason),
+    sentAt: readString(row.sentAt),
+    createdAt: readString(row.createdAt),
+    updatedAt: readString(row.updatedAt),
+  }
+}
+
 function parseCleanerPlan(value: unknown): AirbnbCleanerPlan | null {
   const row = asRecord(value)
   const id = readString(row.id)
@@ -423,6 +526,46 @@ function parseInventoryItem(value: unknown): AirbnbInventoryItem | null {
   }
 }
 
+function parseShoppingList(value: unknown): AirbnbShoppingList | null {
+  const row = asRecord(value)
+  const id = readString(row.id)
+  const forecastStart = readDate(row.forecastStart)
+  const forecastEnd = readDate(row.forecastEnd)
+  if (!id || !forecastStart || !forecastEnd) return null
+
+  return {
+    id,
+    forecastStart,
+    forecastEnd,
+    status: readString(row.status) ?? 'draft',
+    bufferPercent: readNumber(row.bufferPercent) ?? 0,
+    triggerHorizonDays: readNumber(row.triggerHorizonDays) ?? 3,
+    estimatedTotalCents: readNumber(row.estimatedTotalCents),
+    postedAt: readString(row.postedAt),
+    createdAt: readString(row.createdAt),
+    items: readRows(row.items, parseShoppingListItem),
+  }
+}
+
+function parseShoppingListItem(value: unknown): AirbnbShoppingListItem | null {
+  const row = asRecord(value)
+  const id = readString(row.id)
+  const inventoryItemId = readString(row.inventoryItemId)
+  const displayName = readString(row.displayName)
+  if (!id || !inventoryItemId || !displayName) return null
+
+  return {
+    id,
+    inventoryItemId,
+    displayName,
+    stockUnit: readString(row.stockUnit) ?? 'units',
+    quantity: readNumber(row.quantity) ?? 0,
+    estimatedUnitPriceCents: readNumber(row.estimatedUnitPriceCents),
+    reason: readString(row.reason) ?? 'Forecast demand',
+    countToConfirm: readBoolean(row.countToConfirm, false),
+  }
+}
+
 function parseOrder(value: unknown): AirbnbOrder | null {
   const row = asRecord(value)
   const id = readString(row.id)
@@ -436,6 +579,7 @@ function parseOrder(value: unknown): AirbnbOrder | null {
     addressStatus: readString(row.addressStatus) ?? 'unknown',
     deliveryDueAt: readString(row.deliveryDueAt),
     orderedAt: readString(row.orderedAt),
+    createdAt: readString(row.createdAt),
   }
 }
 
@@ -470,6 +614,43 @@ function parseJobRun(value: unknown): AirbnbJobRun | null {
     startedAt: readString(row.startedAt),
     completedAt: readString(row.completedAt),
     errorCode: readString(row.errorCode),
+    receipt: asRecord(row.receipt),
+  }
+}
+
+function parseEvidence(value: unknown): AirbnbEvidence | null {
+  const row = asRecord(value)
+  const id = readString(row.id)
+  const contentHash = readString(row.contentHash)
+  if (!id || !contentHash) return null
+
+  return {
+    id,
+    mailboxScope: readString(row.mailboxScope) ?? 'unknown',
+    provider: readString(row.provider) ?? 'unknown',
+    kind: readString(row.kind) ?? 'ignored',
+    subtype: readString(row.subtype),
+    subject: readString(row.subject),
+    occurredAt: readString(row.occurredAt),
+    ingestedAt: readString(row.ingestedAt),
+    contentHash,
+  }
+}
+
+function parseAuditEvent(value: unknown): AirbnbAuditEvent | null {
+  const row = asRecord(value)
+  const id = readString(row.id)
+  const action = readString(row.action)
+  if (!id || !action) return null
+
+  return {
+    id,
+    actorType: readString(row.actorType) ?? 'unknown',
+    action,
+    entityType: readString(row.entityType) ?? 'unknown',
+    entityId: readString(row.entityId),
+    details: asRecord(row.details),
+    occurredAt: readString(row.occurredAt),
   }
 }
 
