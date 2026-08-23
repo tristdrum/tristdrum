@@ -36,6 +36,11 @@ function positiveInteger(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function rfcMessageId(value) {
+  const normalized = String(value ?? "").trim();
+  return /^<[^<>\s]+@[^<>\s]+>$/.test(normalized) ? normalized : null;
+}
+
 function importDeadlineError(milliseconds) {
   return Object.assign(
     new Error(`Airbnb support Gmail import exceeded ${milliseconds}ms.`),
@@ -125,10 +130,12 @@ export async function collectConversationMessages({
         const envelope = selectedByUid.get(Number(message.uid));
         if (!envelope || !message.source) continue;
         const parsed = await simpleParser(message.source, { skipHtmlToText: true, skipTextToHtml: true });
+        const replyMessageId = rfcMessageId(parsed.messageId);
         parsedByUid.set(envelope.uid, {
           ...envelope,
           mailboxScope,
-          providerMessageId: parsed.messageId ?? `imap:${envelope.uid}`,
+          providerMessageId: replyMessageId ?? `imap:${envelope.uid}`,
+          rfcMessageId: replyMessageId,
           replyTo: addressList(parsed.replyTo)[0] ?? null,
           references: Array.isArray(parsed.references) ? parsed.references : parsed.references ? [parsed.references] : [],
           inReplyTo: parsed.inReplyTo ?? null,
@@ -173,6 +180,71 @@ export async function findSentMessageIds({
       if (matches?.length) found.push(messageId);
     }
     return found;
+  } finally {
+    lock?.release();
+    if (client.usable) await client.logout();
+    else client.close();
+  }
+}
+
+export async function findSentThreadEvidence({
+  messageIds,
+  since,
+  referenceIds = [],
+  mailboxScope = "tristan",
+  env = process.env,
+  createClient = (options) => new ImapFlow(options),
+}) {
+  const wanted = [...new Set((messageIds ?? []).map((value) => String(value ?? "").trim()).filter(Boolean))];
+  const cutoff = since instanceof Date ? since : new Date(since);
+  if (!Number.isFinite(cutoff.getTime())) throw new Error("Sent-thread reconciliation cutoff is invalid.");
+  const anchors = new Set(referenceIds.map(rfcMessageId).filter(Boolean));
+  if (!anchors.size) throw new Error("Sent-thread reconciliation requires a message reference anchor.");
+  const client = createClient(imapOptions(mailboxScope, env));
+  let lock;
+  try {
+    await client.connect();
+    lock = await client.getMailboxLock(mailboxValue(
+      mailboxScope,
+      "SENT_FOLDER",
+      env,
+      String(env.AIRBNB_SUPPORT_GMAIL_SENT_FOLDER ?? DEFAULT_SENT_FOLDER),
+    ));
+    const found = [];
+    for (const messageId of wanted) {
+      const matches = await client.search({ header: { "message-id": messageId } }, { uid: true });
+      if (matches?.length) found.push(messageId);
+    }
+
+    const candidateUids = await client.search({ since: cutoff }, { uid: true });
+    let humanReplyAt = null;
+    const selectedUids = (candidateUids ?? []).slice(-200);
+    if (selectedUids.length) {
+      for await (const message of client.fetch(
+        selectedUids,
+        { source: true, internalDate: true, uid: true },
+        { uid: true },
+      )) {
+        if (!message.source) continue;
+        const parsed = await simpleParser(message.source, { skipHtmlToText: true, skipTextToHtml: true });
+        const messageId = String(parsed.messageId ?? "").trim();
+        if (wanted.includes(messageId)) continue;
+        const recipients = addressList(parsed.to).map((value) => String(value).toLowerCase());
+        if (!recipients.some((address) => trustedAirbnbSender(address))) continue;
+        const occurredAt = message.internalDate ?? parsed.date;
+        const occurredAtMs = occurredAt instanceof Date ? occurredAt.getTime() : Date.parse(occurredAt);
+        if (!Number.isFinite(occurredAtMs) || occurredAtMs <= cutoff.getTime()) continue;
+        const sentReferences = [
+          parsed.inReplyTo,
+          ...(Array.isArray(parsed.references) ? parsed.references : parsed.references ? [parsed.references] : []),
+        ].map((value) => String(value ?? "").trim()).filter(Boolean);
+        const linkedByReference = sentReferences.some((value) => anchors.has(value));
+        if (!linkedByReference) continue;
+        const candidateTime = new Date(occurredAtMs).toISOString();
+        if (!humanReplyAt || Date.parse(candidateTime) > Date.parse(humanReplyAt)) humanReplyAt = candidateTime;
+      }
+    }
+    return { messageIds: found, humanReplyAt };
   } finally {
     lock?.release();
     if (client.usable) await client.logout();

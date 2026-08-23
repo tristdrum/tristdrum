@@ -22,29 +22,34 @@ Last updated: 2026-08-24 SAST.
 
 The candidate release adds:
 
-- content-scoped cleaner delivery idempotency and exact failure-alert chat
-  readback;
+- content-occurrence cleaner delivery idempotency, including `B -> C -> B`
+  reversions, and exact failure-alert chat readback;
 - durable failed cleaner run receipts in Supabase;
 - read-only WhatsApp stock observations that can request a physical count but
   cannot move inventory;
-- stale-count confirmation, hand-soap and towel-set tracking, and honest
-  R350/R400 shopping-list minimum handling when prices are unknown;
+- authoritative physical-count snapshots, stale-count confirmation, hand-soap
+  and manually counted towel-set tracking, strict 1 Bowie Street invoice
+  credit, and an always-visible R350/R400 shopping reminder;
 - deterministic verified support templates and explicit high-risk phrase
   blocking;
 - delayed-alert stage selection with exact Management readback;
 - absolute stock counts, list-order confirmation, bounded conversation context,
   and recursive secret-field redaction in the private dashboard;
-- a 09:05 Tuesday full review so it cannot collide with the 09:00 stock poll.
+- idempotent Tuesday 06:00 and 06:20 full-review attempts, plus Management runs
+  halfway between the regular observation polls.
 
 Local release evidence on 2026-08-24:
 
-- 66 Supabase SQL assertions passed after a clean local database reset.
-- 188 cleaner, core, stock, support, and dashboard tests passed.
+- 74 Supabase SQL assertions passed after a clean local database reset.
+- 219 cleaner, core, database, stock, support, and dashboard tests passed.
 - Dashboard lint and production build passed.
 - `git diff --check` passed.
 
-The pending production migration is
-`20260823215943_airbnb_operational_hardening.sql`.
+The reviewed production delta is
+`20260824012012_airbnb_release_safety_followup.sql`. The preceding
+`20260823215943_airbnb_operational_hardening.sql` remains byte-for-byte
+unchanged from its published commit; linked migration status must determine
+whether one or both are pending.
 
 ## Open gates
 
@@ -61,12 +66,37 @@ The pending production migration is
 
 ## Production verification
 
-After the migration and app deploys:
+Use this order so no scheduled request can cross a mixed schema/app version:
+
+1. Verify the personal Supabase account and `/Users/tristdrum/.local/bin/fly-personal`
+   account scope, then record the linked migration list, twelve active
+   cleaner/stock job rows, support inactivity, and all three current Fly image
+   identifiers. Accept only the expected pending suffix ending in
+   `20260824012012_airbnb_release_safety_followup.sql`; never repair or replay an
+   already-recorded migration.
+2. Pause the eight cleaner jobs and four stock jobs with one linked Supabase
+   query and keep support inactive. Stop the three personal Airbnb Fly machines,
+   confirm they are stopped, confirm no relevant request remains queued in
+   `net.http_request_queue`, and wait for any already-issued request to reach a
+   terminal response before changing schema.
+3. Apply exactly the expected pending migration suffix. If it fails or the job
+   inventory differs, leave every personal worker stopped and use the retained
+   old Min cleaner as the rollback path.
+4. Deploy cleaner, stock, and support from the recorded source commit, which
+   restarts the personal machines on the reviewed images. Keep all schedules
+   inactive while checking health, preview, dry-run, database writes, and exact
+   chat readback.
+5. Re-enable the eight cleaner jobs only after cleaner acceptance passes.
+   Re-enable the three read-only stock observation jobs after one clean
+   observation receipt. Re-enable the stock Management job only after a
+   controlled dry-run/live/readback check. Support remains inactive.
+
+After that guarded cutover:
 
 1. Confirm all eight personal cleaner jobs are active and all eight old Min jobs
    remain inactive.
-2. Confirm the four stock jobs are active, including the Tuesday 09:05 review,
-   and the support job remains inactive.
+2. Confirm the four stock jobs are active, including the Tuesday 06:00/06:20
+   review attempts, and the support job remains inactive.
 3. Run cleaner preview and dry-run, then reconcile the latest receipt, ledger,
    confidence result, database sync, and exact cleaner-chat readback.
 4. Run stock observation mode and confirm WhatsApp evidence contains no raw
@@ -83,8 +113,9 @@ After the migration and app deploys:
 - Require 72 clean hours after this hardening release before treating the
   replacement as stable.
 - Do not delete the stopped Min app or rollback data before the seven-day gate.
-  The conservative retirement checkpoint is 2026-08-30 after the 14:25 audit.
+  The retirement checkpoint is seven full days after the actual hardening
+  cutover, never a preselected calendar date. Extend the heartbeat when the
+  credential handoff delays cutover.
 - Delete old infrastructure only after schedules, receipts, WhatsApp readback,
   current Gmail reservation evidence, stock observations, and dashboard state
   all remain clean.
-

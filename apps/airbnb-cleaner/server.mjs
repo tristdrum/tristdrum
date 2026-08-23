@@ -128,7 +128,7 @@ async function handleRun(request, response, dependencies) {
     } catch (databaseError) {
       receipt.databaseSync = {
         status: "error",
-        code: databaseError.code ?? null,
+        code: databaseError.code == null ? null : redactSensitiveText(databaseError.code).slice(0, 100),
         message: redactSensitiveText(databaseError.message ?? "Database synchronization failed.").slice(0, 200),
       };
     }
@@ -140,7 +140,6 @@ async function handleRun(request, response, dependencies) {
       try {
         receipt.failureAlert = await dependencies.sendFinalFailureAlert({
           targetDate: result.targetDate,
-          runId,
           reason: "database_sync",
         });
       } catch (alertError) {
@@ -151,7 +150,10 @@ async function handleRun(request, response, dependencies) {
     if (result.status === "blocked") {
       if (finalAttempt) {
         try {
-          receipt.failureAlert = await dependencies.sendFinalFailureAlert({ targetDate: result.targetDate, runId });
+          receipt.failureAlert = await dependencies.sendFinalFailureAlert({
+            targetDate: result.targetDate,
+            reason: "blocked",
+          });
         } catch (alertError) {
           receipt.failureAlert = { sent: false, error: redactSensitiveText(alertError.message).slice(0, 200) };
         }
@@ -164,25 +166,28 @@ async function handleRun(request, response, dependencies) {
   } catch (error) {
     const completedAt = dependencies.now().toISOString();
     const receipt = sanitizeFailure(error, { runId, targetDate, mode, finalAttempt, startedAt, completedAt });
-    if (finalAttempt && !hasSuccessfulReceiptInWindow(targetDate, target)) {
+    const runInProgress = error.code === "RUN_IN_PROGRESS";
+    if (!runInProgress && finalAttempt && !hasSuccessfulReceiptInWindow(targetDate, target)) {
       try {
-        receipt.failureAlert = await dependencies.sendFinalFailureAlert({ targetDate, runId });
+        receipt.failureAlert = await dependencies.sendFinalFailureAlert({ targetDate, reason: "delivery" });
       } catch (alertError) {
         receipt.failureAlert = { sent: false, error: redactSensitiveText(alertError.message).slice(0, 200) };
       }
     }
-    try {
-      const databaseSync = await dependencies.syncFailureDatabase({ receipt });
-      if (databaseSync?.status !== "disabled") receipt.databaseSync = databaseSync;
-    } catch (databaseError) {
-      receipt.databaseSync = {
-        status: "error",
-        code: databaseError.code ?? null,
-        message: redactSensitiveText(databaseError.message ?? "Database synchronization failed.").slice(0, 200),
-      };
+    if (!runInProgress) {
+      try {
+        const databaseSync = await dependencies.syncFailureDatabase({ receipt });
+        if (databaseSync?.status !== "disabled") receipt.databaseSync = databaseSync;
+      } catch (databaseError) {
+        receipt.databaseSync = {
+          status: "error",
+          code: databaseError.code == null ? null : redactSensitiveText(databaseError.code).slice(0, 100),
+          message: redactSensitiveText(databaseError.message ?? "Database synchronization failed.").slice(0, 200),
+        };
+      }
+      persistRun(receipt);
     }
-    persistRun(receipt);
-    const status = error.code === "RUN_IN_PROGRESS" ? 409 : 500;
+    const status = runInProgress ? 409 : 500;
     json(response, status, publicReceipt(receipt));
   } finally {
     release();

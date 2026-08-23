@@ -95,6 +95,7 @@ function resultFor(delivery) {
     status: "preview",
     targetDate: delivery.targetDateKey,
     messageHash: delivery.hash,
+    contentOccurrence: delivery.contentOccurrence,
   };
 }
 
@@ -323,6 +324,103 @@ test("a plan that reverts to older content sends one new update", () => {
   assert.equal(unchanged.duplicate?.messageHash, reverted.hash);
 });
 
+test("B-C-B content reversion advances the provider occurrence while an unsent retry stays stable", () => {
+  const checkoutReports = classifyUnits(checkoutReservations(), targetDate);
+  const turnoverReports = classifyUnits(turnoverReservations(), targetDate);
+  const initial = planDelivery({ targetDate, unitReports: checkoutReports, weather: dryWeather, ledgerRecords: [] });
+  const initialRecord = {
+    targetDate: initial.targetDateKey,
+    messageHash: initial.hash,
+    sentAt: "2026-07-27T11:30:00Z",
+    source: "supabase",
+  };
+  const firstB = planDelivery({
+    targetDate,
+    unitReports: turnoverReports,
+    weather: dryWeather,
+    ledgerRecords: [initialRecord],
+  });
+  const firstBLedger = {
+    targetDate: firstB.targetDateKey,
+    messageHash: firstB.hash,
+    sentAt: "2026-07-28T09:00:00Z",
+    source: "supabase",
+    contentOccurrence: 1,
+  };
+  const firstBChat = {
+    ...firstBLedger,
+    normalizedMessageHash: firstB.hash,
+    source: "whatsapp_chat",
+  };
+  const changedC = planDelivery({
+    targetDate,
+    unitReports: turnoverReports,
+    weather: rainyWeather,
+    ledgerRecords: [initialRecord, firstBLedger, firstBChat],
+  });
+  const changedCRecord = {
+    targetDate: changedC.targetDateKey,
+    messageHash: changedC.hash,
+    sentAt: "2026-07-28T09:10:00Z",
+    source: "supabase",
+  };
+  const historyBeforeReversion = [initialRecord, firstBLedger, firstBChat, changedCRecord];
+  const revertedB = planDelivery({
+    targetDate,
+    unitReports: turnoverReports,
+    weather: dryWeather,
+    ledgerRecords: historyBeforeReversion,
+  });
+  const retryB = planDelivery({
+    targetDate,
+    unitReports: turnoverReports,
+    weather: dryWeather,
+    ledgerRecords: historyBeforeReversion,
+  });
+
+  assert.equal(firstB.hash, revertedB.hash);
+  assert.equal(firstB.contentOccurrence, 1);
+  assert.equal(revertedB.contentOccurrence, 2);
+  assert.equal(retryB.contentOccurrence, 2);
+
+  const durableRetry = planDelivery({
+    targetDate,
+    unitReports: turnoverReports,
+    weather: dryWeather,
+    ledgerRecords: [
+      initialRecord,
+      firstBLedger,
+      changedCRecord,
+      { ...firstBLedger, contentOccurrence: 2, sentAt: "2026-07-28T09:20:00Z" },
+    ],
+  });
+  assert.equal(durableRetry.duplicate?.contentOccurrence, 2);
+  assert.equal(durableRetry.contentOccurrence, 2);
+
+  const firstKey = deliveryIdempotencyKey({
+    targetDate,
+    chatId: "cleaners-chat",
+    messageHash: firstB.hash,
+    contentOccurrence: firstB.contentOccurrence,
+  });
+  const revertedKey = deliveryIdempotencyKey({
+    targetDate,
+    chatId: "cleaners-chat",
+    messageHash: revertedB.hash,
+    contentOccurrence: revertedB.contentOccurrence,
+  });
+  const retryKey = deliveryIdempotencyKey({
+    targetDate,
+    chatId: "cleaners-chat",
+    messageHash: retryB.hash,
+    contentOccurrence: retryB.contentOccurrence,
+  });
+
+  assert.notEqual(firstKey, revertedKey);
+  assert.equal(revertedKey, retryKey);
+  assert.match(revertedKey, /:occurrence-2$/);
+});
+
 test("dry-run never appends the ledger", async () => {
   const unitReports = classifyUnits(turnoverReservations(), targetDate);
   const delivery = planDelivery({ targetDate, unitReports, weather: dryWeather, ledgerRecords: [] });
@@ -405,6 +503,7 @@ test("chat-backed duplicate reconciles the durable ledger without a second live 
   assert.deepEqual(appended, [{
     targetDate: "2026-07-28",
     messageHash: delivery.hash,
+    contentOccurrence: 1,
     sentAt: "2026-07-28T09:02:00.000Z",
     reconciledFrom: "whatsapp_chat",
   }]);
@@ -448,14 +547,20 @@ test("candidate envelopes require a verified Airbnb sender domain", () => {
   assert.equal(candidateEnvelope({ from: { name: "Airbnb", addr: "alerts@evilairbnb.com" }, subject }), false);
 });
 
-test("scheduled delivery attempts reuse a content-scoped provider idempotency key", () => {
+test("scheduled delivery attempts reuse a content-occurrence provider idempotency key", () => {
   const shared = { targetDate, chatId: "cleaners-chat", messageHash: "message-hash" };
   const first = deliveryIdempotencyKey({ ...shared, deliveryAttemptId: "run-1" });
   const retry = deliveryIdempotencyKey({ ...shared, deliveryAttemptId: "run-2" });
 
   assert.equal(first, retry);
+  assert.notEqual(first, deliveryIdempotencyKey({ ...shared, contentOccurrence: 2 }));
+  assert.equal(
+    deliveryIdempotencyKey({ ...shared, contentOccurrence: 2, deliveryAttemptId: "run-2" }),
+    deliveryIdempotencyKey({ ...shared, contentOccurrence: 2, deliveryAttemptId: "run-3" }),
+  );
   assert.notEqual(first, deliveryIdempotencyKey({ ...shared, messageHash: "changed-message" }));
   assert.notEqual(first, deliveryIdempotencyKey({ ...shared, chatId: "different-chat" }));
+  assert.throws(() => deliveryIdempotencyKey({ ...shared, contentOccurrence: 0 }), /positive integer/);
 });
 
 test("live WhatsApp sends defer retry to a reconciled scheduler run", async () => {
@@ -505,6 +610,7 @@ test("live send appends only after cleaners-chat readback", async () => {
   const unitReports = classifyUnits(turnoverReservations(), targetDate);
   const delivery = planDelivery({ targetDate, unitReports, weather: dryWeather, ledgerRecords: [] });
   const order = [];
+  let ledgerRecord;
   const result = await applyDelivery({
     mode: "live",
     result: resultFor(delivery),
@@ -518,11 +624,15 @@ test("live send appends only after cleaners-chat readback", async () => {
       order.push("verify");
       return { found: true, attempts: 1 };
     },
-    appendLedgerFn: () => order.push("append"),
+    appendLedgerFn: (record) => {
+      ledgerRecord = record;
+      order.push("append");
+    },
   });
 
   assert.equal(result.status, "sent");
   assert.deepEqual(order, ["dry-run", "send", "verify", "append"]);
+  assert.equal(ledgerRecord.contentOccurrence, 1);
 });
 
 test("cleaners-chat reads retry transient provider failures", async () => {
@@ -549,15 +659,15 @@ test("cleaners-chat reads retry transient provider failures", async () => {
 
 test("private final-failure alerts require exact chat readback", async () => {
   const targetDate = "2026-08-24";
-  const runId = "fixture-run";
+  const incidentId = `delivery:${targetDate}`;
   const expectedText = [
     `Airbnb cleaner report failed after the final cloud retry for ${targetDate}.`,
-    `Run: ${runId}`,
+    `Incident: ${incidentId}`,
     "Check the private Fly status endpoint and sanitized run receipt.",
   ].join("\n");
   const calls = [];
   const result = await sendFinalFailureAlert(
-    { targetDate, runId },
+    { targetDate },
     {
       env: {
         MINCOOL_CUSTOMER_WHATSAPP_API_BASE_URL: "https://customer-api.example",
@@ -578,8 +688,53 @@ test("private final-failure alerts require exact chat readback", async () => {
   );
 
   assert.equal(result.verifiedFromChat, true);
+  assert.equal(result.incidentId, incidentId);
   assert.deepEqual(calls.map((call) => call[0]), ["send", "send", "read"]);
   assert.ok(calls.every((call) => call[0] !== "send" || call[2] === "management@g.us"));
   assert.equal(calls[2][2], "management@g.us");
   assert.equal(calls[0][3], calls[1][3]);
+});
+
+test("final-failure retries reuse one incident-scoped provider key across run IDs", async () => {
+  const targetDate = "2026-08-24";
+  const sends = [];
+  let expectedText = "";
+  const dependencies = {
+    env: {
+      MINCOOL_CUSTOMER_WHATSAPP_API_BASE_URL: "https://customer-api.example",
+      MINCOOL_CUSTOMER_WHATSAPP_API_KEY: "test-key",
+      AIRBNB_WHATSAPP_ACCOUNT_ID: "account-id",
+      AIRBNB_WHATSAPP_CHAT_ID: "cleaners@g.us",
+      AIRBNB_WHATSAPP_ALERT_CHAT_ID: "management@g.us",
+    },
+    whatsappSendFn: async (request) => {
+      sends.push(request);
+      if (!request.dryRun) expectedText = request.text;
+      return { attempts: 1 };
+    },
+    fetchChatMessagesFn: async () => [{ from_me: true, text: expectedText }],
+  };
+
+  await sendFinalFailureAlert({ targetDate, runId: "first-run" }, dependencies);
+  await sendFinalFailureAlert({ targetDate, runId: "retry-run" }, dependencies);
+
+  const liveSends = sends.filter((request) => request.dryRun === false);
+  assert.equal(liveSends.length, 2);
+  assert.equal(liveSends[0].idempotencyKey, liveSends[1].idempotencyKey);
+  assert.equal(liveSends[0].text, liveSends[1].text);
+  assert.doesNotMatch(liveSends[0].text, /first-run|retry-run/);
+
+  const databaseIncident = [];
+  await sendFinalFailureAlert(
+    { targetDate, runId: "database-run", reason: "database_sync" },
+    {
+      ...dependencies,
+      whatsappSendFn: async (request) => {
+        databaseIncident.push(request);
+        if (!request.dryRun) expectedText = request.text;
+        return { attempts: 1 };
+      },
+    },
+  );
+  assert.notEqual(liveSends[0].idempotencyKey, databaseIncident[1].idempotencyKey);
 });

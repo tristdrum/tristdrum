@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  loadDeliveryGuardCandidates,
   loadShadowCandidates,
   loadSuppressedSupportAlerts,
+  recordAmbiguousDeliveryFailure,
+  recordDeliveryGuardFailure,
   storeSupportDraft,
 } from "./repository.mjs";
 
@@ -83,4 +86,75 @@ test("support alert loading revalidates thread and delivery state", async () => 
   assert.match(query, /thread\.status = 'needs_human'/);
   assert.match(query, /thread\.last_host_at < thread\.last_guest_at/);
   assert.match(query, /'ambiguous'/);
+  assert.match(query, /row_number\(\) over/i);
+  assert.match(query, /where stage_rank = 1/i);
+  assert.match(query, /when 'delivery_ambiguous' then 3/i);
+});
+
+test("delivery queue safely recovers stale claims and excludes legacy autonomous approvals", async () => {
+  const queries = [];
+  const transaction = async (strings) => {
+    queries.push(strings.join("?"));
+    return [];
+  };
+  transaction.json = (value) => value;
+  const sql = async (strings) => {
+    queries.push(strings.join("?"));
+    return [];
+  };
+  sql.begin = async (callback) => callback(transaction);
+
+  await loadDeliveryGuardCandidates(sql, {
+    householdId: "22222222-2222-4222-8222-222222222222",
+    now: new Date("2026-08-24T12:00:00.000Z"),
+    limit: 1,
+  });
+
+  assert.equal(queries.some((query) => (
+    /status = 'sending'/.test(query)
+    && /send_attempted_at is null/.test(query)
+    && /set status = 'approved'/.test(query)
+  )), true);
+  assert.equal(queries.some((query) => (
+    /status = 'sending'/.test(query)
+    && /send_attempted_at is not null/.test(query)
+    && /set status = 'ambiguous'/.test(query)
+  )), true);
+  assert.equal(queries.some((query) => (
+    /approved_by is not null/.test(query)
+    && /messageWhitelisted/.test(query)
+  )), true);
+});
+
+test("delivery failure persistence redacts scalar credentials", async () => {
+  const values = [];
+  const transaction = async (strings, ...parameters) => {
+    values.push(...parameters);
+    const query = strings.join("?");
+    if (/update airbnb\.reply_deliveries/.test(query)) {
+      return [{ id: "delivery-1", threadId: "thread-1", status: "ambiguous" }];
+    }
+    return [];
+  };
+  transaction.json = (value) => value;
+  const sql = async () => [];
+  sql.begin = async (callback) => callback(transaction);
+  const error = new Error("provider failed token=very-secret-value postgresql://user:password@example.test/db");
+
+  await recordAmbiguousDeliveryFailure(sql, {
+    householdId: "22222222-2222-4222-8222-222222222222",
+    deliveryId: "delivery-1",
+    error,
+    now: new Date("2026-08-24T12:00:00.000Z"),
+  });
+  await recordDeliveryGuardFailure(sql, {
+    householdId: "22222222-2222-4222-8222-222222222222",
+    deliveryId: "delivery-1",
+    error,
+    now: new Date("2026-08-24T12:01:00.000Z"),
+  });
+
+  const persisted = JSON.stringify(values);
+  assert.doesNotMatch(persisted, /very-secret-value|user:password/);
+  assert.match(persisted, /\[REDACTED\]/);
 });

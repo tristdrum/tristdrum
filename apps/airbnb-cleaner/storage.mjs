@@ -35,9 +35,9 @@ function providerSummary(value) {
 
 export function redactSensitiveText(value) {
   return String(value ?? "")
-    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+\/-]+=*/gi, "$1 [redacted]")
-    .replace(/\b(api[_ -]?key|token|password|secret)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
-    .replace(/\b(postgres(?:ql)?):\/\/[^\s/@]+(?::[^\s/@]*)?@/gi, "$1://[redacted]@")
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
+    .replace(/\b(authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|cookie|credentials?)["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s&,;}]+)/gi, "$1=[redacted]")
+    .replace(/\b(postgres(?:ql)?:\/\/)[^\s'\",]+/gi, "$1[redacted]")
     .slice(0, 500);
 }
 
@@ -80,6 +80,7 @@ export function sanitizeRunResult(result, { runId, startedAt, completedAt, final
     confidence: result.confidence,
     messageHash: result.messageHash,
     legacyMessageHash: result.legacyMessageHash,
+    contentOccurrence: result.contentOccurrence,
     isUpdate: result.isUpdate,
     duplicateSource: result.duplicateSource ?? null,
     ledger: result.ledger ?? null,
@@ -101,8 +102,8 @@ export function sanitizeFailure(error, { runId, targetDate, mode, finalAttempt, 
     mode,
     targetDate,
     error: {
-      name: error?.name ?? "Error",
-      code: error?.code ?? null,
+      name: redactSensitiveText(error?.name ?? "Error").slice(0, 100),
+      code: error?.code == null ? null : redactSensitiveText(error.code).slice(0, 100),
       message: redactSensitiveText(error?.message ?? "Unknown failure"),
     },
   };

@@ -64,7 +64,7 @@ test("authenticated observation returns only the runner receipt", async () => {
   });
   const response = await request(server, { method: "POST", path: "/run", secret: "secret", body: {} });
   assert.equal(response.status, 200);
-  assert.equal(response.body.fullReview, true);
+  assert.equal(response.body.fullReview, false);
   assert.equal(response.body.externalWritesEnabled, false);
   assert.equal(calls, 1);
 });
@@ -75,6 +75,8 @@ test("live mode reaches the runner only after all exact Management gates pass", 
     AIRBNB_STOCK_EXTERNAL_WRITES_ENABLED: "true",
     AIRBNB_STOCK_LIVE_CONFIRMATION: "ENABLE_AIRBNB_STOCK_MANAGEMENT_WRITES",
     AIRBNB_STOCK_MANAGEMENT_ALERTS_ENABLED: "true",
+    AIRBNB_WHATSAPP_CHAT_ID: "maids@g.us",
+    AIRBNB_MANAGEMENT_WHATSAPP_CHAT_ID: "management@g.us",
   };
   const server = createAirbnbStockServer({
     secret: "secret",

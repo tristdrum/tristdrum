@@ -314,6 +314,7 @@ export async function ingestStockWhatsAppObservation(sql, { householdId, observa
       where household_id = ${householdId}
         and active
         and sku = any(${observation.matchedSkus}::text[])
+        and (last_counted_at is null or last_counted_at < ${observation.occurredAt}::timestamptz)
       returning id, sku
     `;
     await transaction`

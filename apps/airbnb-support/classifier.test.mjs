@@ -35,6 +35,7 @@ test("classifier uses strict, non-stored Responses API output and adds the foote
   assert.equal(requestBody.text.format.strict, true);
   assert.equal(requestBody.tools, undefined);
   assert.equal(result.autoReply, true);
+  assert.equal(result.messageWhitelisted, true);
   assert.ok(result.draft.endsWith(AUTOMATED_REPLY_FOOTER));
 });
 
@@ -116,6 +117,43 @@ test("high-risk guest language forces human review despite a low-risk model labe
   assert.equal(result.status, "needs_human");
   assert.equal(result.alertManagement, true);
   assert.equal(result.deterministicGuard, "human_review_phrase");
+});
+
+test("model topic labels cannot bypass cancellation, change, maintenance, or ambiguity review", async () => {
+  const cases = [
+    ["Thanks, I won't be coming after all", "thanks", "human_review_phrase"],
+    ["Please modify my reservation", "greeting", "human_review_phrase"],
+    ["I need to shorten my stay", "thanks", "human_review_phrase"],
+    ["There is no hot water", "greeting", "human_review_phrase"],
+    ["Could you help me with something?", "greeting", "message_not_whitelisted"],
+  ];
+  for (const [guestMessage, topic, expectedGuard] of cases) {
+    const result = await classifyGuestMessage({
+      guestMessage,
+      listingName: "Jasmine Studio Stay",
+      facts: {},
+      env: { OPENAI_API_KEY: "test-key" },
+      fetchFn: async () => ({
+        ok: true,
+        async json() {
+          return { output_text: JSON.stringify({
+            topic,
+            riskTier: "low",
+            confidence: 1,
+            factsVerified: true,
+            replyNeeded: true,
+            summary: "The model incorrectly called this low risk.",
+            draft: "You are very welcome.",
+          }) };
+        },
+      }),
+    });
+    assert.equal(result.messageWhitelisted, false, guestMessage);
+    assert.equal(result.autoReply, false, guestMessage);
+    assert.equal(result.status, "needs_human", guestMessage);
+    assert.equal(result.riskTier, "high", guestMessage);
+    assert.equal(result.deterministicGuard, expectedGuard, guestMessage);
+  }
 });
 
 test("classifier respects the scheduler-safe request deadline", async () => {

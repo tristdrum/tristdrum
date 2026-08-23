@@ -10,7 +10,8 @@ delivery-ledger authority; the volume JSONL remains a rollback mirror until the
 post-cutover rollback window closes. Live delivery fails closed when the shared
 ledger cannot be loaded.
 
-Scheduled attempts reuse a content-scoped WhatsApp idempotency key. Final
+Scheduled attempts reuse a content-occurrence WhatsApp idempotency key, so
+retries remain stable while a later `B -> C -> B` reversion gets a new key. Final
 failure alerts are sent only to the private destination and count as delivered
 only after exact chat readback. Live failures are mirrored into sanitized
 Supabase job receipts even when plan generation does not complete.

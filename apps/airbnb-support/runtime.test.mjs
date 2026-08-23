@@ -34,7 +34,28 @@ test("reviewed delivery, autonomous approval, and management alerts have indepen
     ...base,
     AIRBNB_SUPPORT_AUTONOMOUS_REPLIES_ENABLED: "true",
     AIRBNB_SUPPORT_MANAGEMENT_ALERTS_ENABLED: "true",
+    AIRBNB_SUPPORT_JANE_GMAIL_USER: "jane@example.test",
+    AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD: "configured",
   });
   assert.equal(all.autonomousRepliesEnabled, true);
   assert.equal(all.managementAlertsEnabled, true);
+});
+
+test("autonomous replies fail closed when Jane mailbox credentials are incomplete", () => {
+  const base = {
+    AIRBNB_SUPPORT_EXTERNAL_WRITES_ENABLED: "true",
+    AIRBNB_SUPPORT_LIVE_CONFIRMATION: supportLiveConfirmation,
+    AIRBNB_SUPPORT_REPLY_DELIVERY_ENABLED: "true",
+    AIRBNB_SUPPORT_AUTONOMOUS_REPLIES_ENABLED: "true",
+  };
+  for (const janeCredentials of [
+    {},
+    { AIRBNB_SUPPORT_JANE_GMAIL_USER: "jane@example.test" },
+    { AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD: "configured" },
+  ]) {
+    const capabilities = supportRuntimeCapabilities({ ...base, ...janeCredentials });
+    assert.equal(capabilities.replyDeliveryEnabled, true);
+    assert.equal(capabilities.janeMailboxConfigured, false);
+    assert.equal(capabilities.autonomousRepliesEnabled, false);
+  }
 });

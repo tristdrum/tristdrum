@@ -4,6 +4,7 @@ import {
   propertyForListing,
   supportEscalationStages,
 } from "@tristdrum/airbnb-core";
+import { redactCredentialText } from "@tristdrum/airbnb-db";
 
 function eventTime(occurredAt, sequence) {
   const value = new Date(occurredAt);
@@ -230,6 +231,13 @@ export async function storeSupportDraft(sql, {
                   risk_tier = excluded.risk_tier,
                   classification = excluded.classification,
                   draft_text = excluded.draft_text,
+                  status = case
+                    when airbnb.reply_deliveries.status = 'approved'
+                      and airbnb.reply_deliveries.approved_by is null
+                      and not (excluded.classification @> '{"messageWhitelisted": true}'::jsonb)
+                    then 'needs_approval'
+                    else airbnb.reply_deliveries.status
+                  end,
                   updated_at = now()
     returning id, status
   `;
@@ -285,12 +293,89 @@ export function storeShadowDraft(sql, options) {
   return storeSupportDraft(sql, { ...options, shadowMode: true, automaticallyApprove: false });
 }
 
+const STALE_SENDING_AFTER_MS = 15 * 60 * 1000;
+
+export async function recoverStaleSendingDeliveries(sql, {
+  householdId,
+  now,
+  staleAfterMs = STALE_SENDING_AFTER_MS,
+}) {
+  const checkedAt = now instanceof Date ? now : new Date(now);
+  if (!Number.isFinite(checkedAt.getTime())) throw new Error("Stale delivery recovery time is invalid.");
+  const staleBefore = new Date(checkedAt.getTime() - staleAfterMs);
+  return sql.begin(async (transaction) => {
+    const retryable = await transaction`
+      update airbnb.reply_deliveries
+      set status = 'approved',
+          last_delivery_error = 'Recovered a stale claim before the possible-send boundary.',
+          last_reconciled_at = ${checkedAt},
+          updated_at = ${checkedAt}
+      where household_id = ${householdId}
+        and status = 'sending'
+        and send_attempted_at is null
+        and coalesce(last_reconciled_at, updated_at) < ${staleBefore}
+      returning id
+    `;
+    const ambiguous = await transaction`
+      update airbnb.reply_deliveries
+      set status = 'ambiguous',
+          cancellation_reason = 'A stale possible-send sequence requires manual Sent-mail reconciliation.',
+          last_delivery_error = 'Recovered a stale delivery after the possible-send boundary.',
+          last_reconciled_at = ${checkedAt},
+          updated_at = ${checkedAt}
+      where household_id = ${householdId}
+        and status = 'sending'
+        and send_attempted_at is not null
+        and coalesce(last_reconciled_at, updated_at) < ${staleBefore}
+      returning id, thread_id
+    `;
+    for (const delivery of ambiguous) {
+      await transaction`
+        insert into airbnb.alerts (
+          household_id, alert_type, severity, status, dedupe_key, summary, details
+        ) values (
+          ${householdId}, 'guest_overdue', 'critical', 'suppressed',
+          ${`guest:${delivery.threadId}:delivery-ambiguous:${delivery.id}`},
+          'Airbnb reply delivery outcome needs confirmation',
+          ${transaction.json({
+            threadId: delivery.threadId,
+            replyDeliveryId: delivery.id,
+            stage: "delivery_ambiguous",
+            classificationSummary: "Check Sent mail, then mark the reply sent, retry it, or cancel it.",
+          })}
+        )
+        on conflict (household_id, dedupe_key)
+        do update set severity = excluded.severity,
+                      status = 'suppressed',
+                      summary = excluded.summary,
+                      details = excluded.details,
+                      notified_at = null,
+                      resolved_at = null,
+                      updated_at = now()
+      `;
+      await recordSupportAudit(transaction, {
+        householdId,
+        action: "guest_reply_stale_send_ambiguous",
+        entityId: delivery.id,
+        details: { reason: "stale_after_possible_send_boundary" },
+        occurredAt: checkedAt,
+      });
+    }
+    return { retryableCount: retryable.length, ambiguousCount: ambiguous.length };
+  });
+}
+
 export async function loadDeliveryGuardCandidates(sql, { householdId, now, limit = 8 }) {
+  await recoverStaleSendingDeliveries(sql, { householdId, now });
   return sql`
     select id
     from airbnb.reply_deliveries
     where household_id = ${householdId}
       and status = 'approved'
+      and (
+        approved_by is not null
+        or classification @> '{"messageWhitelisted": true}'::jsonb
+      )
     order by created_at
     limit ${limit}
   `;
@@ -316,28 +401,47 @@ async function recordSupportAudit(transaction, {
 
 export async function loadSuppressedSupportAlerts(sql, { householdId, limit = 24 }) {
   return sql`
-    select alert.id, alert.alert_type, alert.severity, alert.dedupe_key,
-           alert.summary, alert.details, alert.opened_at
-    from airbnb.alerts alert
-    join airbnb.guest_threads thread
-      on thread.household_id = alert.household_id
-     and thread.id = nullif(alert.details->>'threadId', '')::uuid
-    join airbnb.reply_deliveries delivery
-      on delivery.household_id = alert.household_id
-     and delivery.id = nullif(alert.details->>'replyDeliveryId', '')::uuid
-    where alert.household_id = ${householdId}
-      and alert.status = 'suppressed'
-      and alert.alert_type in ('guest_escalation', 'guest_overdue')
-      and thread.status = 'needs_human'
-      and (thread.last_host_at is null or thread.last_host_at < thread.last_guest_at)
-      and (
-        delivery.status not in ('sent', 'handled_by_human', 'cancelled', 'ambiguous')
-        or (
-          delivery.status = 'ambiguous'
-          and alert.details->>'stage' = 'delivery_ambiguous'
+    with ranked as (
+      select alert.id, alert.alert_type, alert.severity, alert.dedupe_key,
+             alert.summary, alert.details, alert.opened_at,
+             row_number() over (
+               partition by coalesce(alert.details->>'threadId', alert.dedupe_key)
+               order by case alert.details->>'stage'
+                 when 'delivery_ambiguous' then 3
+                 when 'overdue' then 2
+                 when 'reminder' then 1
+                 else 0
+               end desc, alert.opened_at desc, alert.id desc
+             ) as stage_rank
+      from airbnb.alerts alert
+      join airbnb.guest_threads thread
+        on thread.household_id = alert.household_id
+       and thread.id = nullif(alert.details->>'threadId', '')::uuid
+      join airbnb.reply_deliveries delivery
+        on delivery.household_id = alert.household_id
+       and delivery.id = nullif(alert.details->>'replyDeliveryId', '')::uuid
+      where alert.household_id = ${householdId}
+        and alert.status = 'suppressed'
+        and alert.alert_type in ('guest_escalation', 'guest_overdue')
+        and thread.status = 'needs_human'
+        and (thread.last_host_at is null or thread.last_host_at < thread.last_guest_at)
+        and (
+          delivery.status not in ('sent', 'handled_by_human', 'cancelled', 'ambiguous')
+          or (
+            delivery.status = 'ambiguous'
+            and alert.details->>'stage' = 'delivery_ambiguous'
+          )
         )
-      )
-    order by alert.opened_at, alert.id
+    )
+    select id, alert_type, severity, dedupe_key, summary, details, opened_at
+    from ranked
+    where stage_rank = 1
+    order by case details->>'stage'
+      when 'delivery_ambiguous' then 3
+      when 'overdue' then 2
+      when 'reminder' then 1
+      else 0
+    end desc, opened_at, id
     limit ${limit}
   `;
 }
@@ -439,6 +543,11 @@ export async function applyDeliveryGuardDecision(sql, {
     const rows = await transaction`
       update airbnb.reply_deliveries
       set status = ${status},
+          send_attempt_count = greatest(
+            0,
+            send_attempt_count - case when send_attempted_at is not null then 1 else 0 end
+          ),
+          send_attempted_at = null,
           cancellation_reason = ${status === "cancelled" ? decision.reason : null},
           provider_sent_message_id = case
             when ${status} = 'sent' then outbound_message_id
@@ -570,7 +679,7 @@ export async function recordAmbiguousDeliveryFailure(sql, {
   error,
   now,
 }) {
-  const message = String(error?.message ?? "Ambiguous SMTP failure.").slice(0, 300);
+  const message = redactCredentialText(error?.message ?? "Ambiguous SMTP failure.").slice(0, 300);
   return sql.begin(async (transaction) => {
     const rows = await transaction`
       update airbnb.reply_deliveries
@@ -623,18 +732,23 @@ export async function recordDeliveryGuardFailure(sql, {
   deliveryId,
   error,
   now,
+  attemptRecorded = false,
 }) {
-  const message = String(error?.message ?? "Delivery guard failed.").slice(0, 300);
+  const message = redactCredentialText(error?.message ?? "Delivery guard failed.").slice(0, 300);
   return sql.begin(async (transaction) => {
     const rows = await transaction`
       update airbnb.reply_deliveries
       set status = 'approved',
+          send_attempt_count = greatest(
+            0,
+            send_attempt_count - case when send_attempted_at is not null then 1 else 0 end
+          ),
+          send_attempted_at = null,
           last_delivery_error = ${message},
           last_reconciled_at = ${now}
       where household_id = ${householdId}
         and id = ${deliveryId}
         and status = 'sending'
-        and send_attempted_at is null
       returning id, status
     `;
     if (!rows[0]) return null;
@@ -642,7 +756,7 @@ export async function recordDeliveryGuardFailure(sql, {
       householdId,
       action: "guest_reply_guard_failed",
       entityId: deliveryId,
-      details: { error: message },
+      details: { error: message, attemptRecorded },
       occurredAt: now,
     });
     return rows[0];

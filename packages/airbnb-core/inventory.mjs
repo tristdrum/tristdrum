@@ -259,12 +259,17 @@ function normalizedAddress(value) {
     .trim();
 }
 
+function isBowieStreetAddress(value) {
+  const address = normalizedAddress(value);
+  return /^1 bowie (?:street|st)(?: (?:(?:nahoon(?: beach)?(?: (?:east london|kugompo(?: city)?))?)|(?:east london|kugompo(?: city)?))(?: ec)?(?: 52\d{2})?(?: south africa)?)?$/.test(address);
+}
+
 export function decideOrderEvidence({ kind, deliveryAddress }) {
   if (kind === "confirmation" && !deliveryAddress) {
     return { addressStatus: "unknown", alertManagement: true, creditInventory: false, ignore: false };
   }
   const address = normalizedAddress(deliveryAddress);
-  const isBowie = /(?:^| )1 bowie(?: street| st)?(?: |$)/.test(address);
+  const isBowie = isBowieStreetAddress(deliveryAddress);
   if (kind === "invoice" && isBowie) {
     return { addressStatus: "bowie_1", alertManagement: false, creditInventory: true, ignore: false };
   }

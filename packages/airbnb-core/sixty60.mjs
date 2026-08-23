@@ -36,7 +36,6 @@ export function classifyInventorySku(description) {
   if (/\b(hand wash|hand soap|body wash|guest soap)\b/.test(name)) return "hand_soap";
   if (/\bbath\s*mat\b/.test(name)) return "bath_mat";
   if (/\blinen\b/.test(name) && /\b(set|sheet|duvet|pillowcase)\b/.test(name)) return "linen_set";
-  if (/\btowels?\b/.test(name)) return "towel_set";
   if (/\bmug\b/.test(name)) return "mug";
   if (/\b(drinking|tumbler|highball)\b/.test(name) && /\bglass/.test(name)) return "drinking_glass";
   return null;
@@ -48,6 +47,7 @@ function packageMultiplier(description, sku) {
   if (pack && [
     "water_500ml", "milk_250ml", "wrapped_rusk",
     "coffee_portion", "sugar_portion", "toilet_roll", "refuse_bag",
+    "hand_soap",
   ].includes(sku)) {
     return Number.parseInt(pack[1], 10);
   }

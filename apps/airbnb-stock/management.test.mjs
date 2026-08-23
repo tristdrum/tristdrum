@@ -29,7 +29,9 @@ test("shopping-list alerts use stored quantities and flag counts to confirm", ()
   assert.match(text, /^\*Airbnb stock shopping list\*/);
   assert.match(text, /- 6 x Guest chocolates/);
   assert.match(text, /- 2\.5 x Coffee sachets/);
-  assert.match(text, /Estimated total: R400\.20/);
+  assert.match(text, /Historical price estimate: R400\.20 \(informational only\)\./);
+  assert.match(text, /current Sixty60 basket at R350 or more/);
+  assert.match(text, /aim for about R400/);
   assert.match(text, /Count to confirm: Coffee sachets/);
   assert.match(text, /Review: https:\/\/www\.tristdrum\.com\/dashboard\/airbnb$/);
 });
@@ -42,8 +44,14 @@ test("shopping-list alerts state the minimum when prices cannot prove it", () =>
     meetsFreeDeliveryMinimum: false,
   };
   const text = renderStockManagementAlert(alert);
-  assert.match(text, /Estimated total: R120\.00 plus unpriced items/);
+  assert.match(text, /Historical price estimate: R120\.00 plus unpriced items \(informational only\)\./);
   assert.match(text, /R350 or more/);
+  assert.match(text, /aim for about R400/);
+});
+
+test("shopping-list alerts keep the basket reminder even when a historical estimate exceeds R350", () => {
+  const text = renderStockManagementAlert(stockAlert());
+  assert.match(text, /current Sixty60 basket at R350 or more/);
   assert.match(text, /aim for about R400/);
 });
 

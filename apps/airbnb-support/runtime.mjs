@@ -8,11 +8,14 @@ export function supportRuntimeCapabilities(env = process.env) {
   const externalWritesRequested = enabled(env.AIRBNB_SUPPORT_EXTERNAL_WRITES_ENABLED);
   const confirmationMatched = String(env.AIRBNB_SUPPORT_LIVE_CONFIRMATION ?? "").trim()
     === LIVE_CONFIRMATION;
+  const janeMailboxConfigured = Boolean(String(env.AIRBNB_SUPPORT_JANE_GMAIL_USER ?? "").trim())
+    && Boolean(String(env.AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD ?? "").trim());
   const externalWritesEnabled = externalWritesRequested && confirmationMatched;
   const replyDeliveryEnabled = externalWritesEnabled
     && enabled(env.AIRBNB_SUPPORT_REPLY_DELIVERY_ENABLED);
   const autonomousRepliesEnabled = replyDeliveryEnabled
-    && enabled(env.AIRBNB_SUPPORT_AUTONOMOUS_REPLIES_ENABLED);
+    && enabled(env.AIRBNB_SUPPORT_AUTONOMOUS_REPLIES_ENABLED)
+    && janeMailboxConfigured;
   const managementAlertsEnabled = externalWritesEnabled
     && enabled(env.AIRBNB_SUPPORT_MANAGEMENT_ALERTS_ENABLED);
   return {
@@ -20,6 +23,7 @@ export function supportRuntimeCapabilities(env = process.env) {
     externalWritesRequested,
     confirmationMatched,
     externalWritesEnabled,
+    janeMailboxConfigured,
     replyDeliveryEnabled,
     autonomousRepliesEnabled,
     managementAlertsEnabled,

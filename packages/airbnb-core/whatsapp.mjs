@@ -26,6 +26,28 @@ function normalizedText(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
+function providerMessageId(message) {
+  return String(
+    message?.message_id
+      ?? message?.messageId
+      ?? message?.id
+      ?? message?.message?.message_id
+      ?? message?.message?.id
+      ?? "",
+  ).trim();
+}
+
+function messageIdentity(message) {
+  const id = providerMessageId(message);
+  if (id) return `id:${id}`;
+  return [
+    "fallback",
+    String(message?.timestamp ?? message?.occurred_at ?? "").trim(),
+    message?.from_me === true ? "out" : "in",
+    normalizedText(message?.text),
+  ].join(":");
+}
+
 function configuration(env) {
   const chatId = required("AIRBNB_MANAGEMENT_WHATSAPP_CHAT_ID", env);
   if (!chatId.endsWith("@g.us")) throw new Error("Airbnb Management WhatsApp destination must be a group.");
@@ -65,6 +87,7 @@ async function sendText({ text, idempotencyKey, dryRun, env, fetchFn }) {
     dryRun,
     mutatesWhatsappState: response.headers.get("x-min-mutates-whatsapp-state"),
     ok: body?.ok ?? true,
+    providerMessageId: providerMessageId(body) || null,
   };
 }
 
@@ -129,13 +152,20 @@ export async function sendVerifiedManagementMessage({
   if (!message) throw new Error("Management alert text is empty.");
   if (!String(idempotencyKey ?? "").trim()) throw new Error("Management alert idempotency key is empty.");
   const dryRun = await sendText({ text: message, idempotencyKey, dryRun: true, env, fetchFn });
+  const messagesBefore = await readMessages({ env, fetchFn });
+  const identitiesBefore = new Set(messagesBefore.map(messageIdentity));
   const live = await sendText({ text: message, idempotencyKey, dryRun: false, env, fetchFn });
   const expected = normalizedText(message);
   const attempts = positiveInteger(env.AIRBNB_WHATSAPP_READBACK_ATTEMPTS, DEFAULT_READBACK_ATTEMPTS);
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const messages = await readMessages({ env, fetchFn });
-    const found = messages.some((candidate) => candidate.from_me === true
-      && normalizedText(candidate.text) === expected);
+    const found = messages.some((candidate) => {
+      if (candidate.from_me !== true || normalizedText(candidate.text) !== expected) return false;
+      const candidateId = providerMessageId(candidate);
+      return live.providerMessageId
+        ? candidateId === live.providerMessageId
+        : !identitiesBefore.has(messageIdentity(candidate));
+    });
     if (found) {
       return {
         dryRun,

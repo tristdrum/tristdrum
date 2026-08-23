@@ -178,8 +178,58 @@ test("only a final failed attempt sends the private failure alert", async () => 
   });
   assert.equal(alerts.length, 1);
   assert.equal(alerts[0].targetDate, "2026-08-07");
+  assert.equal(alerts[0].reason, "delivery");
   assert.equal(mirroredFailures.length, 2);
   assert.equal(mirroredFailures.every((receipt) => receipt.status === "error"), true);
+});
+
+test("a concurrent final RUN_IN_PROGRESS response never sends a private failure alert", async () => {
+  const alerts = [];
+  const mirroredFailures = [];
+  let startRun;
+  let finishRun;
+  const runStarted = new Promise((resolve) => { startRun = resolve; });
+  const runCanFinish = new Promise((resolve) => { finishRun = resolve; });
+  const dependencies = {
+    runReport: async ({ mode, targetDate }) => {
+      startRun();
+      await runCanFinish;
+      return successfulResult(mode, targetDate);
+    },
+    sendFinalFailureAlert: async (value) => {
+      alerts.push(value);
+      return { sent: true, attempts: 1 };
+    },
+    syncFailureDatabase: async ({ receipt }) => {
+      mirroredFailures.push(receipt);
+      return { status: "synced" };
+    },
+  };
+
+  await withServer(dependencies, async (baseUrl) => {
+    const activeRun = fetch(`${baseUrl}/run`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ mode: "live", target: "2026-08-10" }),
+    });
+    await runStarted;
+
+    const overlappingFinal = await fetch(`${baseUrl}/run`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ mode: "live", target: "2026-08-10", finalAttempt: true }),
+    });
+    assert.equal(overlappingFinal.status, 409);
+    assert.equal((await overlappingFinal.json()).error.code, "RUN_IN_PROGRESS");
+    const statusDuringActiveRun = await fetch(`${baseUrl}/status?date=2026-08-10`, { headers: authHeaders() });
+    assert.equal(statusDuringActiveRun.status, 404);
+
+    finishRun();
+    assert.equal((await activeRun).status, 200);
+  });
+
+  assert.equal(alerts.length, 0);
+  assert.equal(mirroredFailures.length, 0);
 });
 
 test("a final successful delivery privately alerts when its database mirror still fails", async () => {
@@ -276,6 +326,7 @@ test("relative final failures keep their calendar status and an earlier success"
 
   assert.equal(alerts.length, 1);
   assert.equal(alerts[0].targetDate, targetDate);
+  assert.equal(alerts[0].reason, "delivery");
 });
 
 test("a final retry failure does not alert after success in the same window", async () => {
@@ -368,4 +419,5 @@ test("a final semantic blocker alerts even after an earlier success", async () =
 
   assert.equal(alerts.length, 1);
   assert.equal(alerts[0].targetDate, targetDate);
+  assert.equal(alerts[0].reason, "blocked");
 });

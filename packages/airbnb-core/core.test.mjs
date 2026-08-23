@@ -18,6 +18,8 @@ import {
   stockObservationSkus,
   supportDisposition,
   supportEscalationStages,
+  supportMessageMatchesTopic,
+  supportMessageRequiresHuman,
   trustedAirbnbSender,
   withAutomatedReplyFooter,
 } from "./index.mjs";
@@ -189,7 +191,27 @@ test("Sixty60 confirmations are provisional and only a 1 Bowie invoice credits s
     creditInventory: false,
     ignore: false,
   });
-  assert.equal(decideOrderEvidence({ kind: "invoice", deliveryAddress: "1 Bowie Street, Nahoon" }).creditInventory, true);
+  for (const address of [
+    "1 Bowie Street",
+    "1 Bowie St",
+    "1 Bowie Street, Nahoon",
+    "1 Bowie St., Nahoon",
+    "1 Bowie Street Nahoon East London 5241 South Africa",
+    "1 Bowie St, Nahoon Beach, KuGompo City, 5210, South Africa",
+  ]) {
+    assert.equal(decideOrderEvidence({ kind: "invoice", deliveryAddress: address }).creditInventory, true);
+  }
+  for (const address of [
+    "1 Bowie",
+    "1 Bowie Road",
+    "11 Bowie Street",
+    "1 Bowie Street Extension",
+    "1 Bowie Street, Cape Town",
+  ]) {
+    const decision = decideOrderEvidence({ kind: "invoice", deliveryAddress: address });
+    assert.equal(decision.creditInventory, false);
+    assert.equal(decision.ignore, true);
+  }
   assert.equal(decideOrderEvidence({ kind: "invoice", deliveryAddress: "18 Other Road" }).ignore, true);
 });
 
@@ -197,6 +219,7 @@ test("support auto-reply gate is whitelist and verified-facts only", () => {
   assert.equal(supportDisposition({
     topic: "wifi",
     riskTier: "low",
+    messageWhitelisted: true,
     factsVerified: true,
     confidence: 0.97,
     replyNeeded: true,
@@ -235,7 +258,7 @@ test("automated footer is subtle, exact, and idempotent", () => {
 });
 
 test("support auto-reply templates use verified facts rather than model prose", async () => {
-  const { supportMessageRequiresHuman, verifiedSupportDraft } = await import("./support.mjs");
+  const { verifiedSupportDraft } = await import("./support.mjs");
   assert.equal(verifiedSupportDraft("greeting", {}), "Hello! Thank you for your message. We look forward to hosting you.");
   assert.equal(
     verifiedSupportDraft("address", { address: "1 Verified Street" }),
@@ -244,6 +267,30 @@ test("support auto-reply templates use verified facts rather than model prose", 
   assert.equal(verifiedSupportDraft("wifi", {}), null);
   assert.equal(supportMessageRequiresHuman("Hello, can I get a refund and change my dates?"), true);
   assert.equal(supportMessageRequiresHuman("Hello, we are looking forward to the stay."), false);
+});
+
+test("support message whitelist accepts only the matching low-risk template intent", () => {
+  assert.equal(supportMessageMatchesTopic("Please resend the Wi-Fi network name and password.", "wifi"), true);
+  assert.equal(supportMessageMatchesTopic("Could you please send directions from the airport?", "directions"), true);
+  assert.equal(supportMessageMatchesTopic("What time may I check in?", "check_in_time"), true);
+  assert.equal(supportMessageMatchesTopic("Thanks, I won't be coming after all", "thanks"), false);
+  assert.equal(supportMessageMatchesTopic("Please modify my reservation", "greeting"), false);
+  assert.equal(supportMessageMatchesTopic("There is no hot water", "thanks"), false);
+  assert.equal(
+    supportMessageMatchesTopic("Could you send directions from the airport and help with something?", "directions"),
+    false,
+  );
+});
+
+test("reservation changes, cancellations, and maintenance always require a human", () => {
+  for (const message of [
+    "Thanks, I won't be coming after all",
+    "Please modify my reservation",
+    "I need to shorten my stay",
+    "There is no hot water",
+  ]) {
+    assert.equal(supportMessageRequiresHuman(message), true, message);
+  }
 });
 
 test("support escalation stages are immediate, reminded at 45 minutes, and overdue at 60", () => {
@@ -318,6 +365,7 @@ test("Sixty60 confirmation stays provisional while its 1 Bowie invoice is credit
   });
   assert.equal(invoice.kind, "invoice");
   assert.match(invoice.deliveryAddress, /^1 Bowie St/);
+  assert.equal(decideOrderEvidence(invoice).creditInventory, true);
   assert.equal(invoice.totalCents, 11897);
   assert.deepEqual(invoice.items.map((item) => [item.inventorySku, item.creditedQuantity]), [
     ["water_500ml", 6],
@@ -334,6 +382,25 @@ test("Sixty60 ignores other senders and unrelated household groceries", () => {
   assert.equal(classifyInventorySku("Magnum Death By Chocolate Flavoured Ice Cream 100ml"), null);
   assert.equal(classifyInventorySku("Staffords Magicmelt Choc Chips Box 250g"), null);
   assert.equal(classifyInventorySku("TV Bar Chocolate Slab 80g"), null);
+  assert.equal(classifyInventorySku("Kitchen Towel 2 Pack"), null);
+  assert.equal(classifyInventorySku("Luxury Bath Towels 4 Pack"), null);
+});
+
+test("Sixty60 hand-soap packs credit bottles without inferring ready towel sets", () => {
+  const items = parseSixty60LineItems([
+    "Product Detail Price (per item) Total",
+    "Guest Hand Soap 2 Pack Qty 3 R 39.99 R 119.97",
+    "Luxury Bath Towels 4 Pack Qty 1 R 299.99 R 299.99",
+    "Product sub-total R 419.96",
+  ].join(" "));
+  assert.deepEqual(items.map((item) => [
+    item.inventorySku,
+    item.creditedQuantity,
+    item.inventoryQuantityKnown,
+  ]), [
+    ["hand_soap", 6, true],
+    [null, 0, false],
+  ]);
 });
 
 test("Sixty60 converts only verified guest-chocolate packs into individual portions", () => {

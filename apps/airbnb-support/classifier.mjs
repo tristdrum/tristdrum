@@ -1,5 +1,6 @@
 import {
   supportDisposition,
+  supportMessageMatchesTopic,
   supportMessageRequiresHuman,
   verifiedSupportDraft,
   withAutomatedReplyFooter,
@@ -87,9 +88,11 @@ export async function classifyGuestMessage({
             {
               type: "input_text",
               text: [
-                "Classify one Airbnb guest message for a cautious host-support shadow system.",
+                "Classify one Airbnb guest message for a cautious host-support system.",
                 "Never assume availability, discounts, refunds, date changes, exceptions, safety facts, or unlisted amenities.",
                 "Only draft from the supplied verified facts. Use null for draft when a safe factual reply cannot be written.",
+                "Only a simple greeting, thanks, or direct request for standard Wi-Fi, address, directions, parking, check-in, check-out, or resend information can ever be autonomous.",
+                "Cancellation, reservation changes, maintenance, complaints, mixed requests, and ambiguous wording always require a human.",
                 "A draft is advisory only and must be concise, warm, and direct.",
               ].join(" "),
             },
@@ -117,16 +120,25 @@ export async function classifyGuestMessage({
   if (!response.ok) throw new Error(`OpenAI classification failed with HTTP ${response.status}.`);
   const raw = JSON.parse(responseText(await response.json()));
   const deterministicDraft = verifiedSupportDraft(raw.topic, facts);
-  const requiresHuman = supportMessageRequiresHuman(guestMessage);
+  const explicitHumanReview = supportMessageRequiresHuman(guestMessage);
+  const messageWhitelisted = supportMessageMatchesTopic(guestMessage, raw.topic);
+  const requiresHuman = explicitHumanReview || !messageWhitelisted;
   const classification = {
     ...raw,
     riskTier: requiresHuman ? "high" : raw.riskTier,
+    messageWhitelisted,
     factsVerified: !requiresHuman
       && raw.factsVerified === true
       && factAvailable(raw.topic, facts)
       && deterministicDraft != null,
     draft: deterministicDraft ?? raw.draft,
-    deterministicGuard: requiresHuman ? "human_review_phrase" : deterministicDraft ? "verified_template" : "no_verified_template",
+    deterministicGuard: explicitHumanReview
+      ? "human_review_phrase"
+      : !messageWhitelisted
+        ? "message_not_whitelisted"
+        : deterministicDraft
+          ? "verified_template"
+          : "no_verified_template",
   };
   const disposition = supportDisposition(classification);
   return {

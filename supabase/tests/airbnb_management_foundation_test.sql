@@ -1,6 +1,6 @@
 begin;
 
-select plan(45);
+select plan(53);
 
 insert into auth.users (id, email)
 values ('00000000-0000-0000-0000-00000000a001', 'airbnb-dashboard-test@example.invalid');
@@ -23,6 +23,27 @@ insert into public.household_members (
   now()
 );
 
+insert into auth.users (id, email)
+values ('00000000-0000-0000-0000-00000000a002', 'airbnb-other-household@example.invalid');
+
+insert into public.households (id, name, created_by)
+values (
+  '00000000-0000-0000-0000-00000000b002',
+  'Other Airbnb test household',
+  '00000000-0000-0000-0000-00000000a002'
+);
+
+insert into public.household_members (
+  household_id, user_id, role, membership_status, invited_by, joined_at
+) values (
+  '00000000-0000-0000-0000-00000000b002',
+  '00000000-0000-0000-0000-00000000a002',
+  'owner',
+  'active',
+  '00000000-0000-0000-0000-00000000a002',
+  now()
+);
+
 insert into airbnb.properties (id, household_id, unit_number, listing_name, common_name)
 values (
   '00000000-0000-0000-0000-00000000c001',
@@ -30,6 +51,57 @@ values (
   1,
   'Fixture Studio',
   'Fixture'
+);
+
+insert into airbnb.cleaner_plans (
+  household_id, run_id, target_date, mode, delivery_status, message_hash,
+  content_occurrence, message_text, is_update, started_at, completed_at, sent_at
+) values (
+    '00000000-0000-0000-0000-00000000b001',
+    'fixture-plan-occurrence-1',
+    current_date,
+    'live',
+    'sent',
+    'fixture-repeated-content',
+    1,
+    'Fixture plan content',
+    false,
+    now() - interval '2 minutes',
+    now() - interval '2 minutes',
+    now() - interval '2 minutes'
+  );
+
+insert into airbnb.cleaner_plans (
+  household_id, run_id, target_date, mode, delivery_status, message_hash,
+  content_occurrence, message_text, is_update, started_at, completed_at, sent_at
+) values (
+    '00000000-0000-0000-0000-00000000b001',
+    'fixture-plan-occurrence-2',
+    current_date,
+    'live',
+    'sent',
+    'fixture-repeated-content',
+    2,
+    'Fixture plan content',
+    true,
+    now() - interval '1 minute',
+    now() - interval '1 minute',
+    now() - interval '1 minute'
+  )
+on conflict (household_id, target_date, message_hash)
+do update set content_occurrence = greatest(
+  airbnb.cleaner_plans.content_occurrence,
+  excluded.content_occurrence
+);
+
+select results_eq(
+  $$select count(*)::integer, max(content_occurrence)::integer
+   from airbnb.cleaner_plans
+   where household_id = '00000000-0000-0000-0000-00000000b001'
+     and target_date = current_date
+     and message_hash = 'fixture-repeated-content'$$,
+  $$values (1, 2)$$,
+  'repeated cleaner content keeps one rollback-compatible row and advances its occurrence'
 );
 
 insert into airbnb.inventory_items (
@@ -66,6 +138,24 @@ insert into airbnb.shopping_list_items (
   2,
   'Fixture demand',
   true
+);
+
+select throws_like(
+  $$insert into airbnb.shopping_lists (
+      id, household_id, forecast_start, forecast_end, estimated_total_cents,
+      price_estimate_complete, meets_free_delivery_minimum, content_hash
+    ) values (
+      '00000000-0000-0000-0000-00000000e002',
+      '00000000-0000-0000-0000-00000000b001',
+      current_date,
+      current_date + 7,
+      null,
+      true,
+      true,
+      'invalid-null-shopping-list'
+    )$$,
+  '%airbnb_shopping_lists_minimum_check%',
+  'free-delivery proof requires a complete non-null total'
 );
 
 insert into airbnb.guest_threads (
@@ -162,7 +252,7 @@ insert into airbnb.job_runs (
   'fixture-observe',
   'fixture-run',
   'success',
-  '{"externalWrites": false, "nested": {"apiKey": "must-not-leak", "safe": "visible"}}'::jsonb,
+  '{"externalWrites": false, "nested": {"apiKey": "must-not-leak", "safe": "visible", "message": "failed Bearer dashboard-secret api_key=query-secret serialized={\"apiKey\":\"serialized-secret\"} postgresql://user:pass@db.example/airbnb"}}'::jsonb,
   now(),
   now()
 );
@@ -404,6 +494,20 @@ select ok(
   'authorized dashboard snapshot returns operational rows and sanitized receipts'
 );
 
+select ok(
+  public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')
+    ->'jobRuns'->0->'receipt'->'nested'->>'message' like '%[REDACTED]%'
+  and public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')
+    ->'jobRuns'->0->'receipt'->'nested'->>'message' not like '%dashboard-secret%'
+  and public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')
+    ->'jobRuns'->0->'receipt'->'nested'->>'message' not like '%query-secret%'
+  and public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')
+    ->'jobRuns'->0->'receipt'->'nested'->>'message' not like '%serialized-secret%'
+  and public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')
+    ->'jobRuns'->0->'receipt'->'nested'->>'message' not like '%user:pass%',
+  'dashboard redacts credential-shaped values embedded in scalar strings'
+);
+
 select lives_ok(
   $$select public.airbnb_record_stock_adjustment(
     '00000000-0000-0000-0000-00000000b001',
@@ -449,6 +553,7 @@ select ok(
       and id = '00000000-0000-0000-0000-00000000d001'
       and count_status = 'confirmed'
       and last_counted_at is not null
+      and last_count_quantity = 7
   )
   and exists (
     select 1 from airbnb.audit_events
@@ -457,6 +562,58 @@ select ok(
       and details->>'quantityOnHand' = '7'
   ),
   'physical count reconciles the balance, clears confirmation, and appends audit evidence'
+);
+
+insert into airbnb.inventory_movements (
+  household_id, inventory_item_id, movement_type, quantity_delta,
+  confidence, source_type, source_id, dedupe_key, occurred_at
+) values (
+  '00000000-0000-0000-0000-00000000b001',
+  '00000000-0000-0000-0000-00000000d001',
+  'purchase',
+  5,
+  'confirmed',
+  'invoice',
+  'late-historical-fixture',
+  'late-historical-fixture',
+  (select last_counted_at - interval '1 day'
+   from airbnb.inventory_items
+   where id = '00000000-0000-0000-0000-00000000d001')
+);
+
+select is(
+  (select quantity_on_hand
+   from airbnb.inventory_balances
+   where household_id = '00000000-0000-0000-0000-00000000b001'
+     and id = '00000000-0000-0000-0000-00000000d001'),
+  7::numeric,
+  'evidence ingested later for an event before the physical count cannot change the balance'
+);
+
+insert into airbnb.inventory_movements (
+  household_id, inventory_item_id, movement_type, quantity_delta,
+  confidence, source_type, source_id, dedupe_key, occurred_at
+) values (
+  '00000000-0000-0000-0000-00000000b001',
+  '00000000-0000-0000-0000-00000000d001',
+  'purchase',
+  2,
+  'confirmed',
+  'invoice',
+  'post-count-fixture',
+  'post-count-fixture',
+  (select last_counted_at + interval '1 second'
+   from airbnb.inventory_items
+   where id = '00000000-0000-0000-0000-00000000d001')
+);
+
+select is(
+  (select quantity_on_hand
+   from airbnb.inventory_balances
+   where household_id = '00000000-0000-0000-0000-00000000b001'
+     and id = '00000000-0000-0000-0000-00000000d001'),
+  9::numeric,
+  'movements that occur after the physical count update the balance'
 );
 
 insert into airbnb.alerts (
@@ -573,6 +730,33 @@ select is(
   'verified 1 Bowie order can be updated'
 );
 
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000a002', true);
+
+select throws_like(
+  $$select public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')$$,
+  '%Household access denied.%',
+  'another household owner cannot read this Airbnb dashboard'
+);
+
+select throws_like(
+  $$select public.airbnb_record_stock_count(
+    '00000000-0000-0000-0000-00000000b001',
+    '00000000-0000-0000-0000-00000000d001',
+    1,
+    'unauthorized count'
+  )$$,
+  '%Household access denied.%',
+  'another household owner cannot record this household stock count'
+);
+
+select throws_like(
+  $$select public.airbnb_mark_shopping_list_ordered('00000000-0000-0000-0000-00000000e001')$$,
+  '%Shopping list not found.%',
+  'another household owner cannot mark this household shopping list ordered'
+);
+
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000a001', true);
+
 select throws_like(
   $$select public.airbnb_update_order_status(
     '00000000-0000-0000-0000-000000002002',
@@ -635,6 +819,14 @@ select ok(
     )
       and not active
       and command not like '%mincool-airbnb-cleaner%'
+      and (
+        jobname <> 'airbnb-stock-weekly-review-0700-utc'
+        or schedule = '0,20 4 * * 2'
+      )
+      and (
+        jobname <> 'airbnb-stock-management-alerts-10-40'
+        or schedule = '15,45 5-19 * * *'
+      )
       and (
         jobname <> 'airbnb-stock-management-alerts-10-40'
         or (command like '%mode%live%' and command like '%fullReview%false%')

@@ -94,10 +94,17 @@ export async function recordJobFinish(sql, {
   `;
 }
 
+export function redactCredentialText(value) {
+  return String(value ?? "")
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [REDACTED]")
+    .replace(/\b(authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|cookie|credentials?)["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s&,;}]+)/gi, "$1=[REDACTED]")
+    .replace(/\b(postgres(?:ql)?:\/\/)[^\s'",]+/gi, "$1[REDACTED]");
+}
+
 export function sanitizedError(error) {
   return {
-    name: error?.name ?? "Error",
-    code: error?.code ?? null,
-    message: String(error?.message ?? "Unknown error").slice(0, 300),
+    name: redactCredentialText(error?.name ?? "Error").slice(0, 100),
+    code: error?.code == null ? null : redactCredentialText(error.code).slice(0, 100),
+    message: redactCredentialText(error?.message ?? "Unknown error").slice(0, 300),
   };
 }

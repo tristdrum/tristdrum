@@ -923,6 +923,23 @@ export function planDelivery({ targetDate, unitReports, weather, ledgerRecords }
       duplicateMessageHashes.has(latestForDate.messageHash) ||
       normalizedDuplicateMessageHashes.has(latestForDate.normalizedMessageHash)
     ) ? latestForDate : undefined);
+  const matchingRecords = ledgerRecords.filter((record) =>
+    record.targetDate === targetDateKey && (
+      duplicateMessageHashes.has(record.messageHash) ||
+      normalizedDuplicateMessageHashes.has(record.normalizedMessageHash)
+    )
+  );
+  const chatOccurrenceCount = matchingRecords.filter((record) => record.source === "whatsapp_chat").length;
+  const ledgerOccurrenceCount = matchingRecords
+    .filter((record) => record.source !== "whatsapp_chat")
+    .reduce(
+      (highest, record) => Math.max(highest, Number(record.contentOccurrence ?? 1)),
+      0,
+    );
+  const deliveredOccurrence = Math.max(chatOccurrenceCount, ledgerOccurrenceCount);
+  const contentOccurrence = duplicate
+    ? Math.max(deliveredOccurrence, Number(duplicate.contentOccurrence ?? 1))
+    : deliveredOccurrence + 1;
 
   return {
     targetDateKey,
@@ -932,6 +949,7 @@ export function planDelivery({ targetDate, unitReports, weather, ledgerRecords }
     message,
     hash,
     legacyHash,
+    contentOccurrence,
     isUpdate,
     duplicate,
   };
@@ -986,6 +1004,7 @@ export async function applyDelivery({
         appendLedgerFn({
           targetDate: result.targetDate,
           messageHash: result.messageHash,
+          contentOccurrence: result.contentOccurrence,
           sentAt: now().toISOString(),
           reconciledFrom: "whatsapp_chat",
         });
@@ -1002,6 +1021,7 @@ export async function applyDelivery({
       appendLedgerFn({
         targetDate: result.targetDate,
         messageHash: result.messageHash,
+        contentOccurrence: result.contentOccurrence,
         sentAt: now().toISOString(),
       });
     }
@@ -1010,8 +1030,12 @@ export async function applyDelivery({
   return result;
 }
 
-export function deliveryIdempotencyKey({ targetDate, chatId, messageHash: hash }) {
-  return `airbnb-cleaners:${formatISODate(targetDate)}:${chatId}:${hash}`;
+export function deliveryIdempotencyKey({ targetDate, chatId, messageHash: hash, contentOccurrence = 1 }) {
+  if (!Number.isSafeInteger(contentOccurrence) || contentOccurrence < 1) {
+    throw new Error("Delivery content occurrence must be a positive integer.");
+  }
+  const contentKey = `airbnb-cleaners:${formatISODate(targetDate)}:${chatId}:${hash}`;
+  return contentOccurrence === 1 ? contentKey : `${contentKey}:occurrence-${contentOccurrence}`;
 }
 
 export function confidenceCheck({ reservations, unitReports, weather, envelopesRead, unmatchedUpdateCount = 0 }) {
@@ -1127,7 +1151,7 @@ export async function whatsappSend(
 }
 
 export async function sendFinalFailureAlert(
-  { targetDate, runId, reason = "delivery" },
+  { targetDate, reason = "delivery" },
   {
     env = process.env,
     whatsappSendFn = whatsappSend,
@@ -1138,18 +1162,26 @@ export async function sendFinalFailureAlert(
   const cleanersChatId = whatsappConfig(env).chatId;
   if (!alertChatId) throw new Error("Private failure-alert chat is not configured.");
   if (alertChatId === cleanersChatId) throw new Error("Failure alerts may not target the cleaners chat.");
+  const incidentReason = reason === "database_sync" || reason === "blocked" ? reason : "delivery";
+  const incidentId = `${incidentReason}:${targetDate}`;
   const text = reason === "database_sync"
     ? [
       `Airbnb cleaner plan was delivered for ${targetDate}, but its database mirror failed after the final retry.`,
-      `Run: ${runId}`,
+      `Incident: ${incidentId}`,
       "The cleaners message remains valid. Check the private Fly status endpoint before stock forecasting.",
     ].join("\n")
+    : reason === "blocked"
+      ? [
+        `Airbnb cleaner report was blocked after the final cloud retry for ${targetDate}.`,
+        `Incident: ${incidentId}`,
+        "Check the private Fly status endpoint and sanitized run receipt.",
+      ].join("\n")
     : [
       `Airbnb cleaner report failed after the final cloud retry for ${targetDate}.`,
-      `Run: ${runId}`,
+      `Incident: ${incidentId}`,
       "Check the private Fly status endpoint and sanitized run receipt.",
     ].join("\n");
-  const idempotencyKey = `airbnb-cleaner-failure:${reason}:${targetDate}:${runId}`;
+  const idempotencyKey = `airbnb-cleaner-failure:${incidentId}`;
   await whatsappSendFn({ text, dryRun: true, idempotencyKey, targetChatId: alertChatId });
   const sent = await whatsappSendFn({ text, dryRun: false, idempotencyKey, targetChatId: alertChatId });
   const verification = await verifyChatMessage(text, {
@@ -1158,6 +1190,7 @@ export async function sendFinalFailureAlert(
   if (!verification.found) throw new Error("Private cleaner failure alert was not found in chat readback.");
   return {
     sent: true,
+    incidentId,
     attempts: sent.attempts,
     verifiedFromChat: true,
     verificationAttempts: verification.attempts,
@@ -1394,6 +1427,7 @@ export async function runReport({
     message,
     hash,
     legacyHash,
+    contentOccurrence,
     isUpdate,
     duplicate,
   } = delivery;
@@ -1409,6 +1443,7 @@ export async function runReport({
     targetDate,
     chatId: chatIdForKey,
     messageHash: hash,
+    contentOccurrence,
   });
 
   const result = {
@@ -1445,6 +1480,7 @@ export async function runReport({
     legacyMessageHash: legacyHash,
     baseMessageHash: baseHash,
     legacyBaseMessageHash: legacyBaseHash,
+    contentOccurrence,
     isUpdate,
     idempotencyKey,
     message,

@@ -197,7 +197,8 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
 
     await admin`
       update airbnb.reply_deliveries
-      set status = 'approved', final_text = 'A reviewed reply.'
+      set status = 'approved', final_text = 'A reviewed reply.',
+          approved_by = ${ownerId}, approved_at = '2026-08-21T13:01:30.000Z'
       where household_id = ${householdId} and id = ${draft.id}
     `;
     const claimed = await claimDeliveryForGuard(database.sql, {
@@ -213,6 +214,11 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
       now: new Date("2026-08-21T13:02:01.000Z"),
     });
     assert.equal(simultaneousClaim, null);
+    await recordDeliveryAttempt(database.sql, {
+      householdId,
+      deliveryId: draft.id,
+      now: new Date("2026-08-21T13:02:30.000Z"),
+    });
     await applyDeliveryGuardDecision(database.sql, {
       householdId,
       deliveryId: draft.id,
@@ -247,7 +253,8 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
     });
     await admin`
       update airbnb.reply_deliveries
-      set status = 'approved', final_text = 'A reviewed reply.'
+      set status = 'approved', final_text = 'A reviewed reply.',
+          approved_by = ${ownerId}, approved_at = '2026-08-21T14:01:30.000Z'
       where household_id = ${householdId} and id = ${ambiguousDraft.id}
     `;
     assert.equal((await loadDeliveryGuardCandidates(database.sql, {
@@ -298,7 +305,7 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
       select count(*)::integer as count
       from airbnb.audit_events
       where household_id = ${householdId} and actor_id = 'support'
-    `)[0].count, 4);
+    `)[0].count, 5);
   } finally {
     await database?.close();
     await admin.end({ timeout: 5 });

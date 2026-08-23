@@ -149,6 +149,7 @@ export async function runSupport({
     } else if (janeUserConfigured || janePasswordConfigured) {
       supplementalError = sanitizedError(new Error("Jane's supplemental Gmail credentials are incomplete."));
     }
+    const janeMailboxAvailable = janeConfigured && supplementalResult.status === "fulfilled";
 
     const candidates = await loadShadowCandidates(ownDatabase.sql, {
       householdId,
@@ -179,6 +180,7 @@ export async function runSupport({
         shadowMode: mode === "shadow",
         automaticallyApprove: mode === "live"
           && capabilities.autonomousRepliesEnabled
+          && janeMailboxAvailable
           && !candidate.existingClassification
           && classification.autoReply === true,
       });
@@ -247,7 +249,9 @@ export async function runSupport({
       managementNotificationVerifiedCount: managementNotifications.filter((item) => item.verified).length,
       externalWritesEnabled: mode === "live" && capabilities.externalWritesEnabled,
       replyDeliveryEnabled: mode === "live" && capabilities.replyDeliveryEnabled,
-      autonomousRepliesEnabled: mode === "live" && capabilities.autonomousRepliesEnabled,
+      autonomousRepliesEnabled: mode === "live"
+        && capabilities.autonomousRepliesEnabled
+        && janeMailboxAvailable,
       managementAlertsEnabled: mode === "live" && capabilities.managementAlertsEnabled,
     };
     await recordJobFinish(ownDatabase.sql, {

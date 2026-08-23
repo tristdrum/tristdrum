@@ -15,9 +15,11 @@ export function latestSupportAlerts(alerts) {
     const existingRank = STAGE_RANK[existing?.details?.stage] ?? -1;
     if (!existing || rank > existingRank) selected.set(key, alert);
   }
-  return [...selected.values()].sort((left, right) => (
-    Date.parse(left.openedAt) - Date.parse(right.openedAt)
-  ));
+  return [...selected.values()].sort((left, right) => {
+    const stageDifference = (STAGE_RANK[right.details?.stage] ?? -1)
+      - (STAGE_RANK[left.details?.stage] ?? -1);
+    return stageDifference || Date.parse(left.openedAt) - Date.parse(right.openedAt);
+  });
 }
 
 export function renderSupportManagementAlert(alert, dashboardUrl = "https://www.tristdrum.com/dashboard/airbnb") {

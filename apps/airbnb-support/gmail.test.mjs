@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   collectConversationMessages,
   findSentMessageIds,
+  findSentThreadEvidence,
   sendThreadedReply,
 } from "./gmail.mjs";
 
@@ -49,6 +50,7 @@ test("canonical collector accepts only Tristan's express stream and closes IMAP"
   });
   assert.equal(result.envelopesFound, 1);
   assert.equal(result.messages[0].providerMessageId, "<conversation@example.test>");
+  assert.equal(result.messages[0].rfcMessageId, "<conversation@example.test>");
   assert.equal(result.messages[0].mailboxScope, "tristan");
   assert.deepEqual(sourceFetchRange, [1]);
   assert.equal(clientOptions.connectionTimeout, 15_000);
@@ -153,6 +155,152 @@ test("Sent reconciliation searches Gmail by the stable outbound Message-ID", asy
   assert.deepEqual(found, ["<sent@example.test>"]);
   assert.equal(searches.length, 2);
   assert.equal(released, true);
+});
+
+test("Sent reconciliation detects a recent human reply in the Airbnb thread", async () => {
+  const source = Buffer.from([
+    "Message-ID: <human-reply@example.test>",
+    "From: tristan@example.test",
+    "To: express@airbnb.com",
+    "Subject: Re: Reservation for Jasmine Studio Stay, Aug 22 - 23",
+    "In-Reply-To: <conversation@example.test>",
+    "References: <conversation@example.test>",
+    "Date: Fri, 21 Aug 2026 12:03:00 +0000",
+    "Content-Type: text/plain; charset=utf-8",
+    "",
+    "I have replied to the guest.",
+  ].join("\r\n"));
+  const client = {
+    usable: true,
+    async connect() {},
+    async getMailboxLock() { return { release() {} }; },
+    async search(query) {
+      return query.header ? [] : [11];
+    },
+    async *fetch() {
+      yield { uid: 11, source, internalDate: new Date("2026-08-21T12:03:00.000Z") };
+    },
+    async logout() {},
+    close() {},
+  };
+  const evidence = await findSentThreadEvidence({
+    messageIds: ["<bot-reply@example.test>"],
+    since: new Date("2026-08-21T12:00:00.000Z"),
+    referenceIds: ["<conversation@example.test>"],
+    mailboxScope: "tristan",
+    env: { AIRBNB_SUPPORT_GMAIL_USER: "tristan@example.test", AIRBNB_SUPPORT_GMAIL_APP_PASSWORD: "not-a-secret" },
+    createClient: () => client,
+  });
+  assert.deepEqual(evidence, {
+    messageIds: [],
+    humanReplyAt: "2026-08-21T12:03:00.000Z",
+  });
+});
+
+test("Sent reconciliation uses Jane's isolated Sent mailbox", async () => {
+  let clientUser;
+  const source = Buffer.from([
+    "Message-ID: <jane-human-reply@example.test>",
+    "From: jane@example.test",
+    "To: express@airbnb.com",
+    "Subject: Re: Reservation for Jasmine Studio Stay, Aug 22 - 23",
+    "In-Reply-To: <conversation@example.test>",
+    "Date: Fri, 21 Aug 2026 12:04:00 +0000",
+    "Content-Type: text/plain; charset=utf-8",
+    "",
+    "Jane has replied to the guest.",
+  ].join("\r\n"));
+  const client = {
+    usable: true,
+    async connect() {},
+    async getMailboxLock() { return { release() {} }; },
+    async search(query) { return query.header ? [] : [12]; },
+    async *fetch() {
+      yield { uid: 12, source, internalDate: new Date("2026-08-21T12:04:00.000Z") };
+    },
+    async logout() {},
+    close() {},
+  };
+  const evidence = await findSentThreadEvidence({
+    messageIds: [],
+    since: new Date("2026-08-21T12:00:00.000Z"),
+    referenceIds: ["<conversation@example.test>"],
+    mailboxScope: "jane",
+    env: {
+      AIRBNB_SUPPORT_JANE_GMAIL_USER: "jane@example.test",
+      AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD: "not-a-secret",
+    },
+    createClient: (options) => {
+      clientUser = options.auth.user;
+      return client;
+    },
+  });
+  assert.equal(clientUser, "jane@example.test");
+  assert.equal(evidence.humanReplyAt, "2026-08-21T12:04:00.000Z");
+});
+
+test("Sent reconciliation ignores a matching subject from a different Airbnb thread", async () => {
+  const source = Buffer.from([
+    "Message-ID: <unrelated-human-reply@example.test>",
+    "From: jane@example.test",
+    "To: express@airbnb.com",
+    "Subject: Re: Reservation for Jasmine Studio Stay, Aug 22 - 23",
+    "In-Reply-To: <different-conversation@example.test>",
+    "References: <different-conversation@example.test>",
+    "Date: Fri, 21 Aug 2026 12:04:00 +0000",
+    "Content-Type: text/plain; charset=utf-8",
+    "",
+    "A reply to another guest with the same subject.",
+  ].join("\r\n"));
+  const client = {
+    usable: true,
+    async connect() {},
+    async getMailboxLock() { return { release() {} }; },
+    async search(query) { return query.header ? [] : [13]; },
+    async *fetch() {
+      yield { uid: 13, source, internalDate: new Date("2026-08-21T12:04:00.000Z") };
+    },
+    async logout() {},
+    close() {},
+  };
+  const evidence = await findSentThreadEvidence({
+    messageIds: [],
+    since: new Date("2026-08-21T12:00:00.000Z"),
+    referenceIds: ["<conversation@example.test>"],
+    mailboxScope: "jane",
+    env: {
+      AIRBNB_SUPPORT_JANE_GMAIL_USER: "jane@example.test",
+      AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD: "not-a-secret",
+    },
+    createClient: () => client,
+  });
+  assert.deepEqual(evidence, { messageIds: [], humanReplyAt: null });
+});
+
+test("Sent reconciliation fails closed without a thread reference anchor", async () => {
+  await assert.rejects(findSentThreadEvidence({
+    messageIds: [],
+    since: new Date("2026-08-21T12:00:00.000Z"),
+    referenceIds: [],
+    mailboxScope: "jane",
+    env: {
+      AIRBNB_SUPPORT_JANE_GMAIL_USER: "jane@example.test",
+      AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD: "not-a-secret",
+    },
+  }), /requires a message reference anchor/);
+});
+
+test("Sent reconciliation rejects a synthetic IMAP identity as a thread anchor", async () => {
+  await assert.rejects(findSentThreadEvidence({
+    messageIds: [],
+    since: new Date("2026-08-21T12:00:00.000Z"),
+    referenceIds: ["imap:42"],
+    mailboxScope: "jane",
+    env: {
+      AIRBNB_SUPPORT_JANE_GMAIL_USER: "jane@example.test",
+      AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD: "not-a-secret",
+    },
+  }), /requires a message reference anchor/);
 });
 
 test("threaded sender preserves the stable Message-ID and refuses non-Airbnb recipients", async () => {

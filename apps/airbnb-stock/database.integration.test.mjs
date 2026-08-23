@@ -290,6 +290,26 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
       count_status: "confirm",
       movement_count: 0,
     });
+    await admin`
+      update airbnb.inventory_items
+      set count_status = 'confirmed', last_counted_at = '2026-08-22T09:00:00.000Z'
+      where household_id = ${householdId} and id = ${inventoryItemId}
+    `;
+    const olderObservation = {
+      ...stockObservation,
+      providerMessageId: `integration-whatsapp-old-${randomUUID()}`,
+      occurredAt: "2026-08-21T09:00:00.000Z",
+      contentHash: "e".repeat(64),
+    };
+    assert.deepEqual(await ingestStockWhatsAppObservation(stock.sql, {
+      householdId,
+      observation: olderObservation,
+    }), { status: "ingested", matchedItemCount: 0 });
+    assert.equal((await admin`
+      select count_status
+      from airbnb.inventory_items
+      where household_id = ${householdId} and id = ${inventoryItemId}
+    `)[0].count_status, "confirmed");
     await assert.rejects(stock.sql`
       insert into airbnb.audit_events (
         household_id, actor_type, actor_id, action, entity_type, entity_id
@@ -321,6 +341,13 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
       record.messageHash === confirmed.result.messageHash
       && record.source === "supabase"
     )), true);
+    const deliveredBeforeBlock = (await admin`
+      select content_occurrence, sent_at
+      from airbnb.cleaner_plans
+      where household_id = ${householdId}
+        and target_date = ${confirmed.result.targetDate}
+        and message_hash = ${confirmed.result.messageHash}
+    `)[0];
     const blockedAfterSend = {
       receipt: {
         ...confirmed.receipt,
@@ -332,26 +359,54 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
       result: {
         ...confirmed.result,
         status: "blocked",
+        contentOccurrence: 2,
         confidence: { ok: false, blockers: ["Integration overlap"] },
       },
     };
     assert.equal((await syncCleanerDatabase({ ...blockedAfterSend, env: cleanerEnv })).status, "synced");
     const preservedPlan = (await admin`
-      select delivery_status, sent_at
+      select delivery_status, content_occurrence, sent_at
       from airbnb.cleaner_plans
       where household_id = ${householdId}
         and target_date = ${confirmed.result.targetDate}
         and message_hash = ${confirmed.result.messageHash}
     `)[0];
     assert.equal(preservedPlan.delivery_status, "duplicate_skipped");
-    assert.ok(preservedPlan.sent_at);
+    assert.equal(preservedPlan.content_occurrence, 1);
+    assert.equal(preservedPlan.sent_at.toISOString(), deliveredBeforeBlock.sent_at.toISOString());
     const ledgerAfterBlock = await loadCleanerLedgerRecords({
       targetDate: confirmed.result.targetDate,
       env: cleanerEnv,
     });
     assert.equal(ledgerAfterBlock.records.some((record) => (
       record.messageHash === confirmed.result.messageHash
+      && record.contentOccurrence === 1
     )), true);
+    const deliveredReversion = {
+      receipt: {
+        ...confirmed.receipt,
+        runId: randomUUID(),
+        status: "sent",
+        startedAt: "2026-08-21T18:03:00.000Z",
+        completedAt: "2026-08-21T18:03:01.000Z",
+      },
+      result: {
+        ...confirmed.result,
+        status: "sent",
+        contentOccurrence: 2,
+      },
+    };
+    assert.equal((await syncCleanerDatabase({ ...deliveredReversion, env: cleanerEnv })).status, "synced");
+    const advancedPlan = (await admin`
+      select delivery_status, content_occurrence, sent_at
+      from airbnb.cleaner_plans
+      where household_id = ${householdId}
+        and target_date = ${confirmed.result.targetDate}
+        and message_hash = ${confirmed.result.messageHash}
+    `)[0];
+    assert.equal(advancedPlan.delivery_status, "sent");
+    assert.equal(advancedPlan.content_occurrence, 2);
+    assert.equal(advancedPlan.sent_at.toISOString(), deliveredReversion.receipt.completedAt);
     const mirroredRun = (await admin`
       select receipt
       from airbnb.job_runs

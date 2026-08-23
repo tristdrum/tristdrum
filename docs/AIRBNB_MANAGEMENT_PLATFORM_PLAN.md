@@ -61,8 +61,9 @@ verification, duplicate checks, independent monitoring, and a rollback window.
 
 - Infer stock from verified 1 Bowie Sixty60 purchases, confirmed guest
   consumption, manual adjustments, and relevant Jane or maid messages.
-- Run a full review every Tuesday at 09:05 SAST and a silent daily depletion
-  forecast at 09:00, so the two jobs cannot contend for the stock worker lock.
+- Run idempotent full-review attempts every Tuesday at 06:00 and 06:20 SAST,
+  safely before the first regular stock poll. Continue silent depletion
+  forecasts through the day without overlapping Management sends.
 - Poll Jane's Sixty60 emails every 30 minutes from 07:00 to 21:00 SAST.
 - Forecast seven days of confirmed demand plus a 25 percent buffer. Trigger a
   shopping list when an item is projected to run out within three days.
@@ -78,7 +79,7 @@ verification, duplicate checks, independent monitoring, and a rollback window.
   useful nonperishable buffer stock. Never place an order automatically.
 - Post a provisional Management alert when an order confirmation arrives because
   that email lacks the address. Credit inventory only when the invoice confirms
-  1 Bowie; silently ignore invoices for other addresses.
+  1 Bowie Street; silently ignore invoices for other addresses.
 
 ## Guest support
 
@@ -106,7 +107,9 @@ verification, duplicate checks, independent monitoring, and a rollback window.
   sending if any newer host event exists, regardless of whether Airbnb labels
   the host as Jane.
 - Generate a stable outbound Message-ID and reconcile Gmail Sent before retrying
-  an ambiguous SMTP failure.
+  an ambiguous SMTP failure. The final guard also checks recent human replies
+  in Tristan's Sent mailbox before SMTP; support stays dormant until both host
+  round trips are proven.
 
 ## Dashboard
 

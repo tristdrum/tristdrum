@@ -123,6 +123,7 @@ export async function runStockObservation({
     try {
       whatsappEvidence = await collectWhatsAppObservations({ env });
     } catch (error) {
+      if (error?.code === "AIRBNB_STOCK_WHATSAPP_GROUPS_REQUIRED") throw error;
       whatsappReadError = sanitizedError(error);
     }
     const whatsappEvidenceResults = [];

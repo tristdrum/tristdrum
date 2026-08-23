@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   appendOnlyReconciliation,
+  ingestStockWhatsAppObservation,
   learnedUnitPrices,
   loadSuppressedStockAlerts,
   markStockAlertNotified,
@@ -75,6 +76,35 @@ test("invoice reconciliation remains exact when normalized quantities cycle", ()
     );
   }
   assert.equal(appendOnlyReconciliation({ targetQuantity: 1, movements }), null);
+});
+
+test("an older WhatsApp shortage cannot override a newer physical count", async () => {
+  const queries = [];
+  const transaction = async (strings, ...values) => {
+    const query = strings.join("?");
+    queries.push({ query, values });
+    if (query.includes("insert into airbnb.evidence")) return [{ id: "evidence-1" }];
+    return [];
+  };
+  transaction.json = (value) => value;
+  const sql = { begin: async (callback) => callback(transaction) };
+  const occurredAt = "2026-08-21T09:00:00.000Z";
+  const result = await ingestStockWhatsAppObservation(sql, {
+    householdId: "22222222-2222-4222-8222-222222222222",
+    observation: {
+      providerMessageId: "old-shortage",
+      chatScope: "maids",
+      senderName: "Fixture person",
+      occurredAt,
+      contentHash: "f".repeat(64),
+      matchedSkus: ["hand_soap"],
+    },
+  });
+  const update = queries.find(({ query }) => query.includes("update airbnb.inventory_items"));
+  assert.ok(update);
+  assert.match(update.query, /last_counted_at is null or last_counted_at < \?::timestamptz/);
+  assert.ok(update.values.includes(occurredAt));
+  assert.deepEqual(result, { status: "ingested", matchedItemCount: 0 });
 });
 
 test("stock alert loading is restricted to current actionable stock and order alerts", async () => {

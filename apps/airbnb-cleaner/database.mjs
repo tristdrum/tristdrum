@@ -37,6 +37,7 @@ export function cleanerLedgerRecords(rows) {
   return rows.map((row) => ({
     targetDate: String(row.targetDate),
     messageHash: row.messageHash,
+    contentOccurrence: Number(row.contentOccurrence ?? 1),
     sentAt: row.sentAt ?? row.completedAt,
     source: "supabase",
   }));
@@ -57,7 +58,7 @@ export async function loadCleanerLedgerRecords({
   const sql = databaseClient(url, postgresFactory, "airbnb-cleaner-ledger");
   try {
     const rows = await sql`
-      select target_date, message_hash, sent_at, completed_at
+      select target_date, message_hash, content_occurrence, sent_at, completed_at
       from airbnb.cleaner_plans
       where household_id = ${householdId}
         and target_date = ${targetDate}
@@ -280,26 +281,61 @@ export async function syncCleanerDatabase({ result, receipt, env = process.env, 
       const planRows = await transaction`
         insert into airbnb.cleaner_plans (
           household_id, run_id, target_date, mode, delivery_status, message_hash,
-          message_text, is_update, unit_states, confidence, source_cutoff_at,
+          content_occurrence, message_text, is_update, unit_states, confidence, source_cutoff_at,
           started_at, completed_at, sent_at
         ) values (
           ${householdId}, ${receipt.runId}, ${result.targetDate}, ${result.mode},
-          ${deliveryStatus(result)}, ${result.messageHash}, ${result.message},
+          ${deliveryStatus(result)}, ${result.messageHash}, ${result.contentOccurrence ?? 1}, ${result.message},
           ${result.isUpdate}, ${transaction.json(result.unitReports ?? [])},
           ${transaction.json(result.confidence ?? {})}, ${receipt.startedAt},
           ${receipt.startedAt}, ${receipt.completedAt},
           ${["sent", "duplicate_skipped"].includes(result.status) ? receipt.completedAt : null}
         )
         on conflict (household_id, target_date, message_hash)
-        do update set delivery_status = case
+        do update set run_id = case
+                        when excluded.delivery_status in ('sent', 'duplicate_skipped')
+                          and (
+                            airbnb.cleaner_plans.delivery_status not in ('sent', 'duplicate_skipped')
+                            or excluded.content_occurrence > airbnb.cleaner_plans.content_occurrence
+                          )
+                          then excluded.run_id
+                        else airbnb.cleaner_plans.run_id
+                      end,
+                      delivery_status = case
                         when airbnb.cleaner_plans.delivery_status in ('sent', 'duplicate_skipped')
                           and excluded.delivery_status not in ('sent', 'duplicate_skipped')
                           then airbnb.cleaner_plans.delivery_status
                         else excluded.delivery_status
                       end,
-                      confidence = excluded.confidence,
-                      completed_at = excluded.completed_at,
-                      sent_at = coalesce(airbnb.cleaner_plans.sent_at, excluded.sent_at)
+                      content_occurrence = case
+                        when excluded.delivery_status in ('sent', 'duplicate_skipped')
+                          then greatest(
+                            airbnb.cleaner_plans.content_occurrence,
+                            excluded.content_occurrence
+                          )
+                        else airbnb.cleaner_plans.content_occurrence
+                      end,
+                      confidence = case
+                        when airbnb.cleaner_plans.delivery_status in ('sent', 'duplicate_skipped')
+                          and excluded.delivery_status not in ('sent', 'duplicate_skipped')
+                          then airbnb.cleaner_plans.confidence
+                        else excluded.confidence
+                      end,
+                      completed_at = case
+                        when airbnb.cleaner_plans.delivery_status in ('sent', 'duplicate_skipped')
+                          and excluded.delivery_status not in ('sent', 'duplicate_skipped')
+                          then airbnb.cleaner_plans.completed_at
+                        else excluded.completed_at
+                      end,
+                      sent_at = case
+                        when excluded.delivery_status in ('sent', 'duplicate_skipped')
+                          and (
+                            airbnb.cleaner_plans.delivery_status not in ('sent', 'duplicate_skipped')
+                            or excluded.content_occurrence > airbnb.cleaner_plans.content_occurrence
+                          )
+                          then excluded.sent_at
+                        else airbnb.cleaner_plans.sent_at
+                      end
         returning id
       `;
       const databaseSync = {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ComponentType, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type FormEvent } from 'react'
 import {
   Activity,
   AlertTriangle,
@@ -79,6 +79,7 @@ export default function AirbnbManagementPage() {
   const [refreshing, setRefreshing] = useState(true)
   const [actionBusy, setActionBusy] = useState<string | null>(null)
   const [actionNotice, setActionNotice] = useState<AirbnbActionNotice | null>(null)
+  const actionLock = useRef(false)
   const today = todayInJohannesburg()
 
   const refresh = useCallback(async () => {
@@ -100,6 +101,8 @@ export default function AirbnbManagementPage() {
     successMessage: string,
     action: () => Promise<void>,
   ) => {
+    if (actionLock.current) return
+    actionLock.current = true
     setActionBusy(actionKey)
     setActionNotice(null)
     try {
@@ -112,6 +115,7 @@ export default function AirbnbManagementPage() {
         message: actionError instanceof Error ? actionError.message : 'The Airbnb change could not be saved.',
       })
     } finally {
+      actionLock.current = false
       setActionBusy(null)
     }
   }, [refresh])
@@ -365,7 +369,7 @@ function GuestsSection({
               <ReplyReviewRow
                 key={delivery.id}
                 delivery={delivery}
-                busy={actionBusy === `reply:${delivery.id}`}
+                busy={actionBusy !== null}
                 onReview={onReviewReply}
               />
             ))}
@@ -494,7 +498,7 @@ function StockSection({
               <InventoryAdjustmentRow
                 key={item.id}
                 item={item}
-                busy={actionBusy === `stock:${item.id}`}
+                busy={actionBusy !== null}
                 onRecordCount={onRecordStockCount}
               />
             ))}
@@ -512,7 +516,7 @@ function StockSection({
               <ShoppingListRow
                 key={shoppingList.id}
                 shoppingList={shoppingList}
-                busy={actionBusy === `shopping-list:${shoppingList.id}`}
+                busy={actionBusy !== null}
                 onMarkOrdered={onMarkShoppingListOrdered}
               />
             ))}
@@ -530,7 +534,7 @@ function StockSection({
               <OrderStatusRow
                 key={order.id}
                 order={order}
-                busy={actionBusy === `order:${order.id}`}
+                busy={actionBusy !== null}
                 onUpdate={onUpdateOrder}
               />
             ))}
@@ -798,9 +802,7 @@ function ShoppingListRow({
   const itemText = shoppingList.items
     .map((item) => `${formatQuantity(item.quantity)} ${item.stockUnit} ${item.displayName}${item.countToConfirm ? ' (confirm count)' : ''}`)
     .join('\n')
-  const minimumInstruction = shoppingList.meetsFreeDeliveryMinimum
-    ? ''
-    : '\n\nKeep the Sixty60 basket at R350 or more for free delivery; aim for about R400 with useful guest or cleaning staples.'
+  const minimumInstruction = '\n\nCheck the current Sixty60 basket is at least R350 for free delivery; aim for about R400 with useful guest or cleaning staples.'
   const listText = `${itemText}${minimumInstruction}`.trim()
   const estimateLabel = shoppingList.priceEstimateComplete
     ? formatZar(shoppingList.estimatedTotalCents)
@@ -839,9 +841,7 @@ function ShoppingListRow({
           </button>
         ) : null}
       </div>
-      {!shoppingList.meetsFreeDeliveryMinimum ? (
-        <p className="airbnb-shopping-minimum">Keep the Sixty60 basket at R350 or more for free delivery; aim for about R400.</p>
-      ) : null}
+      <p className="airbnb-shopping-minimum">Check the current Sixty60 basket is at least R350 for free delivery; aim for about R400. Historical prices are estimates only.</p>
       {shoppingList.items.length ? (
         <ul className="airbnb-shopping-items">
           {shoppingList.items.map((item) => (

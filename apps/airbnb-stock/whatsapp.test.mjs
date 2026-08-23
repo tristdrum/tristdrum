@@ -37,10 +37,19 @@ test("stock WhatsApp collection is read-only, ignores our messages, and keeps no
   assert.match(result.observations[0].contentHash, /^[a-f0-9]{64}$/);
 });
 
-test("stock WhatsApp collection is optional when no groups are configured", async () => {
-  assert.deepEqual(await collectStockWhatsAppObservations({ env: {} }), {
-    status: "disabled",
-    messagesFound: 0,
-    observations: [],
-  });
+test("stock WhatsApp collection requires both distinct group IDs", async () => {
+  for (const env of [
+    {},
+    { AIRBNB_WHATSAPP_CHAT_ID: "maids@g.us" },
+    { AIRBNB_MANAGEMENT_WHATSAPP_CHAT_ID: "management@g.us" },
+    {
+      AIRBNB_WHATSAPP_CHAT_ID: "same@g.us",
+      AIRBNB_MANAGEMENT_WHATSAPP_CHAT_ID: "same@g.us",
+    },
+  ]) {
+    await assert.rejects(
+      collectStockWhatsAppObservations({ env }),
+      (error) => error.code === "AIRBNB_STOCK_WHATSAPP_GROUPS_REQUIRED",
+    );
+  }
 });

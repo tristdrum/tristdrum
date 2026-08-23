@@ -9,6 +9,7 @@ import {
   finalSendDecision,
   parseAirbnbConversationEmail,
   supportDisposition,
+  supportMessageMatchesTopic,
   withAutomatedReplyFooter,
 } from "@tristdrum/airbnb-core";
 
@@ -78,7 +79,10 @@ for (const fixture of corpus.conversations) {
     }
 
     assert.equal(latest.direction, "guest");
-    const disposition = supportDisposition(fixture.classification);
+    const disposition = supportDisposition({
+      ...fixture.classification,
+      messageWhitelisted: supportMessageMatchesTopic(latest.text, fixture.classification.topic),
+    });
     assert.equal(disposition.autoReply, fixture.expected.autoReply);
     assert.equal(disposition.status, fixture.expected.status);
     assert.equal(disposition.alertManagement, fixture.expected.alertManagement);

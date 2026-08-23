@@ -1,3 +1,5 @@
+import { stockWhatsAppGroupConfiguration } from "./whatsapp.mjs";
+
 const LIVE_CONFIRMATION = "ENABLE_AIRBNB_STOCK_MANAGEMENT_WRITES";
 
 function enabled(value) {
@@ -9,13 +11,16 @@ export function stockRuntimeCapabilities(env = process.env) {
   const confirmationMatched = String(env.AIRBNB_STOCK_LIVE_CONFIRMATION ?? "").trim()
     === LIVE_CONFIRMATION;
   const externalWritesEnabled = externalWritesRequested && confirmationMatched;
+  const whatsappGroupsConfigured = stockWhatsAppGroupConfiguration(env).configured;
   const managementAlertsEnabled = externalWritesEnabled
-    && enabled(env.AIRBNB_STOCK_MANAGEMENT_ALERTS_ENABLED);
+    && enabled(env.AIRBNB_STOCK_MANAGEMENT_ALERTS_ENABLED)
+    && whatsappGroupsConfigured;
   return {
     mode: managementAlertsEnabled ? "live" : "observation",
     externalWritesRequested,
     confirmationMatched,
     externalWritesEnabled,
+    whatsappGroupsConfigured,
     managementAlertsEnabled,
     orderPlacementAllowed: false,
   };

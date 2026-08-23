@@ -44,10 +44,6 @@ async function readJson(request) {
   return chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
 }
 
-function isTuesday(date) {
-  return new Intl.DateTimeFormat("en", { timeZone: "Africa/Johannesburg", weekday: "long" }).format(date) === "Tuesday";
-}
-
 export function createAirbnbStockServer({
   run = runStockObservation,
   status = loadStockStatus,
@@ -87,7 +83,7 @@ export function createAirbnbStockServer({
         const receipt = await run({
           mode,
           env,
-          fullReview: body.fullReview === true || (body.fullReview == null && isTuesday(now())),
+          fullReview: body.fullReview === true,
         });
         json(response, 200, receipt);
         return;

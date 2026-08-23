@@ -35,6 +35,17 @@ test("a delayed first alert sends only the most useful stage for each thread", (
   );
 });
 
+test("higher-stage alerts are selected before older immediate alerts", () => {
+  const immediate = alert("old-immediate", "immediate", "thread-old");
+  immediate.openedAt = "2026-08-23T10:00:00.000Z";
+  const overdue = alert("new-overdue", "overdue", "thread-new");
+  overdue.openedAt = "2026-08-23T12:00:00.000Z";
+  assert.deepEqual(latestSupportAlerts([immediate, overdue]).map((item) => item.id), [
+    "new-overdue",
+    "old-immediate",
+  ]);
+});
+
 test("support Management alert is concise and does not include raw message text", () => {
   const text = renderSupportManagementAlert(alert("overdue", "overdue"));
   assert.match(text, /^\*Airbnb guest reply overdue\*/);

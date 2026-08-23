@@ -26,21 +26,36 @@ function observation(message, chatScope) {
   };
 }
 
+export function stockWhatsAppGroupConfiguration(env = process.env) {
+  const maidsChatId = String(env.AIRBNB_WHATSAPP_CHAT_ID ?? "").trim();
+  const managementChatId = String(env.AIRBNB_MANAGEMENT_WHATSAPP_CHAT_ID ?? "").trim();
+  const configured = Boolean(
+    maidsChatId
+    && managementChatId
+    && maidsChatId !== managementChatId
+  );
+  return {
+    configured,
+    chats: configured
+      ? [["maids", maidsChatId], ["management", managementChatId]]
+      : [],
+  };
+}
+
 export async function collectStockWhatsAppObservations({
   env = process.env,
   readChatMessages = readWhatsAppChatMessages,
 } = {}) {
-  const chats = [
-    ["maids", String(env.AIRBNB_WHATSAPP_CHAT_ID ?? "").trim()],
-    ["management", String(env.AIRBNB_MANAGEMENT_WHATSAPP_CHAT_ID ?? "").trim()],
-  ].filter(([, chatId], index, entries) => (
-    chatId && entries.findIndex(([, candidate]) => candidate === chatId) === index
-  ));
-  if (!chats.length) return { status: "disabled", messagesFound: 0, observations: [] };
+  const groupConfiguration = stockWhatsAppGroupConfiguration(env);
+  if (!groupConfiguration.configured) {
+    throw Object.assign(new Error("Both distinct Airbnb WhatsApp group IDs are required."), {
+      code: "AIRBNB_STOCK_WHATSAPP_GROUPS_REQUIRED",
+    });
+  }
 
   const observations = [];
   let messagesFound = 0;
-  for (const [chatScope, chatId] of chats) {
+  for (const [chatScope, chatId] of groupConfiguration.chats) {
     const messages = await readChatMessages({ chatId, limit: 100, env });
     messagesFound += messages.length;
     for (const message of messages) {
