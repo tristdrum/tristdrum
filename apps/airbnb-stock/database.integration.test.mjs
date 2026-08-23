@@ -8,7 +8,11 @@ import {
   recordJobStart,
 } from "@tristdrum/airbnb-db";
 import { syncCleanerDatabase } from "../airbnb-cleaner/database.mjs";
-import { ingestOrderEvidence, reconcileReservationConsumption } from "./repository.mjs";
+import {
+  ingestOrderEvidence,
+  reconcileReservationConsumption,
+  storeShoppingList,
+} from "./repository.mjs";
 
 const adminUrl = process.env.AIRBNB_INTEGRATION_DATABASE_URL;
 const householdId = randomUUID();
@@ -398,6 +402,75 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
     `;
     assert.equal(crossServiceAlertUpdate.length, 0);
     await assert.rejects(support.sql`select id from airbnb.audit_events`, { code: "42501" });
+
+    const shoppingForecast = {
+      startDate: "2026-08-22",
+      endDate: "2026-08-28",
+      arrivals: [],
+      demand: [],
+    };
+    const firstShoppingList = await storeShoppingList(stock.sql, {
+      householdId,
+      forecast: shoppingForecast,
+      list: {
+        estimatedTotalCents: 40_000,
+        countsToConfirm: [],
+        items: [{
+          sku: "integration_chocolate",
+          quantity: 4,
+          estimatedUnitPriceCents: 10_000,
+          reason: "Integration shortage",
+          countToConfirm: false,
+        }],
+      },
+    });
+    const secondShoppingList = await storeShoppingList(stock.sql, {
+      householdId,
+      forecast: shoppingForecast,
+      list: {
+        estimatedTotalCents: 50_000,
+        countsToConfirm: [],
+        items: [{
+          sku: "integration_chocolate",
+          quantity: 5,
+          estimatedUnitPriceCents: 10_000,
+          reason: "Integration shortage changed",
+          countToConfirm: false,
+        }],
+      },
+    });
+    let listStatuses = await admin`
+      select id, status
+      from airbnb.shopping_lists
+      where household_id = ${householdId}
+    `;
+    assert.equal(listStatuses.filter((row) => row.status === "draft").length, 1);
+    assert.equal(listStatuses.filter((row) => row.status === "superseded").length, 1);
+    assert.equal(listStatuses.find((row) => row.status === "draft").id, secondShoppingList.id);
+
+    const restoredShoppingList = await storeShoppingList(stock.sql, {
+      householdId,
+      forecast: shoppingForecast,
+      list: {
+        estimatedTotalCents: 40_000,
+        countsToConfirm: [],
+        items: [{
+          sku: "integration_chocolate",
+          quantity: 4,
+          estimatedUnitPriceCents: 10_000,
+          reason: "Integration shortage",
+          countToConfirm: false,
+        }],
+      },
+    });
+    listStatuses = await admin`
+      select id, status
+      from airbnb.shopping_lists
+      where household_id = ${householdId}
+    `;
+    assert.equal(restoredShoppingList.id, firstShoppingList.id);
+    assert.equal(listStatuses.filter((row) => row.status === "draft").length, 1);
+    assert.equal(listStatuses.find((row) => row.status === "draft").id, firstShoppingList.id);
 
     const orderNumber = randomUUID();
     const invoiceMessage = {

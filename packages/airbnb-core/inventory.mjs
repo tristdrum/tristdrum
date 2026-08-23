@@ -17,6 +17,20 @@ export const DEFAULT_INVENTORY_RULES = Object.freeze([
   Object.freeze({ sku: "sugar_portion", basis: "per_guest", quantity: 2 }),
 ]);
 
+const BUFFER_STAPLE_SKUS = new Set([
+  "guest_chocolate",
+  "water_500ml",
+  "wrapped_rusk",
+  "coffee_portion",
+  "sugar_portion",
+  "toilet_roll",
+  "refuse_bag",
+  "bleach",
+  "multipurpose_cleaner",
+  "dishwashing_liquid",
+  "laundry_detergent",
+]);
+
 function dateKey(value) {
   if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
   const date = value instanceof Date ? value : new Date(value);
@@ -141,7 +155,7 @@ export function projectInventory({ inventoryItems, forecast, triggerHorizonDays 
 
 export function buildShoppingList({
   projections,
-  includeAllProjectedShortages = true,
+  includeAllProjectedShortages = false,
   minimumCents = INVENTORY_POLICY.freeDeliveryMinimumCents,
   targetCents = INVENTORY_POLICY.targetOrderCents,
 }) {
@@ -165,7 +179,11 @@ export function buildShoppingList({
 
   if (selected.length && estimatedTotal() < minimumCents) {
     const staples = projections
-      .filter((item) => !selectedSkus.has(item.sku) && Number(item.targetUnitPriceCents ?? 0) > 0)
+      .filter((item) => (
+        !selectedSkus.has(item.sku)
+        && BUFFER_STAPLE_SKUS.has(item.sku)
+        && Number(item.targetUnitPriceCents ?? 0) > 0
+      ))
       .sort((a, b) => (a.staplePriority ?? 100) - (b.staplePriority ?? 100));
     for (const staple of staples) {
       if (estimatedTotal() >= targetCents) break;

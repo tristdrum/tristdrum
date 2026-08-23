@@ -104,6 +104,56 @@ test("shopping list tops a real shortage toward R400 and never places an order",
   assert.deepEqual(list.countsToConfirm, ["toilet_roll"]);
 });
 
+test("shopping list waits for a three-day runout and uses only durable buffer staples", () => {
+  const list = buildShoppingList({
+    projections: [
+      {
+        sku: "guest_chocolate",
+        displayName: "Chocolates",
+        requiredQuantity: 5,
+        targetUnitPriceCents: 1_000,
+        urgent: true,
+        countStatus: "confirmed",
+        staplePriority: 10,
+      },
+      {
+        sku: "milk_250ml",
+        displayName: "Milk",
+        requiredQuantity: 20,
+        targetUnitPriceCents: 100,
+        urgent: false,
+        countStatus: "confirmed",
+        staplePriority: 1,
+      },
+      {
+        sku: "coffee_portion",
+        displayName: "Coffee",
+        requiredQuantity: 20,
+        targetUnitPriceCents: 1_000,
+        urgent: false,
+        countStatus: "confirmed",
+        staplePriority: 20,
+      },
+    ],
+  });
+
+  assert.deepEqual(list.items.map((item) => item.sku), ["guest_chocolate", "coffee_portion"]);
+  assert.equal(list.items.some((item) => item.sku === "milk_250ml"), false);
+  assert.equal(list.estimatedTotalCents, 40_000);
+
+  const futureOnly = buildShoppingList({
+    projections: [{
+      sku: "guest_chocolate",
+      displayName: "Chocolates",
+      requiredQuantity: 5,
+      targetUnitPriceCents: 1_000,
+      urgent: false,
+      countStatus: "confirmed",
+    }],
+  });
+  assert.deepEqual(futureOnly.items, []);
+});
+
 test("Sixty60 confirmations are provisional and only a 1 Bowie invoice credits stock", () => {
   assert.deepEqual(decideOrderEvidence({ kind: "confirmation" }), {
     addressStatus: "unknown",

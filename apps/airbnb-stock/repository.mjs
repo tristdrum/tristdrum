@@ -416,10 +416,21 @@ export async function storeShoppingList(sql, { householdId, forecast, list }) {
         ${transaction.json(snapshot)}, ${contentHash}
       )
       on conflict (household_id, content_hash)
-      do update set updated_at = now()
+      do update set updated_at = now(),
+                    status = case
+                      when airbnb.shopping_lists.status = 'superseded' then 'draft'
+                      else airbnb.shopping_lists.status
+                    end
       returning id, status
     `;
     const shoppingList = rows[0];
+    await transaction`
+      update airbnb.shopping_lists
+      set status = 'superseded'
+      where household_id = ${householdId}
+        and id <> ${shoppingList.id}
+        and status = 'draft'
+    `;
     for (const item of list.items) {
       const inventoryRows = await transaction`
         select id from airbnb.inventory_items

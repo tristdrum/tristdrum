@@ -120,6 +120,23 @@ describe('parseAirbnbDashboardSnapshot', () => {
           reason: 'Forecast demand',
           countToConfirm: true,
         }],
+      }, {
+        id: 'list-superseded',
+        forecastStart: '2026-08-20',
+        forecastEnd: '2026-08-27',
+        status: 'superseded',
+        items: [],
+      }],
+      orders: [{
+        id: 'order-bowie',
+        providerOrderId: 'bowie-order',
+        status: 'delivered',
+        addressStatus: 'bowie_1',
+      }, {
+        id: 'order-other',
+        providerOrderId: 'other-order',
+        status: 'ignored',
+        addressStatus: 'other',
       }],
       jobRuns: [{
         id: 'run-1',
@@ -154,6 +171,8 @@ describe('parseAirbnbDashboardSnapshot', () => {
     expect(parsed.shoppingLists[0]?.items[0]?.inventoryItemId).toBe('milk')
     expect(parsed.shoppingLists[0]?.items[0]?.quantity).toBe(12)
     expect(parsed.shoppingLists[0]?.items[0]?.countToConfirm).toBe(true)
+    expect(parsed.shoppingLists.map((shoppingList) => shoppingList.id)).toEqual(['list-1'])
+    expect(parsed.orders.map((order) => order.id)).toEqual(['order-bowie'])
     expect(parsed.jobRuns[0]?.receipt).toEqual({ externalWrites: false })
     expect(parsed.loadedAt).toBe('2026-08-21T11:59:00Z')
   })

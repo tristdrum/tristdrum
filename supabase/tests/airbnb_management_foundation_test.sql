@@ -319,6 +319,8 @@ select ok(
 select ok(
   not has_function_privilege('anon', 'public.airbnb_dashboard_snapshot(uuid)', 'EXECUTE')
   and has_function_privilege('authenticated', 'public.airbnb_dashboard_snapshot(uuid)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'private.airbnb_dashboard_snapshot_base(uuid)', 'EXECUTE')
+  and not has_function_privilege('service_role', 'private.airbnb_dashboard_snapshot_base(uuid)', 'EXECUTE')
   and not has_function_privilege('anon', 'public.airbnb_record_stock_adjustment(uuid,uuid,numeric,text)', 'EXECUTE')
   and has_function_privilege('authenticated', 'public.airbnb_record_stock_adjustment(uuid,uuid,numeric,text)', 'EXECUTE'),
   'dashboard and stock RPCs are authenticated-only'
@@ -333,11 +335,13 @@ select ok(
 );
 
 select ok(
-  pg_get_functiondef('public.airbnb_dashboard_snapshot(uuid)'::regprocedure) like '%''replyDeliveries''%'
-  and pg_get_functiondef('public.airbnb_dashboard_snapshot(uuid)'::regprocedure) like '%''shoppingLists''%'
-  and pg_get_functiondef('public.airbnb_dashboard_snapshot(uuid)'::regprocedure) like '%''evidence''%'
-  and pg_get_functiondef('public.airbnb_dashboard_snapshot(uuid)'::regprocedure) like '%''auditEvents''%'
-  and pg_get_functiondef('public.airbnb_dashboard_snapshot(uuid)'::regprocedure) like '%''receipt''%',
+  pg_get_functiondef('private.airbnb_dashboard_snapshot_base(uuid)'::regprocedure) like '%''replyDeliveries''%'
+  and pg_get_functiondef('private.airbnb_dashboard_snapshot_base(uuid)'::regprocedure) like '%''shoppingLists''%'
+  and pg_get_functiondef('private.airbnb_dashboard_snapshot_base(uuid)'::regprocedure) like '%''evidence''%'
+  and pg_get_functiondef('private.airbnb_dashboard_snapshot_base(uuid)'::regprocedure) like '%''auditEvents''%'
+  and pg_get_functiondef('private.airbnb_dashboard_snapshot_base(uuid)'::regprocedure) like '%''receipt''%'
+  and pg_get_functiondef('public.airbnb_dashboard_snapshot(uuid)'::regprocedure) like '%status'' <> ''superseded''%'
+  and pg_get_functiondef('public.airbnb_dashboard_snapshot(uuid)'::regprocedure) like '%addressStatus'' = ''bowie_1''%',
   'dashboard snapshot exposes operational controls, evidence, audit, and receipts'
 );
 
@@ -350,6 +354,8 @@ select ok(
 select ok(
   jsonb_array_length(public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'replyDeliveries') = 1
   and jsonb_array_length(public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'shoppingLists') = 1
+  and jsonb_array_length(public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'orders') = 1
+  and public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'orders'->0->>'addressStatus' = 'bowie_1'
   and jsonb_array_length(public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'evidence') = 1
   and jsonb_array_length(public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'auditEvents') = 1
   and public.airbnb_dashboard_snapshot('00000000-0000-0000-0000-00000000b001')->'jobRuns'->0->'receipt'->>'externalWrites' = 'false',

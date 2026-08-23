@@ -204,6 +204,10 @@ export function parseAirbnbDashboardSnapshot(
   loadedAt = new Date().toISOString(),
 ): AirbnbDashboardData {
   const snapshot = asRecord(value)
+  const shoppingLists = readRows(snapshot.shoppingLists, parseShoppingList)
+    .filter((shoppingList) => shoppingList.status !== 'superseded')
+  const orders = readRows(snapshot.orders, parseOrder)
+    .filter((order) => order.addressStatus === 'bowie_1')
 
   return {
     properties: readRows(snapshot.properties, parseProperty),
@@ -212,8 +216,8 @@ export function parseAirbnbDashboardSnapshot(
     replyDeliveries: readRows(snapshot.replyDeliveries, parseReplyDelivery),
     cleanerPlans: readRows(snapshot.cleanerPlans, parseCleanerPlan),
     inventory: readRows(snapshot.inventory, parseInventoryItem),
-    shoppingLists: readRows(snapshot.shoppingLists, parseShoppingList),
-    orders: readRows(snapshot.orders, parseOrder),
+    shoppingLists,
+    orders,
     alerts: readRows(snapshot.alerts, parseAlert),
     jobRuns: readRows(snapshot.jobRuns, parseJobRun),
     evidence: readRows(snapshot.evidence, parseEvidence),
