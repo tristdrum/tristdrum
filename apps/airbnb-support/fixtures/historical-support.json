@@ -363,7 +363,7 @@
         "confidence": 1,
         "factsVerified": true,
         "replyNeeded": true,
-        "draft": "Yes, check-out at 11:00 is fine."
+        "draft": "I am sorry, but we cannot offer a late check-out. Standard check-out is by 10:00."
       },
       "expected": {
         "directions": ["guest"],
@@ -396,7 +396,7 @@
         "confidence": 1,
         "factsVerified": true,
         "replyNeeded": true,
-        "draft": "I am sorry, but we cannot offer check-out later than 11:00."
+        "draft": "I am sorry, but we cannot offer a late check-out. Standard check-out is by 10:00."
       },
       "expected": {
         "directions": ["guest"],

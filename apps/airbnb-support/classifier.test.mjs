@@ -302,9 +302,9 @@ test("a mixed early-check-in and complaint message stays human-reviewed", async 
   assert.equal(result.deterministicGuard, "human_review_phrase");
 });
 
-test("late checkout after 11 is politely declined without notifying cleaners", async () => {
+test("late checkout is politely declined without notifying cleaners", async () => {
   const result = await classifyGuestMessage({
-    guestMessage: "Can we have a late checkout at 12pm?",
+    guestMessage: "Can we have a late checkout at 11am?",
     listingName: "The Spekboom Studio",
     facts: { checkOutTime: "10:00" },
     env: {},
@@ -313,14 +313,95 @@ test("late checkout after 11 is politely declined without notifying cleaners", a
   assert.equal(result.autoReply, true);
   assert.equal(result.operationalRequest.action, "decline");
   assert.equal(result.operationalRequest.createsOperationalRequest, false);
-  assert.match(result.draft, /11:00/);
+  assert.equal(result.operationalRequest.needsCleanerNotification, false);
+  assert.match(result.draft, /standard check-out is by 10:00/i);
+
+  const halfPast = await classifyGuestMessage({
+    guestMessage: "Can we have a late checkout at 10:30am?",
+    listingName: "The Spekboom Studio",
+    facts: { checkOutTime: "10:00" },
+    env: {},
+    fetchFn: async () => { throw new Error("model must not be called"); },
+  });
+  assert.equal(halfPast.autoReply, true);
+  assert.equal(halfPast.operationalRequest.action, "decline");
+});
+
+test("timing replies need current property times before they can be autonomous", async () => {
+  const result = await classifyGuestMessage({
+    guestMessage: "Can we have a late checkout at 11am?",
+    listingName: "The Spekboom Studio",
+    facts: {},
+    env: {},
+    fetchFn: async () => { throw new Error("model must not be called"); },
+  });
+  assert.equal(result.autoReply, false);
+  assert.equal(result.status, "needs_human");
+  assert.equal(result.factsVerified, false);
+  assert.equal(result.deterministicGuard, "time_policy_not_verified");
+  assert.equal(result.operationalRequest, null);
+  assert.doesNotMatch(result.draft, new RegExp(AUTOMATED_REPLY_FOOTER));
+
+  const conflicting = await classifyGuestMessage({
+    guestMessage: "Can we have a late checkout at 11am?",
+    listingName: "The Spekboom Studio",
+    facts: { checkOutTime: "11:00" },
+    env: {},
+    fetchFn: async () => { throw new Error("model must not be called"); },
+  });
+  assert.equal(conflicting.autoReply, false);
+  assert.equal(conflicting.deterministicGuard, "time_policy_not_verified");
+});
+
+test("a legacy late-checkout promise stays honoured without creating another cleaner instruction", async () => {
+  const activeTimeRequest = {
+    requestType: "late_checkout",
+    stayDate: "2026-08-24",
+    effectiveTime: "11:00",
+    status: "cleaners_notified",
+  };
+  const repeated = await classifyGuestMessage({
+    guestMessage: "Can we have a late checkout at 11am?",
+    listingName: "The Spekboom Studio",
+    facts: { checkOutTime: "10:00" },
+    activeTimeRequest,
+    env: {},
+    fetchFn: async () => { throw new Error("model must not be called"); },
+  });
+  assert.equal(repeated.operationalRequest.action, "preserve_existing");
+  assert.equal(repeated.operationalRequest.createsOperationalRequest, false);
+  assert.equal(repeated.operationalRequest.cancelsOperationalRequest, false);
+  assert.match(repeated.draft, /agreed check-out at 11:00 is still in place/i);
+
+  const later = await classifyGuestMessage({
+    guestMessage: "Can we check out at 12pm instead?",
+    listingName: "The Spekboom Studio",
+    facts: { checkOutTime: "10:00" },
+    activeTimeRequest,
+    env: {},
+    fetchFn: async () => { throw new Error("model must not be called"); },
+  });
+  assert.equal(later.operationalRequest.action, "preserve_existing");
+  assert.equal(later.operationalRequest.cancelsOperationalRequest, false);
+  assert.match(later.draft, /can['’]t extend check-out beyond the already agreed 11:00/i);
+
+  const standard = await classifyGuestMessage({
+    guestMessage: "Can we check out at 10am instead?",
+    listingName: "The Spekboom Studio",
+    facts: { checkOutTime: "10:00" },
+    activeTimeRequest,
+    env: {},
+    fetchFn: async () => { throw new Error("model must not be called"); },
+  });
+  assert.equal(standard.operationalRequest.action, "standard_time");
+  assert.equal(standard.operationalRequest.cancelsOperationalRequest, true);
 });
 
 test("returning to the standard time retracts an active cleaner instruction", async () => {
   const result = await classifyGuestMessage({
     guestMessage: "Can we check in at 3pm instead?",
     listingName: "Jasmine Studio Stay",
-    facts: { checkInTime: "15:00" },
+    facts: { checkInTime: "15:00", checkOutTime: "10:00" },
     activeTimeRequest: {
       requestType: "early_checkin",
       stayDate: "2026-08-24",

@@ -18,7 +18,6 @@ export const SUPPORT_KNOWLEDGE = deepFreeze({
     standardCheckInTime: "15:00",
     standardCheckOutTime: "10:00",
     earliestConditionalCheckInTime: "13:00",
-    latestApprovedCheckOutTime: "11:00",
     propertyLayout: "Three separately listed studios share one property.",
   },
   policies: [
@@ -28,7 +27,7 @@ export const SUPPORT_KNOWLEDGE = deepFreeze({
     "When a fact is missing or contradictory, say that it needs checking instead of choosing the most convenient answer.",
     "Historical examples guide tone and problem-solving, but they do not make a changing property detail current.",
     "Early check-in may be offered from 13:00, but it is always conditional on the previous guest and cleaning being finished.",
-    "Check-out may be extended to 11:00. Later requests are politely declined so the studio can be prepared for the next guest.",
+    "Late check-out requests are politely declined so the studio can be prepared for the next guest.",
   ],
   precedents: [
     {
@@ -59,7 +58,7 @@ export const SUPPORT_KNOWLEDGE = deepFreeze({
   ],
 });
 
-function normalizedClock(value) {
+export function normalizedClock(value) {
   const match = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i.exec(String(value ?? "").trim());
   if (!match) return null;
   let hour = Number.parseInt(match[1], 10);
