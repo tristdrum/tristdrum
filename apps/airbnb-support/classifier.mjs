@@ -8,7 +8,7 @@ import {
   verifiedSupportDraft,
   withAutomatedReplyFooter,
 } from "@tristdrum/airbnb-core";
-import { supportKnowledgeForListing } from "./knowledge.mjs";
+import { normalizedClock, supportKnowledgeForListing } from "./knowledge.mjs";
 
 const PROPERTY_FACT_TOPICS = Object.freeze(new Set([
   "wifi",
@@ -88,6 +88,35 @@ function knowledgeGuard(topic, knowledge) {
   return null;
 }
 
+function timePolicyFactsVerified(decision, facts, knowledge) {
+  if (!knowledge.listingRecognized) return false;
+  if (decision.topic === "early_check_in_follow_up") return true;
+  const keys = decision.requestType === "early_checkin"
+    ? ["checkInTime", "checkOutTime"]
+    : ["checkOutTime"];
+  return keys.every((key) => normalizedClock(facts[key]))
+    && !knowledge.conflicts.some((conflict) => keys.includes(conflict.key));
+}
+
+function reconcileExistingTimePromise(decision, activeTimeRequest) {
+  if (!decision || decision.requestType !== "late_checkout" || activeTimeRequest?.requestType !== "late_checkout") {
+    return decision;
+  }
+  const agreedTime = normalizedClock(activeTimeRequest.effectiveTime);
+  if (!agreedTime || decision.action === "standard_time") return decision;
+  const requestedTime = normalizedClock(decision.requestedTime);
+  return {
+    ...decision,
+    action: "preserve_existing",
+    effectiveTime: agreedTime,
+    createsOperationalRequest: false,
+    needsCleanerNotification: false,
+    reply: requestedTime && requestedTime > agreedTime
+      ? `I’m sorry, but we can’t extend check-out beyond the already agreed ${agreedTime}.`
+      : `Your agreed check-out at ${agreedTime} is still in place.`,
+  };
+}
+
 export async function classifyGuestMessage({
   guestMessage,
   listingName,
@@ -101,36 +130,44 @@ export async function classifyGuestMessage({
   const model = String(env.AIRBNB_SUPPORT_OPENAI_MODEL ?? "gpt-5.6-terra");
   const verifiedFacts = facts && typeof facts === "object" ? facts : {};
   const knowledge = supportKnowledgeForListing({ listingName, propertyFacts: verifiedFacts });
-  const timeDecision = supportTimeRequestDecision(guestMessage, verifiedFacts)
-    ?? supportTimeFollowUpDecision(guestMessage, activeTimeRequest, now);
+  const timeDecision = reconcileExistingTimePromise(
+    supportTimeRequestDecision(guestMessage, verifiedFacts)
+      ?? supportTimeFollowUpDecision(guestMessage, activeTimeRequest, now),
+    activeTimeRequest,
+  );
   if (timeDecision && supportTimeRequestIsFocused(guestMessage)) {
+    const timeFactsVerified = timePolicyFactsVerified(timeDecision, verifiedFacts, knowledge);
     const cancelsOperationalRequest = (
-      activeTimeRequest?.requestType === timeDecision.requestType
+      timeFactsVerified
+      && activeTimeRequest?.requestType === timeDecision.requestType
       && !timeDecision.createsOperationalRequest
-      && (
-        timeDecision.action === "standard_time"
-        || (timeDecision.requestType === "late_checkout" && timeDecision.action === "accept")
-      )
+      && timeDecision.action === "standard_time"
     );
     const classification = {
       topic: timeDecision.topic,
-      riskTier: "low",
+      riskTier: timeFactsVerified ? "low" : "high",
       confidence: 1,
-      factsVerified: true,
+      factsVerified: timeFactsVerified,
       replyNeeded: true,
       summary: timeDecision.requestType === "early_checkin"
         ? "The guest asked about early check-in."
         : "The guest asked about late check-out.",
-      draft: timeDecision.reply,
+      draft: timeFactsVerified
+        ? timeDecision.reply
+        : knowledge.listingRecognized
+          ? "Let me confirm the current check-in or check-out arrangements and get back to you."
+          : "Could you please confirm which studio this is for?",
       messageWhitelisted: true,
-      deterministicGuard: "approved_time_policy",
-      operationalRequest: { ...timeDecision, cancelsOperationalRequest },
+      deterministicGuard: timeFactsVerified ? "approved_time_policy" : "time_policy_not_verified",
+      operationalRequest: timeFactsVerified ? { ...timeDecision, cancelsOperationalRequest } : null,
     };
     const disposition = supportDisposition(classification);
     return {
       ...classification,
       ...disposition,
-      draft: withAutomatedReplyFooter(classification.draft),
+      draft: disposition.autoReply
+        ? withAutomatedReplyFooter(classification.draft)
+        : classification.draft,
       model: null,
     };
   }

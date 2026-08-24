@@ -324,37 +324,46 @@ test("early check-in policy accepts only the two-hour window and keeps the promi
   );
 });
 
-test("late checkout policy allows 11:00, not later, and creates a cleaner note only when accepted", () => {
-  const accepted = supportTimeRequestDecision("Could we have a late checkout at 11am?", {});
-  assert.equal(accepted.action, "accept");
-  assert.equal(accepted.effectiveTime, "11:00");
-  assert.equal(accepted.createsOperationalRequest, true);
+test("late checkout policy politely declines every extension and never creates a cleaner note", () => {
+  const eleven = supportTimeRequestDecision("Could we have a late checkout at 11am?", {});
+  assert.equal(eleven.action, "decline");
+  assert.equal(eleven.effectiveTime, "10:00");
+  assert.equal(eleven.createsOperationalRequest, false);
+  assert.equal(eleven.needsCleanerNotification, false);
+  assert.match(eleven.reply, /standard check-out is by 10:00/i);
 
-  const declined = supportTimeRequestDecision("May we check out late at 12pm?", {});
-  assert.equal(declined.action, "decline");
-  assert.equal(declined.createsOperationalRequest, false);
-  assert.match(declined.reply, /can['’]t offer check-out later than 11:00/i);
+  const unspecified = supportTimeRequestDecision("Could we have a late checkout?", {});
+  assert.equal(unspecified.action, "decline");
+  assert.equal(unspecified.requestedTime, null);
+  assert.equal(unspecified.createsOperationalRequest, false);
+
+  const noon = supportTimeRequestDecision("May we check out late at 12pm?", {});
+  assert.equal(noon.action, "decline");
+  assert.equal(noon.createsOperationalRequest, false);
+  assert.match(noon.reply, /can['’]t offer a late check-out/i);
+  assert.equal(
+    supportTimeRequestDecision("Could we check out at 11am?", {
+      checkOutTime: "10:00",
+      latestCheckOutTime: "12:00",
+    }).action,
+    "decline",
+    "a stale runtime exception must not override the standing policy",
+  );
   assert.equal(supportTimeRequestDecision("Could we have a late checkout at 1?", {}).requestedTime, "13:00");
-  assert.equal(
-    supportTimeRequestDecision("Checkout is 10am, could we leave at 11am?", {}).effectiveTime,
-    "11:00",
-  );
-  assert.equal(
-    supportTimeRequestDecision("Can we check out after 10am, say 11am?", {}).effectiveTime,
-    "11:00",
-  );
-  assert.equal(
-    supportTimeRequestDecision("Can we check out at 11am rather than 10am?", {}).effectiveTime,
-    "11:00",
-  );
+
+  const standard = supportTimeRequestDecision("Can we check out at 10am?", {});
+  assert.equal(standard.action, "standard_time");
+  assert.equal(standard.effectiveTime, "10:00");
 });
 
 test("timing autonomy rejects mixed requests", () => {
   assert.equal(supportTimeRequestIsFocused("Could we check in early at 2pm?"), true);
+  assert.equal(supportTimeRequestIsFocused("Can we check out at 10:30am?"), true);
   assert.equal(supportTimeRequestIsFocused("The room is dirty. Could we check in early at 2pm?"), false);
   assert.equal(supportTimeRequestIsFocused("Could we check in early at 2pm and get a refund?"), false);
   assert.equal(supportTimeRequestIsFocused("Can we check in early at 2pm, the sheets have stains?"), false);
   assert.equal(supportTimeRequestIsFocused("Can we check in early at 2pm, what is the Wi-Fi password?"), false);
+  assert.equal(supportTimeRequestIsFocused("Can we check out at 10:30am: and send the Wi-Fi password?"), false);
 });
 
 test("early check-in follow-ups never offer entry before 13:00 and use the approved no-response wording", () => {

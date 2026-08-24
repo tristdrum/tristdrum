@@ -6,7 +6,7 @@ Private Fly worker for Tristan's canonical `express@airbnb.com` conversation str
 - OpenAI Responses calls use strict JSON schema, `store: false`, low reasoning, and no tools.
 - The model writes a short, friendly draft for any case it can answer honestly. Model prose stays review-only; automatic replies still come from verified facts or an explicitly approved timing policy.
 - The small canonical knowledge module holds stable hosting policy and anonymized precedents. Current property facts remain the source for Wi-Fi, access, directions, parking, and other details that can change.
-- Early check-in is conditional from 13:00. Check-out may be extended to 11:00. Accepted times create one durable cleaner note, one verified cleaner notification, and an early-arrival readiness check one hour beforehand.
+- Early check-in is conditional from 13:00 and creates one durable cleaner note, one verified cleaner notification, and an early-arrival readiness check one hour beforehand. Late check-out requests are politely declined.
 - A cleaner must explicitly say the named unit is ready before the guest is told it is ready, and that message is never queued before 13:00. Without a cleaner response, the worker stays quiet unless the guest follows up.
 - Tristan and Jane Gmail sources are fetched concurrently with a 30-second deadline. OpenAI requests default to 10 seconds and live delivery is limited to one guarded reply per run, keeping the worst-case work inside the scheduler's 180-second budget.
 - Tristan's `express@airbnb.com` copy is always the SMTP thread target. Jane's trusted Airbnb copies are supplemental veto evidence only, so a newer host or guest event can stop delivery without rerouting the reply through Jane's mailbox.

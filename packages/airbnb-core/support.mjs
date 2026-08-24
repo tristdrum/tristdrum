@@ -180,7 +180,8 @@ export function supportTimeRequestIsFocused(message) {
   const text = String(message ?? "").normalize("NFKC").trim();
   if (!text || NON_TIME_HUMAN_REVIEW_PATTERNS.some((pattern) => pattern.test(text))) return false;
   const withoutGreeting = text.replace(/^(?:hi|hello|hey|good (?:morning|afternoon|evening))[,!]\s*/i, "");
-  if (/[,;:\n]/.test(withoutGreeting)) return false;
+  const withoutClockColons = withoutGreeting.replace(/(\d):(?=\d)/g, "$1");
+  if (/[,;:\n]/.test(withoutClockColons)) return false;
   if (/\b(?:and|also|plus|as well as|another thing|because|but|although|though|however|while)\b/i.test(withoutGreeting)) return false;
   if (/\b(?:wi-?fi|internet|password|address|directions?|parking|refund|booking|reservation|price|rate)\b/i.test(withoutGreeting)) return false;
   if ((text.match(/\?/g) ?? []).length > 1) return false;
@@ -194,7 +195,6 @@ export function supportTimeRequestDecision(message, facts = {}) {
   const standardCheckIn = clockMinutes(facts.checkInTime, 15 * 60);
   const standardCheckOut = clockMinutes(facts.checkOutTime, 10 * 60);
   const earliestCheckIn = clockMinutes(facts.earliestCheckInTime, 13 * 60);
-  const latestCheckOut = clockMinutes(facts.latestCheckOutTime, 11 * 60);
   const standardMinutes = requestType === "early_checkin" ? standardCheckIn : standardCheckOut;
   const requestedMinutes = requestedClockMinutes(message, requestType, standardMinutes);
   const requestedTime = requestedMinutes == null ? null : clockLabel(requestedMinutes);
@@ -248,31 +248,16 @@ export function supportTimeRequestDecision(message, facts = {}) {
     };
   }
 
-  if (requestedMinutes == null) {
+  if (requestedMinutes != null && requestedMinutes <= standardCheckOut) {
     return {
       topic: "late_check_out",
       requestType,
-      action: "offer_latest",
-      requestedTime: null,
-      effectiveTime: clockLabel(latestCheckOut),
+      action: "standard_time",
+      requestedTime,
+      effectiveTime: clockLabel(standardCheckOut),
       createsOperationalRequest: false,
       needsCleanerNotification: false,
-      reply: `We can offer check-out at ${clockLabel(latestCheckOut)} at the latest. Would that work for you?`,
-    };
-  }
-  if (requestedMinutes <= latestCheckOut) {
-    const effectiveMinutes = Math.max(requestedMinutes, standardCheckOut);
-    return {
-      topic: "late_check_out",
-      requestType,
-      action: "accept",
-      requestedTime,
-      effectiveTime: clockLabel(effectiveMinutes),
-      createsOperationalRequest: effectiveMinutes > standardCheckOut,
-      needsCleanerNotification: effectiveMinutes > standardCheckOut,
-      reply: effectiveMinutes > standardCheckOut
-        ? `Yes, check-out at ${clockLabel(effectiveMinutes)} is fine. We’ll let the cleaning team know.`
-        : `Standard check-out is by ${clockLabel(standardCheckOut)}, so ${requestedTime} is fine.`,
+      reply: `Standard check-out is by ${clockLabel(standardCheckOut)}, so ${requestedTime} is fine.`,
     };
   }
   return {
@@ -280,10 +265,10 @@ export function supportTimeRequestDecision(message, facts = {}) {
     requestType,
     action: "decline",
     requestedTime,
-    effectiveTime: clockLabel(latestCheckOut),
+    effectiveTime: clockLabel(standardCheckOut),
     createsOperationalRequest: false,
     needsCleanerNotification: false,
-    reply: `I’m sorry, but we can’t offer check-out later than ${clockLabel(latestCheckOut)} because the studio needs to be prepared for the next guest.`,
+    reply: `I’m sorry, but we can’t offer a late check-out because the studio needs to be prepared for the next guest. Standard check-out is by ${clockLabel(standardCheckOut)}.`,
   };
 }
 
