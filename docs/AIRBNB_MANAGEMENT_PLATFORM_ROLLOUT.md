@@ -86,21 +86,45 @@ Verified at 2026-08-24 07:26 SAST without changing production:
 
 ## Open gates
 
-- The personal Fly helper must pass `auth whoami` and read-only status for all
-  three apps before deployment. Its Keychain credential was unavailable during
-  the 2026-08-24 preflight, so no deploy was attempted.
-- The linked personal Supabase CLI gate is cleared for read-only work. Do not
-  run `db push` until the Fly helper gate clears, the twelve active jobs are
-  paused, all three personal machines are stopped, and quiescence is rechecked.
+- The personal Fly and linked Supabase gates cleared on 2026-08-24. The guarded
+  migration and deployment completed without a mixed-version window.
 - The native Supabase connector did not expose the linked project
   `akvlarrmhlbnuvnfpvic` during the 2026-08-24 preflight. It is not an
   authorized substitute unless that exact project becomes visible and its
   account scope is verified.
-- OpenAI classification currently returns `insufficient_quota`. Support must
-  stay shadow-only and unscheduled until classification succeeds and both
-  Tristan and Jane host-reply round trips are proven from the canonical stream.
+- The replacement OpenAI key authenticates and completed a real
+  `gpt-5.6-terra` Responses API request. Support shadow classification now
+  succeeds, but support must stay unscheduled and unable to write until both
+  Tristan and Jane host-reply round trips are proven and the verified property
+  facts required by the autonomous allowlist are populated.
 - No order placement is permitted. WhatsApp stock evidence remains read-only,
   and cleaner verification must not create a second plan.
+
+## Hardening cutover
+
+The reviewed hardening cutover completed at 2026-08-24 09:10 SAST.
+
+- All thirteen Airbnb jobs were paused before migration. At quiescence, all
+  three personal Fly machines were stopped, `net.http_request_queue` was empty,
+  and no `airbnb.job_runs` row remained `started`.
+- The exact reviewed migration suffix was applied in order, and linked history
+  now matches through `20260824012012`.
+- Deployed cleaner image: `deployment-01M0S9292YSCKWRRZBVMQBPNAX`.
+- Deployed stock image: `deployment-01M0S93VSD35YQQFR88QX05W6C`.
+- Deployed support image: `deployment-01M0S958GWZ4NNYQZS4MKCP4ZP`.
+- Cleaner preview for 24 August returned HTTP 200, `status: preview`, and clean
+  confidence. The subsequent dry-run returned `dry_run_ok`; the WhatsApp
+  dry-run returned HTTP 200 with `mutatesWhatsappState: false`. The cleaner
+  ledger retained its single existing 24 August content row and occurrence.
+- Stock observation completed successfully with external writes disabled,
+  zero Management alerts, and order placement disabled.
+- Support shadow scanned 29 canonical emails, classified eight candidates with
+  zero classification failures, and produced zero guest replies and zero
+  Management notifications. Booking candidates remained high-risk and needed
+  approval.
+- Eight cleaner and four stock jobs were restored with their reviewed schedules.
+  The support job remains inactive. Public health checks and
+  `/dashboard/airbnb` returned HTTP 200 after deployment.
 
 ## Production verification
 
@@ -148,12 +172,12 @@ After that guarded cutover:
 
 - Heartbeat `airbnb-cleaner-midday-cutover-check` performs the daily personal
   platform and rollback audit at 14:25 SAST.
-- Require 72 clean hours after this hardening release before treating the
-  replacement as stable.
+- Require 72 clean hours after the 2026-08-24 09:10 SAST hardening cutover before
+  treating the replacement as stable. The earliest stability checkpoint is
+  2026-08-27 09:10 SAST.
 - Do not delete the stopped Min app or rollback data before the seven-day gate.
-  The retirement checkpoint is seven full days after the actual hardening
-  cutover, never a preselected calendar date. Extend the heartbeat when the
-  credential handoff delays cutover.
+  The earliest retirement checkpoint is 2026-08-31 09:10 SAST, after seven full
+  clean days. Extend the heartbeat if verification delays retirement.
 - Delete old infrastructure only after schedules, receipts, WhatsApp readback,
   current Gmail reservation evidence, stock observations, and dashboard state
   all remain clean.
