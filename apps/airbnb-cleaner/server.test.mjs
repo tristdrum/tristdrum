@@ -127,6 +127,26 @@ test("live delivery fails closed when its required Supabase ledger is unavailabl
   assert.equal(reportCalled, false);
 });
 
+test("a cleaner timing-note read failure blocks the report", async () => {
+  let reportCalled = false;
+  await withServer({
+    loadOperationalNotes: async () => { throw new Error("safe timing-note test failure"); },
+    runReport: async () => {
+      reportCalled = true;
+      return successfulResult();
+    },
+  }, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/run`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ mode: "live", target: "2026-08-07" }),
+    });
+    assert.equal(response.status, 500);
+    assert.equal((await response.json()).status, "error");
+  });
+  assert.equal(reportCalled, false);
+});
+
 test("run persists and returns a sanitized receipt", async () => {
   await withServer({
     runReport: async ({ mode, deliveryAttemptId }) => {

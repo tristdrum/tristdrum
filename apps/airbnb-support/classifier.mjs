@@ -2,9 +2,24 @@ import {
   supportDisposition,
   supportMessageMatchesTopic,
   supportMessageRequiresHuman,
+  supportTimeFollowUpDecision,
+  supportTimeRequestIsFocused,
+  supportTimeRequestDecision,
   verifiedSupportDraft,
   withAutomatedReplyFooter,
 } from "@tristdrum/airbnb-core";
+import { supportKnowledgeForListing } from "./knowledge.mjs";
+
+const PROPERTY_FACT_TOPICS = Object.freeze(new Set([
+  "wifi",
+  "address",
+  "directions",
+  "parking",
+  "verified_amenity",
+  "check_in_time",
+  "check_out_time",
+  "resend_standard_info",
+]));
 
 export const CLASSIFICATION_SCHEMA = Object.freeze({
   type: "object",
@@ -17,7 +32,7 @@ export const CLASSIFICATION_SCHEMA = Object.freeze({
         "wifi", "address", "directions", "parking", "verified_amenity", "check_in_time",
         "check_out_time", "greeting", "thanks", "resend_standard_info", "booking",
         "availability", "pricing", "refund", "date_change", "complaint", "safety",
-        "exception", "unknown",
+        "exception", "early_check_in", "late_check_out", "early_check_in_follow_up", "unknown",
       ],
     },
     riskTier: { type: "string", enum: ["low", "high", "unknown"] },
@@ -63,14 +78,62 @@ function factAvailable(topic, facts) {
   return false;
 }
 
+function knowledgeGuard(topic, knowledge) {
+  if (knowledge.conflicts.some((conflict) => conflict.topics.includes(topic))) {
+    return "knowledge_conflict";
+  }
+  if (PROPERTY_FACT_TOPICS.has(topic) && !knowledge.listingRecognized) {
+    return "listing_not_recognized";
+  }
+  return null;
+}
+
 export async function classifyGuestMessage({
   guestMessage,
   listingName,
   facts,
+  activeTimeRequest = null,
+  conversationContext = [],
+  now = new Date(),
   env = process.env,
   fetchFn = fetch,
 }) {
   const model = String(env.AIRBNB_SUPPORT_OPENAI_MODEL ?? "gpt-5.6-terra");
+  const verifiedFacts = facts && typeof facts === "object" ? facts : {};
+  const knowledge = supportKnowledgeForListing({ listingName, propertyFacts: verifiedFacts });
+  const timeDecision = supportTimeRequestDecision(guestMessage, verifiedFacts)
+    ?? supportTimeFollowUpDecision(guestMessage, activeTimeRequest, now);
+  if (timeDecision && supportTimeRequestIsFocused(guestMessage)) {
+    const cancelsOperationalRequest = (
+      activeTimeRequest?.requestType === timeDecision.requestType
+      && !timeDecision.createsOperationalRequest
+      && (
+        timeDecision.action === "standard_time"
+        || (timeDecision.requestType === "late_checkout" && timeDecision.action === "accept")
+      )
+    );
+    const classification = {
+      topic: timeDecision.topic,
+      riskTier: "low",
+      confidence: 1,
+      factsVerified: true,
+      replyNeeded: true,
+      summary: timeDecision.requestType === "early_checkin"
+        ? "The guest asked about early check-in."
+        : "The guest asked about late check-out.",
+      draft: timeDecision.reply,
+      messageWhitelisted: true,
+      deterministicGuard: "approved_time_policy",
+      operationalRequest: { ...timeDecision, cancelsOperationalRequest },
+    };
+    const disposition = supportDisposition(classification);
+    return {
+      ...classification,
+      ...disposition,
+      draft: withAutomatedReplyFooter(classification.draft),
+      model: null,
+    };
+  }
   const response = await fetchFn("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -90,10 +153,13 @@ export async function classifyGuestMessage({
               text: [
                 "Classify one Airbnb guest message for a cautious host-support system.",
                 "Never assume availability, discounts, refunds, date changes, exceptions, safety facts, or unlisted amenities.",
-                "Only draft from the supplied verified facts. Use null for draft when a safe factual reply cannot be written.",
+                "Treat canonical knowledge as policy and context, verified property facts as current details, and any listed conflict as unknown.",
+                "For a conflict or missing fact, offer to check or ask one useful clarifying question instead of guessing.",
+                "Whenever a reply is needed, write a concise, warm proposed reply if one can be honest, even when a human must review it.",
+                "Do not promise an outcome, mention internal systems or risk labels, or expose the reasoning behind escalation.",
                 "Only a simple greeting, thanks, or direct request for standard Wi-Fi, address, directions, parking, check-in, check-out, or resend information can ever be autonomous.",
                 "Cancellation, reservation changes, maintenance, complaints, mixed requests, and ambiguous wording always require a human.",
-                "A draft is advisory only and must be concise, warm, and direct.",
+                "The draft is advisory; application code independently decides whether any reply is autonomous.",
               ].join(" "),
             },
           ],
@@ -102,7 +168,14 @@ export async function classifyGuestMessage({
           role: "user",
           content: [{
             type: "input_text",
-            text: JSON.stringify({ listingName, guestMessage, verifiedFacts: facts }),
+            text: JSON.stringify({
+              listingName,
+              guestMessage,
+              recentConversation: conversationContext,
+              activeTimeRequest,
+              canonicalKnowledge: knowledge,
+              verifiedPropertyFacts: verifiedFacts,
+            }),
           }],
         },
       ],
@@ -119,26 +192,27 @@ export async function classifyGuestMessage({
   });
   if (!response.ok) throw new Error(`OpenAI classification failed with HTTP ${response.status}.`);
   const raw = JSON.parse(responseText(await response.json()));
-  const deterministicDraft = verifiedSupportDraft(raw.topic, facts);
+  const deterministicDraft = verifiedSupportDraft(raw.topic, verifiedFacts);
   const explicitHumanReview = supportMessageRequiresHuman(guestMessage);
   const messageWhitelisted = supportMessageMatchesTopic(guestMessage, raw.topic);
-  const requiresHuman = explicitHumanReview || !messageWhitelisted;
+  const knowledgeIssue = knowledgeGuard(raw.topic, knowledge);
+  const requiresHuman = explicitHumanReview || !messageWhitelisted || Boolean(knowledgeIssue);
+  const autonomousDraft = requiresHuman ? null : deterministicDraft;
   const classification = {
     ...raw,
     riskTier: requiresHuman ? "high" : raw.riskTier,
     messageWhitelisted,
     factsVerified: !requiresHuman
       && raw.factsVerified === true
-      && factAvailable(raw.topic, facts)
-      && deterministicDraft != null,
-    draft: deterministicDraft ?? raw.draft,
+      && factAvailable(raw.topic, verifiedFacts)
+      && autonomousDraft != null,
+    draft: autonomousDraft ?? raw.draft,
     deterministicGuard: explicitHumanReview
       ? "human_review_phrase"
       : !messageWhitelisted
         ? "message_not_whitelisted"
-        : deterministicDraft
-          ? "verified_template"
-          : "no_verified_template",
+        : knowledgeIssue
+          ?? (autonomousDraft ? "verified_template" : "no_verified_template"),
   };
   const disposition = supportDisposition(classification);
   return {

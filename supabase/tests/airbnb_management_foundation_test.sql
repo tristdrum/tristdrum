@@ -279,6 +279,7 @@ values
   ('reservation_evidence'),
   ('guest_threads'),
   ('guest_messages'),
+  ('guest_time_requests'),
   ('reply_deliveries'),
   ('cleaner_plans'),
   ('inventory_items'),
@@ -296,7 +297,7 @@ select ok(
   (select count(*)
    from information_schema.tables table_info
    join airbnb_test_tables expected on expected.table_name = table_info.table_name
-   where table_info.table_schema = 'airbnb') = 18,
+   where table_info.table_schema = 'airbnb') = 19,
   'all private Airbnb tables exist'
 );
 
@@ -337,9 +338,11 @@ select ok(
 
 select ok(
   has_table_privilege('airbnb_cleaner_worker', 'airbnb.cleaner_plans', 'SELECT')
+  and has_table_privilege('airbnb_cleaner_worker', 'airbnb.guest_time_requests', 'SELECT')
+  and not has_table_privilege('airbnb_cleaner_worker', 'airbnb.guest_time_requests', 'INSERT')
   and not has_table_privilege('airbnb_cleaner_worker', 'airbnb.guest_messages', 'SELECT')
   and not has_table_privilege('airbnb_cleaner_worker', 'airbnb.inventory_items', 'SELECT'),
-  'cleaner capability cannot read support or stock tables'
+  'cleaner capability can read timing notes but not guest messages or stock tables'
 );
 
 select ok(
@@ -351,10 +354,12 @@ select ok(
 
 select ok(
   has_table_privilege('airbnb_support_worker', 'airbnb.guest_messages', 'SELECT')
+  and has_table_privilege('airbnb_support_worker', 'airbnb.guest_time_requests', 'INSERT')
+  and has_table_privilege('airbnb_support_worker', 'airbnb.guest_time_requests', 'UPDATE')
   and has_table_privilege('airbnb_support_worker', 'airbnb.reservations', 'SELECT')
   and not has_table_privilege('airbnb_support_worker', 'airbnb.cleaner_plans', 'SELECT')
   and not has_table_privilege('airbnb_support_worker', 'airbnb.inventory_items', 'SELECT'),
-  'support capability cannot read cleaner or stock tables'
+  'support capability can manage timing requests but cannot read cleaner or stock tables'
 );
 
 select ok(
@@ -401,7 +406,7 @@ select ok(
     where namespace.nspname = 'airbnb'
       and trigger_info.tgname = 'airbnb_no_hard_delete'
       and not trigger_info.tgisinternal
-  ) = 18,
+  ) = 19,
   'every Airbnb table rejects hard deletes'
 );
 

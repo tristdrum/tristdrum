@@ -220,6 +220,35 @@ test("reproduces the July 28 checkout-only and turnover timeline", () => {
   assert.doesNotMatch(updatedMessage, /tomorrow|ngomso/i);
 });
 
+test("accepted early and late times appear beneath the correct unit in English and Xhosa", () => {
+  const unitReports = classifyUnits(turnoverReservations(), targetDate);
+  const operationalNotes = [
+    {
+      unitId: 2,
+      requestType: "early_checkin",
+      effectiveTime: "13:00",
+      english: "Early check-in requested for 13:00. Please prioritise this unit; the time is not guaranteed yet.",
+      xhosa: "Kucelwe ukungena kwangethuba ngo-13:00. Nceda ubeke le unit phambili; ixesha alikaqinisekiswa.",
+    },
+    {
+      unitId: 3,
+      requestType: "late_checkout",
+      effectiveTime: "11:00",
+      english: "Late check-out approved for 11:00. Please start cleaning after the guest leaves.",
+      xhosa: "Ukuhamba kade ngo-11:00 kuvunyiwe. Nceda uqale ukucoca emva kokuba undwendwe luhambile.",
+    },
+  ];
+  const message = buildMessage({ targetDate, unitReports, weather: dryWeather, operationalNotes });
+  assert.match(message, /Unit 2\n- 1 guest; Arrival Two\n- Early check-in requested for 13:00/);
+  assert.match(message, /Unit 3\n- 1 guest; Arrival Three\n- Late check-out approved for 11:00/);
+  assert.match(message, /Unit 2\n- 1 undwendwe; Arrival Two\.\n- Kucelwe ukungena kwangethuba ngo-13:00/);
+  assert.match(message, /Unit 3\n- 1 undwendwe; Arrival Three\.\n- Ukuhamba kade ngo-11:00/);
+
+  const withoutNotes = planDelivery({ targetDate, unitReports, weather: dryWeather, ledgerRecords: [] });
+  const withNotes = planDelivery({ targetDate, unitReports, weather: dryWeather, operationalNotes, ledgerRecords: [] });
+  assert.notEqual(withNotes.hash, withoutNotes.hash);
+});
+
 test("duplicate midday content skips the live send and ledger append", async () => {
   const unitReports = classifyUnits(turnoverReservations(), targetDate);
   const first = planDelivery({ targetDate, unitReports, weather: dryWeather, ledgerRecords: [] });

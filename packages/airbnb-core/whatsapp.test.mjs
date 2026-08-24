@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readWhatsAppChatMessages, sendVerifiedManagementMessage } from "./whatsapp.mjs";
+import {
+  readWhatsAppChatMessages,
+  sendVerifiedManagementMessage,
+  sendVerifiedWhatsAppGroupMessage,
+} from "./whatsapp.mjs";
 
 const env = {
   MINCOOL_CUSTOMER_WHATSAPP_API_BASE_URL: "https://min.example",
@@ -114,6 +118,29 @@ test("Management alerts can never target the cleaners chat", async () => {
     }),
     /may not target the cleaners chat/,
   );
+});
+
+test("the generic verified sender can safely target the cleaners group", async () => {
+  let liveSent = false;
+  const result = await sendVerifiedWhatsAppGroupMessage({
+    chatId: "cleaners@g.us",
+    text: "Unit 2: early check-in requested for 13:00.",
+    idempotencyKey: "time-request-1",
+    env,
+    waitFn: async () => {},
+    fetchFn: async (url, options = {}) => {
+      if ((options.method ?? "GET") === "GET") {
+        return new Response(JSON.stringify({
+          messages: liveSent
+            ? [{ id: "cleaner-note-1", from_me: true, text: "Unit 2: early check-in requested for 13:00." }]
+            : [],
+        }), { status: 200 });
+      }
+      if (!String(url).includes("dry_run=true")) liveSent = true;
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    },
+  });
+  assert.equal(result.verification.found, true);
 });
 
 test("WhatsApp evidence reads return a bounded normalized message shape without writing", async () => {

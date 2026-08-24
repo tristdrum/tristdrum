@@ -307,6 +307,105 @@
         "supportCandidate": false,
         "hostIdentity": null
       }
+    },
+    {
+      "id": "early-check-in-conditional",
+      "providerMessageId": "<support-fixture-10@example.test>",
+      "providerThreadId": "9900001010",
+      "subject": "RE: Reservation for Jasmine Studio Stay, Jan 28 - 29",
+      "listingName": "JASMINE STUDIO STAY",
+      "occurredAt": "2025-01-27T10:00:00Z",
+      "bodyLines": [
+        "RESERVATION FOR JASMINE STUDIO STAY, JAN 28 - 29",
+        "For your protection and safety, always communicate through Airbnb.",
+        "GUEST JULIET",
+        "Guest",
+        "Could we please check in early at 1pm?",
+        "Reply",
+        "https://www.airbnb.example/hosting/thread/9900001010?thread_type=home_booking"
+      ],
+      "classification": {
+        "topic": "early_check_in",
+        "riskTier": "low",
+        "confidence": 1,
+        "factsVerified": true,
+        "replyNeeded": true,
+        "draft": "We will try to arrange a conditional early check-in at 13:00."
+      },
+      "expected": {
+        "directions": ["guest"],
+        "latestName": "GUEST JULIET",
+        "latestText": "Could we please check in early at 1pm?",
+        "autoReply": true,
+        "status": "approved_for_guard",
+        "alertManagement": false
+      }
+    },
+    {
+      "id": "late-checkout-eleven",
+      "providerMessageId": "<support-fixture-11@example.test>",
+      "providerThreadId": "9900001011",
+      "subject": "RE: Reservation for The Spekboom Studio, Jan 30 - 31",
+      "listingName": "THE SPEKBOOM STUDIO",
+      "occurredAt": "2025-01-29T10:00:00Z",
+      "bodyLines": [
+        "RESERVATION FOR THE SPEKBOOM STUDIO, JAN 30 - 31",
+        "For your protection and safety, always communicate through Airbnb.",
+        "GUEST KILO",
+        "Guest",
+        "Could we have a late checkout at 11am?",
+        "Reply",
+        "https://www.airbnb.example/hosting/thread/9900001011?thread_type=home_booking"
+      ],
+      "classification": {
+        "topic": "late_check_out",
+        "riskTier": "low",
+        "confidence": 1,
+        "factsVerified": true,
+        "replyNeeded": true,
+        "draft": "Yes, check-out at 11:00 is fine."
+      },
+      "expected": {
+        "directions": ["guest"],
+        "latestName": "GUEST KILO",
+        "latestText": "Could we have a late checkout at 11am?",
+        "autoReply": true,
+        "status": "approved_for_guard",
+        "alertManagement": false
+      }
+    },
+    {
+      "id": "late-checkout-after-eleven",
+      "providerMessageId": "<support-fixture-12@example.test>",
+      "providerThreadId": "9900001012",
+      "subject": "RE: Reservation for Bougainvillea Courtyard Studio, Feb 1 - 2",
+      "listingName": "BOUGAINVILLEA COURTYARD STUDIO",
+      "occurredAt": "2025-01-31T10:00:00Z",
+      "bodyLines": [
+        "RESERVATION FOR BOUGAINVILLEA COURTYARD STUDIO, FEB 1 - 2",
+        "For your protection and safety, always communicate through Airbnb.",
+        "GUEST LIMA",
+        "Guest",
+        "Can we check out late at 12pm?",
+        "Reply",
+        "https://www.airbnb.example/hosting/thread/9900001012?thread_type=home_booking"
+      ],
+      "classification": {
+        "topic": "late_check_out",
+        "riskTier": "low",
+        "confidence": 1,
+        "factsVerified": true,
+        "replyNeeded": true,
+        "draft": "I am sorry, but we cannot offer check-out later than 11:00."
+      },
+      "expected": {
+        "directions": ["guest"],
+        "latestName": "GUEST LIMA",
+        "latestText": "Can we check out late at 12pm?",
+        "autoReply": true,
+        "status": "approved_for_guard",
+        "alertManagement": false
+      }
     }
   ],
   "sendRaces": [

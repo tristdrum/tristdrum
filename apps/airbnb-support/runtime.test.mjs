@@ -39,6 +39,16 @@ test("reviewed delivery, autonomous approval, and management alerts have indepen
   });
   assert.equal(all.autonomousRepliesEnabled, true);
   assert.equal(all.managementAlertsEnabled, true);
+  assert.equal(all.timeRequestsEnabled, false);
+
+  const withTimeRequests = supportRuntimeCapabilities({
+    ...base,
+    AIRBNB_SUPPORT_AUTONOMOUS_REPLIES_ENABLED: "true",
+    AIRBNB_SUPPORT_TIME_REQUESTS_ENABLED: "true",
+    AIRBNB_SUPPORT_JANE_GMAIL_USER: "jane@example.test",
+    AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD: "configured",
+  });
+  assert.equal(withTimeRequests.timeRequestsEnabled, true);
 });
 
 test("autonomous replies fail closed when Jane mailbox credentials are incomplete", () => {
