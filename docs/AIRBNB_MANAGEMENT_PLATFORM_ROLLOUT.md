@@ -126,6 +126,23 @@ The reviewed hardening cutover completed at 2026-08-24 09:10 SAST.
   The support job remains inactive. Public health checks and
   `/dashboard/airbnb` returned HTTP 200 after deployment.
 
+### Stock WhatsApp timeout repair
+
+The first 14:25 monitoring pass found that the Maids chat read took about 19
+seconds while the stock worker allowed only eight seconds. Email ingestion,
+forecasting, and scheduling still succeeded, but WhatsApp stock evidence was
+being skipped with a sanitized timeout receipt.
+
+- Commit `2ee47df` raised only the bounded WhatsApp request timeout to 30
+  seconds; ordering and support capabilities were unchanged.
+- Stock and shared-core tests passed: 65 passed and one database integration
+  test was skipped because no integration database was configured.
+- Deployed stock image: `deployment-01M0SWDB849YRGFCRBKBXTZV21`.
+- A manual observation and the ordinary 14:45 SAST Management run both
+  completed successfully. Each loaded 85 WhatsApp messages with no read error,
+  found no actionable stock observation, sent no Management alert, and retained
+  `orderPlacementAllowed: false`.
+
 ## Production verification
 
 Use this order so no scheduled request can cross a mixed schema/app version:
