@@ -6,16 +6,23 @@ import { parseAirbnbConversationEmail } from "@tristdrum/airbnb-core";
 import { createAirbnbDatabase } from "@tristdrum/airbnb-db";
 import {
   applyDeliveryGuardDecision,
+  cancelActiveGuestTimeRequests,
   claimDeliveryForGuard,
   ingestConversation,
   ingestSupplementalConversation,
   loadDeliveryGuardCandidates,
   loadSuppressedSupportAlerts,
   loadShadowCandidates,
+  loadAwaitingReadyRequests,
+  loadActiveGuestTimeRequestsForReplacement,
+  loadDueReadinessRequests,
+  loadReadyTimeRequests,
   markSupportAlertNotified,
   recordAmbiguousDeliveryFailure,
   recordDeliveryAttempt,
+  storeOperationalGuestReply,
   storeShadowDraft,
+  upsertGuestTimeRequest,
 } from "./repository.mjs";
 
 const adminUrl = process.env.AIRBNB_INTEGRATION_DATABASE_URL;
@@ -39,22 +46,27 @@ function roleUrl(url) {
   return parsed.toString();
 }
 
-function emailFixture({ mailboxScope, providerMessageId, occurredAt, providerThreadId = "9876543210" }) {
+function emailFixture({
+  mailboxScope,
+  providerMessageId,
+  occurredAt,
+  providerThreadId = "9876543210",
+  listingName = "Jasmine Studio Stay",
+  entries = [{ name: "Guest Fixture", role: "Guest", text: "Hello, could you help?" }],
+}) {
   return {
     mailboxScope,
     providerMessageId,
-    subject: "RE: Reservation for Jasmine Studio Stay, Aug 22 - 23",
+    subject: `RE: Reservation for ${listingName}, Aug 22 - 23`,
     from: "express@airbnb.com",
     replyTo: "express@airbnb.com",
     references: ["<older@example.test>"],
     inReplyTo: "<older@example.test>",
     occurredAt,
     body: [
-      "Reservation for Jasmine Studio Stay, Aug 22 - 23",
+      `Reservation for ${listingName}, Aug 22 - 23`,
       `https://www.airbnb.test/hosting/thread/${providerThreadId}`,
-      "Guest Fixture",
-      "Guest",
-      "Hello, could you help?",
+      ...entries.flatMap((entry) => [entry.name, entry.role, entry.text]),
     ].join("\n"),
   };
 }
@@ -93,7 +105,8 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
     `;
     await admin`
       insert into airbnb.properties (household_id, unit_number, listing_name, common_name)
-      values (${householdId}, 3, 'Jasmine Studio Stay', 'Jasmine')
+      values (${householdId}, 3, 'Jasmine Studio Stay', 'Jasmine'),
+             (${householdId}, 2, 'The Spekboom Studio', 'Spekboom')
     `;
     database = createAirbnbDatabase({
       postgresFactory: postgres,
@@ -143,6 +156,132 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
 
     const candidates = await loadShadowCandidates(database.sql, { householdId, limit: 8 });
     assert.equal(candidates.length, 1);
+    const timingRequest = await upsertGuestTimeRequest(database.sql, {
+      householdId,
+      candidate: candidates[0],
+      request: {
+        requestType: "early_checkin",
+        action: "accept_conditional",
+        stayDate: "2026-08-22",
+        requestedTime: "13:00",
+        effectiveTime: "13:00",
+        unitNumber: 3,
+        cleanerNoteEn: "Early check-in requested for 13:00.",
+        cleanerNoteXh: "Kucelwe ukungena kwangethuba ngo-13:00.",
+        readinessCheckAt: "2026-08-22T10:00:00.000Z",
+      },
+      now: new Date("2026-08-21T12:00:00.000Z"),
+    });
+    assert.equal(timingRequest.status, "accepted");
+    await admin`
+      update airbnb.guest_time_requests
+      set status = 'cleaners_notified', cleaners_notified_at = '2026-08-22T09:00:00.000Z'
+      where household_id = ${householdId} and id = ${timingRequest.id}
+    `;
+    assert.equal((await loadDueReadinessRequests(database.sql, {
+      householdId,
+      now: new Date("2026-08-22T10:00:00.000Z"),
+    }))[0].id, timingRequest.id);
+    assert.equal((await loadDueReadinessRequests(database.sql, {
+      householdId,
+      now: new Date("2026-08-23T10:00:00.000Z"),
+    })).some((request) => request.id === timingRequest.id), false);
+    await admin`
+      update airbnb.guest_time_requests
+      set status = 'awaiting_ready', readiness_prompted_at = '2026-08-22T10:00:00.000Z'
+      where household_id = ${householdId} and id = ${timingRequest.id}
+    `;
+    assert.equal((await loadAwaitingReadyRequests(database.sql, {
+      householdId,
+      now: new Date("2026-08-23T10:00:00.000Z"),
+    })).some((request) => request.id === timingRequest.id), false);
+    await admin`
+      update airbnb.guest_time_requests
+      set status = 'ready', ready_at = '2026-08-22T10:01:00.000Z'
+      where household_id = ${householdId} and id = ${timingRequest.id}
+    `;
+    assert.equal((await loadReadyTimeRequests(database.sql, {
+      householdId,
+      now: new Date("2026-08-22T11:01:00.000Z"),
+    }))[0].id, timingRequest.id);
+    assert.equal((await loadReadyTimeRequests(database.sql, {
+      householdId,
+      now: new Date("2026-08-23T11:01:00.000Z"),
+    })).some((request) => request.id === timingRequest.id), false);
+    const operationalReply = await storeOperationalGuestReply(database.sql, {
+      householdId,
+      requestId: timingRequest.id,
+      threadId: candidates[0].id,
+      draft: "The studio is ready.",
+      now: new Date("2026-08-22T11:01:00.000Z"),
+    });
+    assert.ok(operationalReply?.id);
+    assert.equal(await storeOperationalGuestReply(database.sql, {
+      householdId,
+      requestId: timingRequest.id,
+      threadId: candidates[0].id,
+      draft: "The studio is ready.",
+      now: new Date("2026-08-22T11:02:00.000Z"),
+    }), null);
+    const replacementRequest = await upsertGuestTimeRequest(database.sql, {
+      householdId,
+      candidate: { ...candidates[0], sourceFingerprint: "replacement-time-fingerprint" },
+      request: {
+        requestType: "early_checkin",
+        action: "accept_conditional",
+        stayDate: "2026-08-22",
+        requestedTime: "14:00",
+        effectiveTime: "14:00",
+        unitNumber: 3,
+        cleanerNoteEn: "Early check-in requested for 14:00.",
+        cleanerNoteXh: "Kucelwe ukungena kwangethuba ngo-14:00.",
+        readinessCheckAt: "2026-08-22T11:00:00.000Z",
+      },
+      now: new Date("2026-08-22T11:02:00.000Z"),
+    });
+    assert.equal(replacementRequest.supersededCount, 1);
+    assert.equal(replacementRequest.replacesPrevious, true);
+    const replacementRetry = await upsertGuestTimeRequest(database.sql, {
+      householdId,
+      candidate: { ...candidates[0], sourceFingerprint: "replacement-time-fingerprint" },
+      request: {
+        requestType: "early_checkin",
+        action: "accept_conditional",
+        stayDate: "2026-08-22",
+        requestedTime: "14:00",
+        effectiveTime: "14:00",
+        unitNumber: 3,
+        cleanerNoteEn: "Early check-in requested for 14:00.",
+        cleanerNoteXh: "Kucelwe ukungena kwangethuba ngo-14:00.",
+        readinessCheckAt: "2026-08-22T11:00:00.000Z",
+      },
+      now: new Date("2026-08-22T11:02:30.000Z"),
+    });
+    assert.equal(replacementRetry.supersededCount, 0);
+    assert.equal(replacementRetry.replacesPrevious, true);
+    assert.equal((await admin`
+      select status
+      from airbnb.guest_time_requests
+      where household_id = ${householdId} and id = ${timingRequest.id}
+    `)[0].status, "cancelled");
+    const returnToStandardCandidate = {
+      ...candidates[0],
+      sourceFingerprint: "return-to-standard-fingerprint",
+    };
+    assert.deepEqual(
+      (await loadActiveGuestTimeRequestsForReplacement(database.sql, {
+        householdId,
+        candidate: returnToStandardCandidate,
+        requestType: "early_checkin",
+      })).map((request) => request.id),
+      [replacementRequest.id],
+    );
+    assert.equal((await cancelActiveGuestTimeRequests(database.sql, {
+      householdId,
+      candidate: returnToStandardCandidate,
+      requestType: "early_checkin",
+      now: new Date("2026-08-22T11:03:00.000Z"),
+    })).length, 1);
     const classification = {
       topic: "unknown",
       riskTier: "unknown",
@@ -306,6 +445,79 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
       from airbnb.audit_events
       where household_id = ${householdId} and actor_id = 'support'
     `)[0].count, 5);
+
+    const chronologyThreadId = "9876543212";
+    const newerEmail = emailFixture({
+      mailboxScope: "tristan",
+      providerMessageId: `<newer-${randomUUID()}@example.test>`,
+      providerThreadId: chronologyThreadId,
+      occurredAt: "2026-08-21T16:00:00.000Z",
+      entries: [
+        { name: "Host Fixture", role: "Host", text: "How can we help?" },
+        { name: "New Guest", role: "Guest", text: "Could I check in early?" },
+      ],
+    });
+    const newerParsed = parseAirbnbConversationEmail(newerEmail);
+    const newerIngested = await ingestConversation(database.sql, {
+      householdId,
+      email: newerEmail,
+      parsed: newerParsed,
+    });
+    const chronologyCandidate = (await loadShadowCandidates(database.sql, { householdId, limit: 20 }))
+      .find((candidate) => candidate.providerThreadId === chronologyThreadId);
+    const chronologyDraft = await storeShadowDraft(database.sql, {
+      householdId,
+      candidate: chronologyCandidate,
+      classification: {
+        topic: "early_check_in",
+        riskTier: "low",
+        confidence: 0.9,
+        factsVerified: true,
+        replyNeeded: true,
+        summary: "A safe draft awaits review.",
+        draft: "Thanks, we are checking.",
+        autoReply: false,
+        status: "drafted",
+        alertManagement: false,
+      },
+      now: new Date("2026-08-21T16:01:00.000Z"),
+    });
+    const olderHostEmail = emailFixture({
+      mailboxScope: "tristan",
+      providerMessageId: `<older-${randomUUID()}@example.test>`,
+      providerThreadId: chronologyThreadId,
+      occurredAt: "2026-08-21T15:00:00.000Z",
+      listingName: "The Spekboom Studio",
+      entries: [
+        { name: "Old Guest", role: "Guest", text: "An older guest question." },
+        { name: "Host Fixture", role: "Host", text: "An older host reply." },
+      ],
+    });
+    const olderResult = await ingestConversation(database.sql, {
+      householdId,
+      email: olderHostEmail,
+      parsed: parseAirbnbConversationEmail(olderHostEmail),
+    });
+    assert.equal(newerIngested.latestDirection, "guest");
+    assert.equal(olderResult.latestDirection, "guest");
+    const chronologyState = (await admin`
+      select thread.status, thread.property_id, thread.guest_display_name,
+             thread.source_fingerprint, delivery.status as delivery_status
+      from airbnb.guest_threads thread
+      join airbnb.reply_deliveries delivery
+        on delivery.household_id = thread.household_id
+       and delivery.thread_id = thread.id
+      where thread.household_id = ${householdId}
+        and thread.provider_thread_id = ${chronologyThreadId}
+        and delivery.id = ${chronologyDraft.id}
+    `)[0];
+    assert.deepEqual({ ...chronologyState }, {
+      status: "needs_human",
+      property_id: chronologyCandidate.propertyId,
+      guest_display_name: "New Guest",
+      source_fingerprint: newerParsed.sourceFingerprint,
+      delivery_status: "needs_approval",
+    });
   } finally {
     await database?.close();
     await admin.end({ timeout: 5 });

@@ -12,12 +12,18 @@ import { processDeliveryGuard } from "./delivery.mjs";
 import { collectConversationMessages } from "./gmail.mjs";
 import { notifySupportManagement } from "./management.mjs";
 import {
+  captureGuestTimeRequest,
+  processTimeRequestReadiness,
+  withdrawGuestTimeRequest,
+} from "./operations.mjs";
+import {
   ingestConversation,
   ingestSupplementalConversation,
   latestConversationEvidenceAt,
   latestSupportRun,
   loadDeliveryGuardCandidates,
   loadShadowCandidates,
+  reconcileGuestTimeRequestNotifications,
   storeSupportDraft,
 } from "./repository.mjs";
 import { assertSupportModeAllowed } from "./runtime.mjs";
@@ -62,6 +68,9 @@ export async function runSupport({
   classify = classifyGuestMessage,
   processDelivery = processDeliveryGuard,
   notifyManagement = notifySupportManagement,
+  captureTimeRequest = captureGuestTimeRequest,
+  withdrawTimeRequest = withdrawGuestTimeRequest,
+  processReadiness = processTimeRequestReadiness,
   database = null,
   env = process.env,
 } = {}) {
@@ -156,6 +165,7 @@ export async function runSupport({
       limit: Number.parseInt(env.AIRBNB_SUPPORT_CANDIDATE_LIMIT ?? "8", 10),
     });
     const drafts = [];
+    const timeRequests = [];
     let classificationFailureCount = 0;
     const classifyAndStore = async (candidate) => {
       let classification;
@@ -166,12 +176,65 @@ export async function runSupport({
           guestMessage: candidate.guestMessage,
           listingName: candidate.listingName,
           facts: candidate.facts,
+          activeTimeRequest: candidate.activeTimeRequest,
+          conversationContext: candidate.conversationContext,
+          now: startedAt,
           env,
         });
       } catch (error) {
         classificationFailureCount += 1;
         classification = fallbackClassification(error);
       }
+      let timeRequestOutcome = null;
+      const operationalRequest = classification.operationalRequest;
+      if (
+        mode === "live"
+        && capabilities.timeRequestsEnabled
+        && !candidate.existingClassification
+        && classification.autoReply === true
+        && (
+          operationalRequest?.createsOperationalRequest === true
+          || operationalRequest?.cancelsOperationalRequest === true
+        )
+      ) {
+        try {
+          timeRequestOutcome = operationalRequest.createsOperationalRequest
+            ? await captureTimeRequest({
+              sql: ownDatabase.sql,
+              householdId,
+              candidate,
+              decision: operationalRequest,
+              now: startedAt,
+              env,
+            })
+            : await withdrawTimeRequest({
+              sql: ownDatabase.sql,
+              householdId,
+              candidate,
+              decision: operationalRequest,
+              now: startedAt,
+              env,
+            });
+          timeRequests.push(timeRequestOutcome);
+          if (!["notified", "already_notified", "cancelled", "no_change"].includes(timeRequestOutcome.status)) {
+            classification = {
+              ...classification,
+              autoReply: false,
+              status: "needs_human",
+              alertManagement: true,
+              riskTier: "high",
+              deterministicGuard: "time_request_not_operationally_safe",
+            };
+          }
+        } catch (error) {
+          throw Object.assign(new Error("The cleaner timing update did not complete and will be retried."), {
+            code: "TIME_REQUEST_OPERATION_FAILED",
+            cause: error,
+          });
+        }
+      }
+      const timePolicyAllowed = !operationalRequest
+        || capabilities.timeRequestsEnabled === true;
       return storeSupportDraft(ownDatabase.sql, {
         householdId,
         candidate,
@@ -182,12 +245,26 @@ export async function runSupport({
           && capabilities.autonomousRepliesEnabled
           && janeMailboxAvailable
           && !candidate.existingClassification
+          && timePolicyAllowed
           && classification.autoReply === true,
       });
     };
     const concurrency = Math.max(1, Math.min(4, Number.parseInt(env.AIRBNB_SUPPORT_CLASSIFICATION_CONCURRENCY ?? "4", 10)));
     for (let index = 0; index < candidates.length; index += concurrency) {
-      drafts.push(...await Promise.all(candidates.slice(index, index + concurrency).map(classifyAndStore)));
+      const settled = await Promise.allSettled(candidates.slice(index, index + concurrency).map(classifyAndStore));
+      drafts.push(...settled.filter((item) => item.status === "fulfilled").map((item) => item.value));
+      const failure = settled.find((item) => item.status === "rejected");
+      if (failure) throw failure.reason;
+    }
+
+    let readiness = { promptedCount: 0, readyCount: 0, repliesQueuedCount: 0 };
+    if (mode === "live" && capabilities.timeRequestsEnabled) {
+      readiness = await processReadiness({
+        sql: ownDatabase.sql,
+        householdId,
+        now: startedAt,
+        env,
+      });
     }
 
     const deliveries = [];
@@ -206,6 +283,10 @@ export async function runSupport({
           env,
         }));
       }
+      await reconcileGuestTimeRequestNotifications(ownDatabase.sql, {
+        householdId,
+        now: now(),
+      });
     }
     const managementNotifications = mode === "live" && capabilities.managementAlertsEnabled
       ? await notifyManagement({
@@ -247,12 +328,19 @@ export async function runSupport({
       deliveryAmbiguousCount: deliveries.filter((delivery) => ["ambiguous", "guard_error"].includes(delivery.action)).length,
       managementNotificationCount: managementNotifications.length,
       managementNotificationVerifiedCount: managementNotifications.filter((item) => item.verified).length,
+      timeRequestCount: timeRequests.length,
+      timeRequestNotifiedCount: timeRequests.filter((item) => ["notified", "already_notified"].includes(item.status)).length,
+      timeRequestCancelledCount: timeRequests.filter((item) => item.status === "cancelled").length,
+      readinessPromptCount: readiness.promptedCount,
+      cleanerReadyCount: readiness.readyCount,
+      readinessReplyQueuedCount: readiness.repliesQueuedCount,
       externalWritesEnabled: mode === "live" && capabilities.externalWritesEnabled,
       replyDeliveryEnabled: mode === "live" && capabilities.replyDeliveryEnabled,
       autonomousRepliesEnabled: mode === "live"
         && capabilities.autonomousRepliesEnabled
         && janeMailboxAvailable,
       managementAlertsEnabled: mode === "live" && capabilities.managementAlertsEnabled,
+      timeRequestsEnabled: mode === "live" && capabilities.timeRequestsEnabled,
     };
     await recordJobFinish(ownDatabase.sql, {
       service: "support",

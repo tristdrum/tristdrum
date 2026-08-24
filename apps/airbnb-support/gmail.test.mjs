@@ -59,6 +59,56 @@ test("canonical collector accepts only Tristan's express stream and closes IMAP"
   assert.equal(loggedOut, true);
 });
 
+test("historical collection pages forward by UID without rereading newer mail", async () => {
+  const client = {
+    usable: true,
+    async connect() {},
+    async getMailboxLock() { return { release() {} }; },
+    async search() { return [1, 2, 3, 4]; },
+    async *fetch(range, query) {
+      if (query.source) {
+        for (const uid of range) {
+          yield {
+            uid,
+            source: Buffer.from([
+              `Message-ID: <conversation-${uid}@example.test>`,
+              "From: express@airbnb.com",
+              `Subject: RE: Inquiry for Jasmine Studio Stay, Aug ${20 + uid} - ${21 + uid}`,
+              "Content-Type: text/plain; charset=utf-8",
+              "",
+              "Guest",
+              "Hello",
+            ].join("\r\n")),
+          };
+        }
+        return;
+      }
+      for (let uid = 1; uid <= 4; uid += 1) {
+        yield {
+          uid,
+          internalDate: new Date(`2026-08-${20 + uid}T12:00:00Z`),
+          envelope: {
+            subject: `RE: Inquiry for Jasmine Studio Stay, Aug ${20 + uid} - ${21 + uid}`,
+            from: [{ address: "express@airbnb.com" }],
+          },
+        };
+      }
+    },
+    async logout() {},
+    close() {},
+  };
+  const result = await collectConversationMessages({
+    since: new Date("2026-08-01T00:00:00Z"),
+    afterUid: 1,
+    oldestFirst: true,
+    maxRead: 2,
+    env: { AIRBNB_SUPPORT_GMAIL_USER: "tristan@example.test", AIRBNB_SUPPORT_GMAIL_APP_PASSWORD: "not-a-secret" },
+    createClient: () => client,
+  });
+  assert.deepEqual(result.messages.map((message) => message.uid), [2, 3]);
+  assert.equal(result.lastUid, 3);
+});
+
 test("collector closes a stalled IMAP import at the configured deadline", async () => {
   let closed = false;
   const client = {

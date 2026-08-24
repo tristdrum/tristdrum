@@ -20,6 +20,9 @@ import {
   supportEscalationStages,
   supportMessageMatchesTopic,
   supportMessageRequiresHuman,
+  supportTimeFollowUpDecision,
+  supportTimeRequestIsFocused,
+  supportTimeRequestDecision,
   trustedAirbnbSender,
   withAutomatedReplyFooter,
 } from "./index.mjs";
@@ -291,6 +294,96 @@ test("reservation changes, cancellations, and maintenance always require a human
   ]) {
     assert.equal(supportMessageRequiresHuman(message), true, message);
   }
+});
+
+test("early check-in policy accepts only the two-hour window and keeps the promise conditional", () => {
+  const accepted = supportTimeRequestDecision("Could we check in early at 1pm?", {
+    checkInTime: "15:00",
+    checkOutTime: "10:00",
+  });
+  assert.equal(accepted.action, "accept_conditional");
+  assert.equal(accepted.effectiveTime, "13:00");
+  assert.equal(accepted.createsOperationalRequest, true);
+  assert.match(accepted.reply, /cannot be guaranteed/i);
+
+  const tooEarly = supportTimeRequestDecision("Can we check in early at 12:00?", {});
+  assert.equal(tooEarly.action, "offer_earliest");
+  assert.equal(tooEarly.effectiveTime, "13:00");
+  assert.equal(tooEarly.createsOperationalRequest, false);
+  assert.equal(
+    supportTimeRequestDecision("Check-in is 3pm, could we arrive at 2pm?", {}).effectiveTime,
+    "14:00",
+  );
+  assert.equal(
+    supportTimeRequestDecision("Could we check in earlier than 3pm, ideally 2pm?", {}).effectiveTime,
+    "14:00",
+  );
+  assert.equal(
+    supportTimeRequestDecision("Could we check in at 2pm instead of 3pm?", {}).effectiveTime,
+    "14:00",
+  );
+});
+
+test("late checkout policy allows 11:00, not later, and creates a cleaner note only when accepted", () => {
+  const accepted = supportTimeRequestDecision("Could we have a late checkout at 11am?", {});
+  assert.equal(accepted.action, "accept");
+  assert.equal(accepted.effectiveTime, "11:00");
+  assert.equal(accepted.createsOperationalRequest, true);
+
+  const declined = supportTimeRequestDecision("May we check out late at 12pm?", {});
+  assert.equal(declined.action, "decline");
+  assert.equal(declined.createsOperationalRequest, false);
+  assert.match(declined.reply, /can['’]t offer check-out later than 11:00/i);
+  assert.equal(supportTimeRequestDecision("Could we have a late checkout at 1?", {}).requestedTime, "13:00");
+  assert.equal(
+    supportTimeRequestDecision("Checkout is 10am, could we leave at 11am?", {}).effectiveTime,
+    "11:00",
+  );
+  assert.equal(
+    supportTimeRequestDecision("Can we check out after 10am, say 11am?", {}).effectiveTime,
+    "11:00",
+  );
+  assert.equal(
+    supportTimeRequestDecision("Can we check out at 11am rather than 10am?", {}).effectiveTime,
+    "11:00",
+  );
+});
+
+test("timing autonomy rejects mixed requests", () => {
+  assert.equal(supportTimeRequestIsFocused("Could we check in early at 2pm?"), true);
+  assert.equal(supportTimeRequestIsFocused("The room is dirty. Could we check in early at 2pm?"), false);
+  assert.equal(supportTimeRequestIsFocused("Could we check in early at 2pm and get a refund?"), false);
+  assert.equal(supportTimeRequestIsFocused("Can we check in early at 2pm, the sheets have stains?"), false);
+  assert.equal(supportTimeRequestIsFocused("Can we check in early at 2pm, what is the Wi-Fi password?"), false);
+});
+
+test("early check-in follow-ups never offer entry before 13:00 and use the approved no-response wording", () => {
+  const activeRequest = {
+    requestType: "early_checkin",
+    stayDate: "2026-08-24",
+    effectiveTime: "13:00",
+    status: "awaiting_ready",
+  };
+  const before = supportTimeFollowUpDecision(
+    "Is the studio ready?",
+    activeRequest,
+    new Date("2026-08-24T12:45:00+02:00"),
+  );
+  assert.equal(before.action, "still_waiting");
+  assert.match(before.reply, /wait for an update/i);
+
+  const atTime = supportTimeFollowUpDecision(
+    "Can we check in now?",
+    activeRequest,
+    new Date("2026-08-24T13:00:00+02:00"),
+  );
+  assert.equal(atTime.action, "no_cleaner_response");
+  assert.match(atTime.reply, /did get an early notification/i);
+  assert.equal(supportTimeFollowUpDecision(
+    "Can we check in now?",
+    activeRequest,
+    new Date("2026-08-25T13:00:00+02:00"),
+  ), null);
 });
 
 test("support escalation stages are immediate, reminded at 45 minutes, and overdue at 60", () => {

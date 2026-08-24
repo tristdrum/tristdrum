@@ -71,6 +71,47 @@ export async function loadCleanerLedgerRecords({
   }
 }
 
+export async function loadCleanerOperationalNotes({
+  targetDate,
+  env = process.env,
+  postgresFactory = postgres,
+} = {}) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(targetDate ?? ""))) {
+    throw new Error("A YYYY-MM-DD target date is required to load cleaner timing notes.");
+  }
+  const configuration = databaseConfiguration(env);
+  if (!configuration) return { status: "disabled", notes: [] };
+  const { householdId, url } = configuration;
+  validateHouseholdId(householdId);
+  const sql = databaseClient(url, postgresFactory, "airbnb-cleaner-time-notes");
+  try {
+    const rows = await sql`
+      select property.unit_number, request.request_type, request.effective_time,
+             request.cleaner_note_en, request.cleaner_note_xh
+      from airbnb.guest_time_requests request
+      join airbnb.properties property
+        on property.household_id = request.household_id
+       and property.id = request.property_id
+      where request.household_id = ${householdId}
+        and request.stay_date = ${targetDate}
+        and request.status <> 'cancelled'
+      order by property.unit_number, request.created_at
+    `;
+    return {
+      status: "loaded",
+      notes: rows.map((row) => ({
+        unitId: Number(row.unitNumber),
+        requestType: row.requestType,
+        effectiveTime: String(row.effectiveTime).slice(0, 5),
+        english: row.cleanerNoteEn,
+        xhosa: row.cleanerNoteXh,
+      })),
+    };
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
+
 function hash(value) {
   return createHash("sha256").update(String(value)).digest("hex");
 }

@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import {
   loadCleanerLedgerRecords,
+  loadCleanerOperationalNotes,
   syncCleanerDatabase,
   syncCleanerFailureDatabase,
 } from "./database.mjs";
@@ -115,13 +116,20 @@ async function handleRun(request, response, dependencies) {
     if (mode === "live" && dependencies.sharedLedgerRequired && databaseLedger.status !== "loaded") {
       throw new Error("The required Supabase cleaner ledger is not configured.");
     }
+    const operationalNotes = await dependencies.loadOperationalNotes({ targetDate });
     const result = await dependencies.runReport({
       mode,
       targetDate,
       authoritativeLedgerRecords: databaseLedger.status === "loaded" ? databaseLedger.records : null,
+      operationalNotes: operationalNotes.notes,
     });
     const completedAt = dependencies.now().toISOString();
     const receipt = sanitizeRunResult(result, { runId, startedAt, completedAt, finalAttempt });
+    receipt.operationalNotes = {
+      status: operationalNotes.status,
+      count: operationalNotes.notes.length,
+      ...(operationalNotes.message ? { message: operationalNotes.message } : {}),
+    };
     try {
       const databaseSync = await dependencies.syncDatabase({ result, receipt });
       if (databaseSync?.status !== "disabled") receipt.databaseSync = databaseSync;
@@ -201,6 +209,7 @@ export function createAirbnbCleanerServer(dependencies = {}) {
     syncDatabase: dependencies.syncDatabase ?? syncCleanerDatabase,
     syncFailureDatabase: dependencies.syncFailureDatabase ?? syncCleanerFailureDatabase,
     loadDatabaseLedger: dependencies.loadDatabaseLedger ?? loadCleanerLedgerRecords,
+    loadOperationalNotes: dependencies.loadOperationalNotes ?? loadCleanerOperationalNotes,
     sharedLedgerRequired: dependencies.sharedLedgerRequired
       ?? process.env.AIRBNB_CLEANER_SHARED_LEDGER_REQUIRED === "true",
     now: dependencies.now ?? (() => new Date()),

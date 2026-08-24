@@ -765,9 +765,10 @@ function sumMatches(value, pattern) {
   return total;
 }
 
-export function buildUnitEnglish(report) {
+export function buildUnitEnglish(report, operationalNotes = []) {
   const { unit, action, arrivals } = report;
   const lines = [unit.label];
+  const notes = operationalNotes.filter((note) => Number(note.unitId) === Number(unit.id));
   const arrival = arrivals[0];
   const setupGuests = guestCountLabel(arrival);
   const setupLine = `${setupGuests}${arrival?.guestName ? `; ${arrival.guestName}` : ""}`;
@@ -775,28 +776,35 @@ export function buildUnitEnglish(report) {
   if (action === "turnover") {
     lines.push(`- ${setupLine}`);
     if (infantCountLabel(arrival)) lines.push(`- ${infantCountLabel(arrival)}`);
+    for (const note of notes) lines.push(`- ${note.english}`);
     return lines.join("\n");
   }
 
   if (action === "arrival") {
     lines.push(`- ${setupLine}`);
     if (infantCountLabel(arrival)) lines.push(`- ${infantCountLabel(arrival)}`);
+    for (const note of notes) lines.push(`- ${note.english}`);
     return lines.join("\n");
   }
 
   if (action === "checkout") {
     lines.push(`- ${setupGuests}`);
+    for (const note of notes) lines.push(`- ${note.english}`);
     return lines.join("\n");
   }
 
   if (action === "stayover") {
-    return "";
+    if (!notes.length) return "";
+    for (const note of notes) lines.push(`- ${note.english}`);
+    return lines.join("\n");
   }
 
-  return "";
+  if (!notes.length) return "";
+  for (const note of notes) lines.push(`- ${note.english}`);
+  return lines.join("\n");
 }
 
-export function buildXhosaSummary(unitReports, weather, targetDate) {
+export function buildXhosaSummary(unitReports, weather, targetDate, operationalNotes = []) {
   const lines = ["*Xhosa:*"];
   const anyWork = hasAirbnbWork(unitReports);
   const anyStayover = hasStayovers(unitReports);
@@ -814,19 +822,26 @@ export function buildXhosaSummary(unitReports, weather, targetDate) {
 
   for (const report of unitReports) {
     const label = `${report.unit.label}`;
+    const notes = operationalNotes.filter((note) => Number(note.unitId) === Number(report.unit.id));
     if (report.action === "turnover") {
       const arrival = report.arrivals[0];
       lines.push(label);
       lines.push(`- ${xhosaGuestCountLabel(arrival)}${arrival?.guestName ? `; ${arrival.guestName}` : ""}.`);
       if (xhosaInfantCountLabel(arrival)) lines.push(`- ${xhosaInfantCountLabel(arrival)}.`);
+      for (const note of notes) lines.push(`- ${note.xhosa}`);
     } else if (report.action === "arrival") {
       const arrival = report.arrivals[0];
       lines.push(label);
       lines.push(`- ${xhosaGuestCountLabel(arrival)}${arrival?.guestName ? `; ${arrival.guestName}` : ""}.`);
       if (xhosaInfantCountLabel(arrival)) lines.push(`- ${xhosaInfantCountLabel(arrival)}.`);
+      for (const note of notes) lines.push(`- ${note.xhosa}`);
     } else if (report.action === "checkout") {
       lines.push(label);
       lines.push(`- ${xhosaGuestCountLabel(null)}.`);
+      for (const note of notes) lines.push(`- ${note.xhosa}`);
+    } else if (notes.length) {
+      lines.push(label);
+      for (const note of notes) lines.push(`- ${note.xhosa}`);
     }
   }
 
@@ -841,7 +856,7 @@ export function buildXhosaSummary(unitReports, weather, targetDate) {
   return lines.join("\n");
 }
 
-export function buildMessage({ targetDate, unitReports, weather, isUpdate = false }) {
+export function buildMessage({ targetDate, unitReports, weather, operationalNotes = [], isUpdate = false }) {
   const isTuesday = targetDate.getDay() === 2;
   const anyWork = hasAirbnbWork(unitReports);
   const anyStayover = hasStayovers(unitReports);
@@ -872,11 +887,11 @@ export function buildMessage({ targetDate, unitReports, weather, isUpdate = fals
   }
 
   for (const report of unitReports) {
-    const unitLine = buildUnitEnglish(report);
+    const unitLine = buildUnitEnglish(report, operationalNotes);
     if (unitLine) lines.push(unitLine);
   }
   lines.push("");
-  lines.push(buildXhosaSummary(unitReports, weather, targetDate));
+  lines.push(buildXhosaSummary(unitReports, weather, targetDate, operationalNotes));
   lines.push("");
   lines.push(MESSAGE_FOOTER);
 
@@ -890,9 +905,9 @@ function withLegacyFooter(message) {
     : message;
 }
 
-export function planDelivery({ targetDate, unitReports, weather, ledgerRecords }) {
+export function planDelivery({ targetDate, unitReports, weather, operationalNotes = [], ledgerRecords }) {
   const targetDateKey = formatISODate(targetDate);
-  const baseMessage = buildMessage({ targetDate, unitReports, weather });
+  const baseMessage = buildMessage({ targetDate, unitReports, weather, operationalNotes });
   const baseHash = messageHash(baseMessage);
   const legacyBaseHash = messageHash(withLegacyFooter(baseMessage));
   const duplicateBaseHashes = new Set([baseHash, legacyBaseHash]);
@@ -909,7 +924,9 @@ export function planDelivery({ targetDate, unitReports, weather, ledgerRecords }
     : undefined;
   const previousForDate = Boolean(latestForDate);
   const isUpdate = Boolean(previousForDate && !sameContentDuplicate);
-  const message = isUpdate ? buildMessage({ targetDate, unitReports, weather, isUpdate: true }) : baseMessage;
+  const message = isUpdate
+    ? buildMessage({ targetDate, unitReports, weather, operationalNotes, isUpdate: true })
+    : baseMessage;
   const hash = messageHash(message);
   const legacyHash = messageHash(withLegacyFooter(message));
   const duplicateMessageHashes = new Set([hash, legacyHash]);
@@ -1398,6 +1415,7 @@ export async function runReport({
   verifyChatFn = null,
   loadLedgerRecordsFn = loadLedgerRecords,
   authoritativeLedgerRecords = null,
+  operationalNotes = [],
   appendLedgerFn = appendLedger,
   now = () => new Date(),
   workDir = WORK_DIR,
@@ -1419,6 +1437,7 @@ export async function runReport({
     targetDate,
     unitReports,
     weather,
+    operationalNotes,
     ledgerRecords: [...ledgerRecords, ...chatLedgerRecords(chatMessages, targetDate)],
   });
   const {
@@ -1459,6 +1478,11 @@ export async function runReport({
       arrivals: report.arrivals.map(personLine),
       checkouts: report.checkouts.map(personLine),
       stayovers: report.stayovers.map(personLine),
+    })),
+    operationalNotes: operationalNotes.map((note) => ({
+      unitId: Number(note.unitId),
+      requestType: note.requestType,
+      effectiveTime: note.effectiveTime,
     })),
     reservationsParsed: collected.reservations.length,
     envelopesFound: collected.envelopesFound,

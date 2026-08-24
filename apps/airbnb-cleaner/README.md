@@ -15,3 +15,8 @@ retries remain stable while a later `B -> C -> B` reversion gets a new key. Fina
 failure alerts are sent only to the private destination and count as delivered
 only after exact chat readback. Live failures are mirrored into sanitized
 Supabase job receipts even when plan generation does not complete.
+
+Accepted early check-ins and late check-outs are read from the shared Airbnb
+database and shown under the relevant unit in English and Xhosa. A timing-note
+read failure is recorded in the run receipt but does not suppress the underlying
+confirmed-reservation cleaner plan.

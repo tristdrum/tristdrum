@@ -16,6 +16,39 @@ function conversationWindow(bodyLines) {
   return bodyLines.slice(safetyIndex >= 0 ? safetyIndex + 1 : 0, end);
 }
 
+const CONVERSATION_SUBJECT_PATTERNS = Object.freeze([
+  /^RE:\s*(?:Reservation|Inquiry)\s+for\s+(.+?),\s*(.+)$/i,
+  /^RE:\s*Reservation request\s+(?:for|at)\s+(.+?)(?:,\s*|\s+for\s+)(.+)$/i,
+]);
+
+const CONVERSATION_HEADING_PATTERNS = Object.freeze([
+  /(?:Reservation|Inquiry)\s+for\s+(.+?),\s*(.+?)(?:\n|$)/i,
+  /Reservation request\s+(?:for|at)\s+(.+?)(?:,\s*|\s+for\s+)(.+?)(?:\n|$)/i,
+]);
+
+export function isAirbnbConversationSubject(subject) {
+  const value = String(subject ?? "").trim();
+  return CONVERSATION_SUBJECT_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+function conversationMetadata(subject, body) {
+  const subjectText = String(subject ?? "").trim();
+  const subjectMatch = CONVERSATION_SUBJECT_PATTERNS
+    .map((pattern) => pattern.exec(subjectText))
+    .find(Boolean);
+  if (!subjectMatch) return null;
+
+  const bodyText = String(body ?? "");
+  const headingMatch = CONVERSATION_HEADING_PATTERNS
+    .map((pattern) => pattern.exec(bodyText))
+    .find(Boolean);
+  const match = headingMatch ?? subjectMatch;
+  return {
+    listingName: match[1]?.trim() || null,
+    stayLabel: match[2]?.trim() || null,
+  };
+}
+
 export function parseConversationEntries(body) {
   const bodyLines = conversationWindow(lines(body));
   const entries = [];
@@ -66,16 +99,16 @@ export function parseAirbnbConversationEmail({
 }) {
   if (!trustedAirbnbSender(from)) return null;
   const threadId = /\/hosting\/thread\/(\d+)/i.exec(body)?.[1] ?? null;
-  if (!threadId || !/^RE:\s*Reservation for /i.test(String(subject ?? ""))) return null;
-  const heading = /Reservation for\s+(.+?),\s+(.+?)(?:\n|$)/i.exec(String(body ?? ""));
+  const metadata = conversationMetadata(subject, body);
+  if (!threadId || !metadata) return null;
   const entries = parseConversationEntries(body);
   if (!entries.length) return null;
   return {
     providerMessageId,
     providerThreadId: threadId,
     subject: String(subject ?? "").trim(),
-    listingName: heading?.[1]?.trim() ?? null,
-    stayLabel: heading?.[2]?.trim() ?? null,
+    listingName: metadata.listingName,
+    stayLabel: metadata.stayLabel,
     occurredAt,
     replyTo,
     references,

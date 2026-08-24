@@ -48,25 +48,21 @@ function messageIdentity(message) {
   ].join(":");
 }
 
-function configuration(env) {
-  const chatId = required("AIRBNB_MANAGEMENT_WHATSAPP_CHAT_ID", env);
-  if (!chatId.endsWith("@g.us")) throw new Error("Airbnb Management WhatsApp destination must be a group.");
-  const cleanersChatId = String(env.AIRBNB_WHATSAPP_CHAT_ID ?? "").trim();
-  if (cleanersChatId && cleanersChatId === chatId) {
-    throw new Error("Airbnb Management alerts may not target the cleaners chat.");
-  }
+function configuration(env, chatId) {
+  const normalizedChatId = String(chatId ?? "").trim();
+  if (!normalizedChatId.endsWith("@g.us")) throw new Error("Airbnb WhatsApp destination must be a group.");
   return {
     baseUrl: required("MINCOOL_CUSTOMER_WHATSAPP_API_BASE_URL", env),
     apiKey: required("MINCOOL_CUSTOMER_WHATSAPP_API_KEY", env),
     accountId: required("AIRBNB_WHATSAPP_ACCOUNT_ID", env),
-    chatId,
+    chatId: normalizedChatId,
   };
 }
 
-async function sendText({ text, idempotencyKey, dryRun, env, fetchFn }) {
-  const { baseUrl, apiKey, accountId, chatId } = configuration(env);
+async function sendText({ chatId, text, idempotencyKey, dryRun, env, fetchFn }) {
+  const { baseUrl, apiKey, accountId, chatId: destination } = configuration(env, chatId);
   const url = new URL(
-    `/api/v1/whatsapp/accounts/${encodeURIComponent(accountId)}/chats/${encodeURIComponent(chatId)}/messages`,
+    `/api/v1/whatsapp/accounts/${encodeURIComponent(accountId)}/chats/${encodeURIComponent(destination)}/messages`,
     baseUrl,
   );
   if (dryRun) url.searchParams.set("dry_run", "true");
@@ -91,10 +87,10 @@ async function sendText({ text, idempotencyKey, dryRun, env, fetchFn }) {
   };
 }
 
-async function readMessages({ env, fetchFn }) {
-  const { baseUrl, apiKey, accountId, chatId } = configuration(env);
+async function readMessages({ chatId, env, fetchFn }) {
+  const { baseUrl, apiKey, accountId, chatId: destination } = configuration(env, chatId);
   const url = new URL(
-    `/api/v1/whatsapp/accounts/${encodeURIComponent(accountId)}/chats/${encodeURIComponent(chatId)}/messages?limit=30`,
+    `/api/v1/whatsapp/accounts/${encodeURIComponent(accountId)}/chats/${encodeURIComponent(destination)}/messages?limit=30`,
     baseUrl,
   );
   const response = await fetchFn(url, {
@@ -148,17 +144,41 @@ export async function sendVerifiedManagementMessage({
   fetchFn = fetch,
   waitFn = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
 }) {
+  const chatId = required("AIRBNB_MANAGEMENT_WHATSAPP_CHAT_ID", env);
+  const cleanersChatId = String(env.AIRBNB_WHATSAPP_CHAT_ID ?? "").trim();
+  if (cleanersChatId && cleanersChatId === chatId) {
+    throw new Error("Airbnb Management alerts may not target the cleaners chat.");
+  }
+  return sendVerifiedWhatsAppGroupMessage({
+    chatId,
+    text,
+    idempotencyKey,
+    env,
+    fetchFn,
+    waitFn,
+  });
+}
+
+export async function sendVerifiedWhatsAppGroupMessage({
+  chatId,
+  text,
+  idempotencyKey,
+  env = process.env,
+  fetchFn = fetch,
+  waitFn = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+}) {
   const message = String(text ?? "").trim();
-  if (!message) throw new Error("Management alert text is empty.");
-  if (!String(idempotencyKey ?? "").trim()) throw new Error("Management alert idempotency key is empty.");
-  const dryRun = await sendText({ text: message, idempotencyKey, dryRun: true, env, fetchFn });
-  const messagesBefore = await readMessages({ env, fetchFn });
+  if (!message) throw new Error("WhatsApp group message text is empty.");
+  if (!String(idempotencyKey ?? "").trim()) throw new Error("WhatsApp group message idempotency key is empty.");
+  const destination = String(chatId ?? "").trim();
+  const dryRun = await sendText({ chatId: destination, text: message, idempotencyKey, dryRun: true, env, fetchFn });
+  const messagesBefore = await readMessages({ chatId: destination, env, fetchFn });
   const identitiesBefore = new Set(messagesBefore.map(messageIdentity));
-  const live = await sendText({ text: message, idempotencyKey, dryRun: false, env, fetchFn });
+  const live = await sendText({ chatId: destination, text: message, idempotencyKey, dryRun: false, env, fetchFn });
   const expected = normalizedText(message);
   const attempts = positiveInteger(env.AIRBNB_WHATSAPP_READBACK_ATTEMPTS, DEFAULT_READBACK_ATTEMPTS);
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const messages = await readMessages({ env, fetchFn });
+    const messages = await readMessages({ chatId: destination, env, fetchFn });
     const found = messages.some((candidate) => {
       if (candidate.from_me !== true || normalizedText(candidate.text) !== expected) return false;
       const candidateId = providerMessageId(candidate);
@@ -175,5 +195,5 @@ export async function sendVerifiedManagementMessage({
     }
     if (attempt < attempts) await waitFn(500 * attempt);
   }
-  throw new Error("WhatsApp Management alert was not found in readback.");
+  throw new Error("WhatsApp group message was not found in readback.");
 }

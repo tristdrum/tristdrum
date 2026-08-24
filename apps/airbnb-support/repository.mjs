@@ -63,13 +63,50 @@ export async function ingestConversation(sql, { householdId, email, parsed }) {
         ${latestGuestAt}, ${latestHostAt}, ${parsed.sourceFingerprint}
       )
       on conflict (household_id, canonical_mailbox, provider_thread_id)
-      do update set property_id = coalesce(excluded.property_id, airbnb.guest_threads.property_id),
-                    guest_display_name = coalesce(excluded.guest_display_name, airbnb.guest_threads.guest_display_name),
-                    status = excluded.status,
+      do update set property_id = case
+                      when greatest(
+                        coalesce(excluded.last_guest_at, '-infinity'::timestamptz),
+                        coalesce(excluded.last_host_at, '-infinity'::timestamptz)
+                      ) >= greatest(
+                        coalesce(airbnb.guest_threads.last_guest_at, '-infinity'::timestamptz),
+                        coalesce(airbnb.guest_threads.last_host_at, '-infinity'::timestamptz)
+                      ) then coalesce(excluded.property_id, airbnb.guest_threads.property_id)
+                      else airbnb.guest_threads.property_id
+                    end,
+                    guest_display_name = case
+                      when greatest(
+                        coalesce(excluded.last_guest_at, '-infinity'::timestamptz),
+                        coalesce(excluded.last_host_at, '-infinity'::timestamptz)
+                      ) >= greatest(
+                        coalesce(airbnb.guest_threads.last_guest_at, '-infinity'::timestamptz),
+                        coalesce(airbnb.guest_threads.last_host_at, '-infinity'::timestamptz)
+                      ) then coalesce(excluded.guest_display_name, airbnb.guest_threads.guest_display_name)
+                      else airbnb.guest_threads.guest_display_name
+                    end,
+                    status = case
+                      when greatest(
+                        coalesce(excluded.last_guest_at, '-infinity'::timestamptz),
+                        coalesce(excluded.last_host_at, '-infinity'::timestamptz)
+                      ) >= greatest(
+                        coalesce(airbnb.guest_threads.last_guest_at, '-infinity'::timestamptz),
+                        coalesce(airbnb.guest_threads.last_host_at, '-infinity'::timestamptz)
+                      ) then excluded.status
+                      else airbnb.guest_threads.status
+                    end,
                     last_guest_at = greatest(airbnb.guest_threads.last_guest_at, excluded.last_guest_at),
                     last_host_at = greatest(airbnb.guest_threads.last_host_at, excluded.last_host_at),
-                    source_fingerprint = excluded.source_fingerprint
-      returning id, status
+                    source_fingerprint = case
+                      when greatest(
+                        coalesce(excluded.last_guest_at, '-infinity'::timestamptz),
+                        coalesce(excluded.last_host_at, '-infinity'::timestamptz)
+                      ) >= greatest(
+                        coalesce(airbnb.guest_threads.last_guest_at, '-infinity'::timestamptz),
+                        coalesce(airbnb.guest_threads.last_host_at, '-infinity'::timestamptz)
+                      ) then excluded.source_fingerprint
+                      else airbnb.guest_threads.source_fingerprint
+                    end
+      returning id, status, property_id, guest_display_name,
+                last_guest_at, last_host_at, source_fingerprint
     `;
     const thread = threadRows[0];
     for (const entry of parsed.entries) {
@@ -86,7 +123,11 @@ export async function ingestConversation(sql, { householdId, email, parsed }) {
         on conflict (household_id, provider_message_id) do nothing
       `;
     }
-    if (latest.direction === "host") {
+    const databaseLatestDirection = (
+      thread.lastHostAt
+      && (!thread.lastGuestAt || new Date(thread.lastHostAt) >= new Date(thread.lastGuestAt))
+    ) ? "host" : "guest";
+    if (databaseLatestDirection === "host") {
       await transaction`
         update airbnb.reply_deliveries
         set status = 'handled_by_human',
@@ -109,7 +150,7 @@ export async function ingestConversation(sql, { householdId, email, parsed }) {
       threadId: thread.id,
       providerThreadId: parsed.providerThreadId,
       status: thread.status,
-      latestDirection: latest.direction,
+      latestDirection: databaseLatestDirection,
       evidenceId: evidenceRows[0].id,
       propertyId: propertyRows[0]?.id ?? null,
     };
@@ -157,6 +198,8 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8 }) {
     select
       thread.id,
       thread.provider_thread_id,
+      thread.property_id,
+      thread.reservation_id,
       thread.guest_display_name,
       thread.source_fingerprint,
       thread.last_guest_at,
@@ -165,7 +208,14 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8 }) {
       existing.classification as existing_classification,
       existing.draft_text as existing_draft,
       latest.body_normalized as guest_message,
-      latest.provider_sent_at as latest_event_at
+      latest.provider_sent_at as latest_event_at,
+      conversation.stay_label,
+      active_time_request.request_type as active_time_request_type,
+      active_time_request.stay_date as active_time_request_stay_date,
+      active_time_request.effective_time as active_time_request_effective_time,
+      active_time_request.status as active_time_request_status,
+      active_time_request.ready_at as active_time_request_ready_at,
+      recent_context.messages as conversation_context
     from airbnb.guest_threads thread
     join lateral (
       select message.body_normalized, message.provider_sent_at
@@ -176,6 +226,41 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8 }) {
       order by message.provider_sent_at desc
       limit 1
     ) latest on true
+    left join lateral (
+      select evidence.normalized_payload->>'stayLabel' as stay_label
+      from airbnb.evidence evidence
+      where evidence.household_id = thread.household_id
+        and evidence.mailbox_scope = 'tristan'
+        and evidence.evidence_kind = 'conversation'
+        and evidence.provider_thread_id = thread.provider_thread_id
+      order by evidence.occurred_at desc
+      limit 1
+    ) conversation on true
+    left join lateral (
+      select request.request_type, request.stay_date, request.effective_time,
+             request.status, request.ready_at
+      from airbnb.guest_time_requests request
+      where request.household_id = thread.household_id
+        and request.thread_id = thread.id
+        and request.status not in ('completed', 'cancelled')
+      order by request.created_at desc
+      limit 1
+    ) active_time_request on true
+    left join lateral (
+      select jsonb_agg(jsonb_build_object(
+        'direction', context_message.direction,
+        'text', context_message.body_normalized,
+        'occurredAt', context_message.provider_sent_at
+      ) order by context_message.provider_sent_at) as messages
+      from (
+        select message.direction, message.body_normalized, message.provider_sent_at
+        from airbnb.guest_messages message
+        where message.household_id = thread.household_id
+          and message.thread_id = thread.id
+        order by message.provider_sent_at desc
+        limit 8
+      ) context_message
+    ) recent_context on true
     left join airbnb.properties property
       on property.household_id = thread.household_id
      and property.id = thread.property_id
@@ -201,6 +286,14 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8 }) {
     existingClassification: row.existingClassification
       ? { ...row.existingClassification, draft: row.existingDraft }
       : null,
+    activeTimeRequest: row.activeTimeRequestType ? {
+      requestType: row.activeTimeRequestType,
+      stayDate: String(row.activeTimeRequestStayDate),
+      effectiveTime: String(row.activeTimeRequestEffectiveTime).slice(0, 5),
+      status: row.activeTimeRequestStatus,
+      readyAt: row.activeTimeRequestReadyAt ?? null,
+    } : null,
+    conversationContext: row.conversationContext ?? [],
   }));
 }
 
@@ -291,6 +384,279 @@ export async function storeSupportDraft(sql, {
 
 export function storeShadowDraft(sql, options) {
   return storeSupportDraft(sql, { ...options, shadowMode: true, automaticallyApprove: false });
+}
+
+export async function upsertGuestTimeRequest(sql, {
+  householdId,
+  candidate,
+  request,
+  now,
+}) {
+  const rows = await sql`
+    with superseded as (
+      update airbnb.guest_time_requests
+      set status = 'cancelled',
+          details = details || ${sql.json({ supersededByFingerprint: candidate.sourceFingerprint })}
+      where household_id = ${householdId}
+        and thread_id = ${candidate.id}
+        and request_type = ${request.requestType}
+        and source_fingerprint <> ${candidate.sourceFingerprint}
+        and status not in ('completed', 'cancelled')
+      returning id
+    ), upserted as (
+      insert into airbnb.guest_time_requests (
+      household_id, thread_id, property_id, reservation_id, source_fingerprint,
+      request_type, stay_date, requested_time, effective_time, cleaner_note_en,
+      cleaner_note_xh, readiness_check_at, details
+      ) values (
+        ${householdId}, ${candidate.id}, ${candidate.propertyId}, ${candidate.reservationId ?? null},
+        ${candidate.sourceFingerprint}, ${request.requestType}, ${request.stayDate},
+        ${request.requestedTime}, ${request.effectiveTime}, ${request.cleanerNoteEn},
+        ${request.cleanerNoteXh}, ${request.readinessCheckAt ?? null},
+        ${sql.json({
+          listingName: candidate.listingName,
+          guestName: candidate.guestDisplayName,
+          unitNumber: request.unitNumber,
+          action: request.action,
+        })}::jsonb || jsonb_build_object(
+          'replacesPrevious', exists(select 1 from superseded)
+        )
+      )
+      on conflict (household_id, thread_id, source_fingerprint, request_type)
+      do update set requested_time = excluded.requested_time,
+                    effective_time = excluded.effective_time,
+                    cleaner_note_en = excluded.cleaner_note_en,
+                    cleaner_note_xh = excluded.cleaner_note_xh,
+                    readiness_check_at = excluded.readiness_check_at,
+                    details = excluded.details || jsonb_build_object(
+                      'replacesPrevious',
+                      coalesce((airbnb.guest_time_requests.details->>'replacesPrevious')::boolean, false)
+                        or coalesce((excluded.details->>'replacesPrevious')::boolean, false)
+                    ),
+                    updated_at = ${now}
+      returning id, status, cleaners_notified_at, readiness_check_at,
+                coalesce((details->>'replacesPrevious')::boolean, false) as replaces_previous
+    )
+    select upserted.*, (select count(*)::integer from superseded) as superseded_count
+    from upserted
+  `;
+  return rows[0];
+}
+
+export async function loadActiveGuestTimeRequestsForReplacement(sql, {
+  householdId,
+  candidate,
+  requestType,
+}) {
+  return sql`
+    select request.id, request.stay_date, request.request_type, request.effective_time,
+           property.unit_number
+    from airbnb.guest_time_requests request
+    join airbnb.properties property
+      on property.household_id = request.household_id
+     and property.id = request.property_id
+    where request.household_id = ${householdId}
+      and request.thread_id = ${candidate.id}
+      and request.request_type = ${requestType}
+      and request.source_fingerprint <> ${candidate.sourceFingerprint}
+      and request.status not in ('completed', 'cancelled')
+    order by request.created_at
+  `;
+}
+
+export async function cancelActiveGuestTimeRequests(sql, {
+  householdId,
+  candidate,
+  requestType,
+  now,
+}) {
+  return sql`
+    update airbnb.guest_time_requests
+    set status = 'cancelled',
+        details = details || ${sql.json({ withdrawnByFingerprint: candidate.sourceFingerprint })},
+        updated_at = ${now}
+    where household_id = ${householdId}
+      and thread_id = ${candidate.id}
+      and request_type = ${requestType}
+      and source_fingerprint <> ${candidate.sourceFingerprint}
+      and status not in ('completed', 'cancelled')
+    returning id
+  `;
+}
+
+export async function markGuestTimeRequestCleanersNotified(sql, {
+  householdId,
+  requestId,
+  providerMessageId = null,
+  now,
+}) {
+  const rows = await sql`
+    update airbnb.guest_time_requests
+    set status = 'cleaners_notified',
+        cleaners_notified_at = coalesce(cleaners_notified_at, ${now}),
+        cleaner_provider_message_id = coalesce(cleaner_provider_message_id, ${providerMessageId})
+    where household_id = ${householdId}
+      and id = ${requestId}
+      and status in ('accepted', 'cleaners_notified')
+    returning id, status, cleaners_notified_at
+  `;
+  return rows[0] ?? null;
+}
+
+export async function loadDueReadinessRequests(sql, { householdId, now, limit = 8 }) {
+  return sql`
+    select request.id, request.thread_id, request.property_id, request.source_fingerprint,
+           request.stay_date, request.effective_time, request.readiness_check_at,
+           request.details, property.unit_number, property.common_name,
+           thread.provider_thread_id
+    from airbnb.guest_time_requests request
+    join airbnb.properties property
+      on property.household_id = request.household_id
+     and property.id = request.property_id
+    join airbnb.guest_threads thread
+      on thread.household_id = request.household_id
+     and thread.id = request.thread_id
+    where request.household_id = ${householdId}
+      and request.request_type = 'early_checkin'
+      and request.status = 'cleaners_notified'
+      and request.stay_date = (${now} at time zone 'Africa/Johannesburg')::date
+      and request.readiness_check_at <= ${now}
+      and request.readiness_prompted_at is null
+    order by request.readiness_check_at
+    limit ${limit}
+  `;
+}
+
+export async function markGuestTimeRequestReadinessPrompted(sql, {
+  householdId,
+  requestId,
+  now,
+}) {
+  const rows = await sql`
+    update airbnb.guest_time_requests
+    set status = 'awaiting_ready', readiness_prompted_at = ${now}
+    where household_id = ${householdId}
+      and id = ${requestId}
+      and status = 'cleaners_notified'
+      and readiness_prompted_at is null
+    returning id, status, readiness_prompted_at
+  `;
+  return rows[0] ?? null;
+}
+
+export async function loadAwaitingReadyRequests(sql, { householdId, now, limit = 8 }) {
+  return sql`
+    select request.id, request.thread_id, request.source_fingerprint, request.stay_date,
+           request.effective_time, request.readiness_prompted_at, request.details,
+           property.unit_number, property.common_name
+    from airbnb.guest_time_requests request
+    join airbnb.properties property
+      on property.household_id = request.household_id
+     and property.id = request.property_id
+    where request.household_id = ${householdId}
+      and request.request_type = 'early_checkin'
+      and request.status = 'awaiting_ready'
+      and request.stay_date = (${now} at time zone 'Africa/Johannesburg')::date
+    order by request.readiness_prompted_at
+    limit ${limit}
+  `;
+}
+
+export async function markGuestTimeRequestReady(sql, { householdId, requestId, now }) {
+  const rows = await sql`
+    update airbnb.guest_time_requests
+    set status = 'ready', ready_at = ${now}
+    where household_id = ${householdId}
+      and id = ${requestId}
+      and status = 'awaiting_ready'
+    returning id, thread_id, source_fingerprint, stay_date, effective_time
+  `;
+  return rows[0] ?? null;
+}
+
+export async function loadReadyTimeRequests(sql, { householdId, now, limit = 8 }) {
+  return sql`
+    select request.id, request.thread_id, request.stay_date, request.effective_time
+    from airbnb.guest_time_requests request
+    where request.household_id = ${householdId}
+      and request.status = 'ready'
+      and request.stay_date = (${now} at time zone 'Africa/Johannesburg')::date
+      and (
+        request.stay_date::text || ' ' || request.effective_time::text
+      )::timestamp at time zone 'Africa/Johannesburg' <= ${now}
+    order by request.stay_date, request.effective_time
+    limit ${limit}
+  `;
+}
+
+export async function storeOperationalGuestReply(sql, {
+  householdId,
+  requestId,
+  threadId,
+  draft,
+  now,
+}) {
+  const threadRows = await sql`
+    select source_fingerprint, last_guest_at
+    from airbnb.guest_threads
+    where household_id = ${householdId} and id = ${threadId}
+    limit 1
+  `;
+  const thread = threadRows[0];
+  if (!thread?.sourceFingerprint || !thread?.lastGuestAt) return null;
+  const idempotencyKey = `airbnb-support:time-ready:${requestId}`;
+  const outboundMessageId = `<${contentFingerprint(`${householdId}:${idempotencyKey}`).slice(0, 32)}@airbnb.tristdrum.com>`;
+  const rows = await sql`
+    insert into airbnb.reply_deliveries (
+      household_id, thread_id, source_fingerprint, source_last_event_at, topic,
+      risk_tier, classification, draft_text, status, idempotency_key, outbound_message_id
+    ) values (
+      ${householdId}, ${threadId}, ${thread.sourceFingerprint}, ${thread.lastGuestAt},
+      'early_check_in_ready', 'low',
+      ${sql.json({
+        topic: 'early_check_in_ready',
+        riskTier: 'low',
+        confidence: 1,
+        factsVerified: true,
+        messageWhitelisted: true,
+        replyNeeded: true,
+        summary: 'The cleaners explicitly confirmed that the studio is ready.',
+        operationalRequestId: requestId,
+      })},
+      ${draft}, 'approved', ${idempotencyKey}, ${outboundMessageId}
+    )
+    on conflict (household_id, idempotency_key) do nothing
+    returning id, status
+  `;
+  return rows[0] ?? null;
+}
+
+export async function markGuestTimeRequestGuestNotified(sql, { householdId, requestId, now }) {
+  const rows = await sql`
+    update airbnb.guest_time_requests
+    set status = 'guest_notified', guest_notified_at = ${now}
+    where household_id = ${householdId}
+      and id = ${requestId}
+      and status = 'ready'
+    returning id, status
+  `;
+  return rows[0] ?? null;
+}
+
+export async function reconcileGuestTimeRequestNotifications(sql, { householdId, now }) {
+  const rows = await sql`
+    update airbnb.guest_time_requests request
+    set status = 'guest_notified', guest_notified_at = ${now}
+    from airbnb.reply_deliveries delivery
+    where request.household_id = ${householdId}
+      and request.status = 'ready'
+      and delivery.household_id = request.household_id
+      and delivery.thread_id = request.thread_id
+      and delivery.status = 'sent'
+      and delivery.classification->>'operationalRequestId' = request.id::text
+    returning request.id, request.status
+  `;
+  return rows;
 }
 
 const STALE_SENDING_AFTER_MS = 15 * 60 * 1000;

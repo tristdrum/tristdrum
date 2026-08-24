@@ -18,6 +18,8 @@ export function supportRuntimeCapabilities(env = process.env) {
     && janeMailboxConfigured;
   const managementAlertsEnabled = externalWritesEnabled
     && enabled(env.AIRBNB_SUPPORT_MANAGEMENT_ALERTS_ENABLED);
+  const timeRequestsEnabled = autonomousRepliesEnabled
+    && enabled(env.AIRBNB_SUPPORT_TIME_REQUESTS_ENABLED);
   return {
     mode: replyDeliveryEnabled || managementAlertsEnabled ? "live" : "shadow",
     externalWritesRequested,
@@ -27,6 +29,7 @@ export function supportRuntimeCapabilities(env = process.env) {
     replyDeliveryEnabled,
     autonomousRepliesEnabled,
     managementAlertsEnabled,
+    timeRequestsEnabled,
   };
 }
 

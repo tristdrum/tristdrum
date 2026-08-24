@@ -62,6 +62,7 @@ export function createAirbnbSupportServer({
           replyDeliveryEnabled: capabilities.replyDeliveryEnabled,
           autonomousRepliesEnabled: capabilities.autonomousRepliesEnabled,
           managementAlertsEnabled: capabilities.managementAlertsEnabled,
+          timeRequestsEnabled: capabilities.timeRequestsEnabled,
         });
         return;
       }

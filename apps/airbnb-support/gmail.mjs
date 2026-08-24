@@ -2,7 +2,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { htmlToText } from "html-to-text";
 import nodemailer from "nodemailer";
-import { trustedAirbnbSender } from "@tristdrum/airbnb-core";
+import { isAirbnbConversationSubject, trustedAirbnbSender } from "@tristdrum/airbnb-core";
 
 const DEFAULT_FOLDER = "[Gmail]/All Mail";
 const DEFAULT_CONNECTION_TIMEOUT_MS = 15_000;
@@ -85,6 +85,8 @@ function imapOptions(mailboxScope, env) {
 export async function collectConversationMessages({
   since,
   maxRead = 500,
+  afterUid = 0,
+  oldestFirst = false,
   mailboxScope = "tristan",
   env = process.env,
   createClient = (options) => new ImapFlow(options),
@@ -107,19 +109,19 @@ export async function collectConversationMessages({
       ));
       const expectedSender = mailboxScope === "tristan" ? "express@airbnb.com" : "airbnb.com";
       const uids = await client.search({ since, from: expectedSender }, { uid: true });
-      if (!uids.length) return { messages: [], envelopesFound: 0 };
+      if (!uids.length) return { messages: [], envelopesFound: 0, lastUid: Number(afterUid) };
       const candidates = [];
       for await (const message of client.fetch(uids, { envelope: true, internalDate: true, uid: true }, { uid: true })) {
         const sender = String(message.envelope?.from?.[0]?.address ?? "").toLowerCase();
         const subject = message.envelope?.subject ?? "";
-        if (!trustedAirbnbSender(sender) || !/^RE:\s*Reservation for /i.test(subject)) continue;
+        if (!trustedAirbnbSender(sender) || !isAirbnbConversationSubject(subject)) continue;
         if (mailboxScope === "tristan" && sender !== "express@airbnb.com") continue;
+        if (Number(message.uid) <= Number(afterUid)) continue;
         candidates.push({ uid: Number(message.uid), occurredAt: message.internalDate?.toISOString?.() ?? null, from: sender, subject });
       }
-      const selected = candidates
-        .sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt))
-        .slice(-maxRead);
-      if (!selected.length) return { messages: [], envelopesFound: 0 };
+      const ordered = candidates.sort((a, b) => a.uid - b.uid);
+      const selected = oldestFirst ? ordered.slice(0, maxRead) : ordered.slice(-maxRead);
+      if (!selected.length) return { messages: [], envelopesFound: 0, lastUid: Number(afterUid) };
       const selectedByUid = new Map(selected.map((envelope) => [envelope.uid, envelope]));
       const parsedByUid = new Map();
       for await (const message of client.fetch(
@@ -145,6 +147,7 @@ export async function collectConversationMessages({
       return {
         messages: selected.map((envelope) => parsedByUid.get(envelope.uid)).filter(Boolean),
         envelopesFound: selected.length,
+        lastUid: selected.at(-1)?.uid ?? Number(afterUid),
       };
     })();
     const deadline = new Promise((_, reject) => {
