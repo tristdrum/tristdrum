@@ -53,16 +53,45 @@ whether one or both are pending.
 
 - Reviewed application source commit:
   `61770444fbc074bb2abc15a2a2059e8cc07933c1`.
+- Expected operational-hardening migration SHA-256:
+  `def319397044e22b28304e22c5cf0de187929edaeb91d47cb0aaae048a70bc4a`.
 - Expected follow-up migration SHA-256:
   `3052bff38e55e881e980c79654f1c352fec233d64a6d64119c8cdf6732da54b7`.
+
+## Read-only cutover preflight
+
+Verified at 2026-08-24 07:26 SAST without changing production:
+
+- The official personal Supabase CLI credential is owner-only (`0600`) and,
+  with ambient `SUPABASE_ACCESS_TOKEN` removed, lists linked project
+  `akvlarrmhlbnuvnfpvic` as `ACTIVE_HEALTHY`.
+- `supabase migration list --linked` reports an exact two-migration pending
+  suffix: `20260823215943_airbnb_operational_hardening.sql`, followed by
+  `20260824012012_airbnb_release_safety_followup.sql`. All preceding local and
+  remote versions match.
+- `cron.job` contains eight active cleaner jobs, four active stock jobs, and the
+  inactive `airbnb-support-shadow-poll-5m` job. Every scheduled job that has
+  fired most recently reports `succeeded`; the weekly stock review has not yet
+  reached its first trigger.
+- `net.http_request_queue` contains no pending cleaner, stock, support, or other
+  requests.
+- The latest cleaner receipt for 24 August is `duplicate_skipped`, with clean
+  confidence, successful WhatsApp dry-run, exact chat readback, and synced
+  database state. The latest stock observation and Management runs succeeded,
+  while order placement remained disabled. The most recent support run was
+  shadow-only with zero replies and zero Management notifications.
+- `/Users/tristdrum/.local/bin/fly-personal auth whoami` still fails closed with
+  `personal Fly credential is unavailable in Keychain`. No Fly status, stop,
+  deploy, Supabase pause, or migration command was attempted after that failure.
 
 ## Open gates
 
 - The personal Fly helper must pass `auth whoami` and read-only status for all
   three apps before deployment. Its Keychain credential was unavailable during
   the 2026-08-24 preflight, so no deploy was attempted.
-- The linked Supabase CLI must authenticate and show only the expected pending
-  migration before `db push` is allowed.
+- The linked personal Supabase CLI gate is cleared for read-only work. Do not
+  run `db push` until the Fly helper gate clears, the twelve active jobs are
+  paused, all three personal machines are stopped, and quiescence is rechecked.
 - The native Supabase connector did not expose the linked project
   `akvlarrmhlbnuvnfpvic` during the 2026-08-24 preflight. It is not an
   authorized substitute unless that exact project becomes visible and its
