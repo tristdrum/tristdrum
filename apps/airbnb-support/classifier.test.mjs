@@ -3,7 +3,7 @@ import test from "node:test";
 import { AUTOMATED_REPLY_FOOTER } from "@tristdrum/airbnb-core";
 import { classifyGuestMessage } from "./classifier.mjs";
 
-test("classifier uses strict, non-stored Responses API output and adds the footer", async () => {
+test("classifier uses strict, non-stored Responses API output without an AI footer", async () => {
   let requestBody;
   const result = await classifyGuestMessage({
     guestMessage: "What time is checkout?",
@@ -40,7 +40,7 @@ test("classifier uses strict, non-stored Responses API output and adds the foote
   assert.deepEqual(input.verifiedPropertyFacts, { checkOutTime: "10:00" });
   assert.equal(result.autoReply, true);
   assert.equal(result.messageWhitelisted, true);
-  assert.ok(result.draft.endsWith(AUTOMATED_REPLY_FOOTER));
+  assert.doesNotMatch(result.draft, new RegExp(AUTOMATED_REPLY_FOOTER));
 });
 
 test("model confidence cannot make an unconfigured Wi-Fi fact safe", async () => {
@@ -94,6 +94,34 @@ test("verified templates replace model prose before autonomous approval", async 
   assert.match(result.draft, /^Hello! Thank you for your message\./);
   assert.doesNotMatch(result.draft, /refund|dates are changed/i);
   assert.equal(result.deterministicGuard, "verified_template");
+});
+
+test("clear natural phrasing may use a verified fact without an exact template match", async () => {
+  const result = await classifyGuestMessage({
+    guestMessage: "Hey there, we’re driving in and would love to know where the car should go.",
+    listingName: "Bougainvillea Courtyard Studio",
+    facts: { parking: "Please park in the marked bay for Unit 1." },
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: async () => ({
+      ok: true,
+      async json() {
+        return { output_text: JSON.stringify({
+          topic: "parking",
+          riskTier: "low",
+          confidence: 0.98,
+          factsVerified: true,
+          replyNeeded: true,
+          summary: "The guest asks where to park.",
+          draft: "You can park in the Unit 1 bay.",
+          canReplyAutonomously: true,
+          managementAlertNeeded: false,
+        }) };
+      },
+    }),
+  });
+  assert.equal(result.autoReply, true);
+  assert.equal(result.deterministicGuard, "verified_template");
+  assert.equal(result.draft, "Parking: Please park in the marked bay for Unit 1.");
 });
 
 test("high-risk guest language forces human review despite a low-risk model label", async () => {
@@ -273,7 +301,30 @@ test("approved early check-in policy is deterministic and does not call the mode
   assert.equal(result.operationalRequest.effectiveTime, "14:00");
   assert.equal(result.operationalRequest.createsOperationalRequest, true);
   assert.match(result.draft, /cannot be guaranteed/i);
-  assert.ok(result.draft.endsWith(AUTOMATED_REPLY_FOOTER));
+  assert.doesNotMatch(result.draft, new RegExp(AUTOMATED_REPLY_FOOTER));
+});
+
+test("the Anele late-booking arrival is answered immediately and escalated", async () => {
+  const result = await classifyGuestMessage({
+    guestMessage: "Hi Jane we are outside .Please help with parking",
+    listingName: "Bougainvillea Courtyard Studio",
+    facts: { checkInTime: "15:00", parking: "Please use the Unit 1 parking bay." },
+    stayLabel: "AUG 25 – 26",
+    latestEventAt: "2026-08-24T18:34:00.000Z",
+    conversationContext: [{
+      direction: "host",
+      text: "Confirming the dates of your stay: 25 Aug 2026 15:00 to 26 Aug 2026 10:00",
+    }],
+    env: {},
+    fetchFn: async () => { throw new Error("model must not be called"); },
+  });
+  assert.equal(result.topic, "urgent_arrival");
+  assert.equal(result.autoReply, true);
+  assert.equal(result.alertManagement, true);
+  assert.equal(result.deterministicGuard, "urgent_arrival_policy");
+  assert.match(result.draft, /reservation starts on 25 August/i);
+  assert.match(result.draft, /does not cover tonight/i);
+  assert.doesNotMatch(result.draft, /password|code|Automated reply/i);
 });
 
 test("a mixed early-check-in and complaint message stays human-reviewed", async () => {

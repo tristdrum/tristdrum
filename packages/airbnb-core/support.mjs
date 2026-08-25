@@ -14,9 +14,18 @@ export const AUTO_REPLY_TOPICS = Object.freeze(new Set([
   "early_check_in",
   "late_check_out",
   "early_check_in_follow_up",
+  "urgent_arrival",
 ]));
 
 const TIME_REQUEST_PATTERN = /\b(?:early check[ -]?in|late check[ -]?out)\b/i;
+const URGENT_ARRIVAL_PATTERN = /\b(?:(?:we(?:'re| are)?|i(?:'m| am)?)\s+(?:outside|here|at (?:the )?(?:gate|property|studio|house)|(?:have )?arrived)|(?:we|i) (?:just )?arrived|outside (?:the )?(?:gate|property|studio|house)|can(?:not|'t) get in|locked out)\b/i;
+const URGENT_ARRIVAL_MIXED_PATTERN = /\b(?:refund|cancel|payment|charge|discount|unsafe|danger|emergency|injur|police|dirty|broken|damage|not working|change (?:my|the) dates?)\b/i;
+const MONTHS = Object.freeze(new Map([
+  ["jan", 1], ["january", 1], ["feb", 2], ["february", 2], ["mar", 3], ["march", 3],
+  ["apr", 4], ["april", 4], ["may", 5], ["jun", 6], ["june", 6], ["jul", 7], ["july", 7],
+  ["aug", 8], ["august", 8], ["sep", 9], ["sept", 9], ["september", 9], ["oct", 10],
+  ["october", 10], ["nov", 11], ["november", 11], ["dec", 12], ["december", 12],
+]));
 
 const NON_TIME_HUMAN_REVIEW_PATTERNS = Object.freeze([
   /\b(?:book|booking|reservation request|accept|decline|availability|available)\b/i,
@@ -99,6 +108,98 @@ function clockLabel(minutes) {
   const hours = Math.floor(minutes / 60);
   const remainder = minutes % 60;
   return `${String(hours).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function zonedParts(value) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Johannesburg",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(value));
+  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
+}
+
+function isoDate(year, month, day) {
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function contextualCheckIn({ stayLabel, conversationContext, observedAt }) {
+  const contextText = (conversationContext ?? []).map((message) => message?.text ?? "").join("\n");
+  const explicit = /\b(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})\s+(\d{1,2}:\d{2})\b/i.exec(contextText);
+  if (explicit) {
+    const month = MONTHS.get(explicit[2].toLowerCase());
+    if (month) return { date: isoDate(Number(explicit[3]), month, Number(explicit[1])), time: explicit[4] };
+  }
+
+  const label = /\b([A-Za-z]{3,9})\s+(\d{1,2})\b/i.exec(String(stayLabel ?? ""));
+  if (!label) return null;
+  const month = MONTHS.get(label[1].toLowerCase());
+  if (!month) return null;
+  const observed = zonedParts(observedAt);
+  let year = Number(observed.year);
+  const observedMonth = Number(observed.month);
+  if (month === 1 && observedMonth === 12) year += 1;
+  if (month === 12 && observedMonth === 1) year -= 1;
+  return { date: isoDate(year, month, Number(label[2])), time: null };
+}
+
+function humanDate(value) {
+  const [year, month, day] = String(value).split("-").map(Number);
+  return new Intl.DateTimeFormat("en-ZA", {
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, day)));
+}
+
+export function supportUrgentArrivalDecision({
+  message,
+  stayLabel = null,
+  conversationContext = [],
+  observedAt = new Date(),
+  facts = {},
+} = {}) {
+  const text = String(message ?? "").normalize("NFKC").trim();
+  if (!URGENT_ARRIVAL_PATTERN.test(text) || URGENT_ARRIVAL_MIXED_PATTERN.test(text)) return null;
+
+  const observed = zonedParts(observedAt);
+  const observedDate = isoDate(observed.year, observed.month, observed.day);
+  const observedTime = `${observed.hour}:${observed.minute}`;
+  const checkIn = contextualCheckIn({ stayLabel, conversationContext, observedAt });
+  const standardTime = factText(facts.checkInTime) ?? checkIn?.time ?? "15:00";
+  const alertManagement = true;
+
+  if (checkIn?.date && observedDate < checkIn.date) {
+    return {
+      topic: "urgent_arrival",
+      action: "booking_starts_later",
+      reply: `Hi, we’ve seen your message. Your reservation starts on ${humanDate(checkIn.date)}, with check-in from ${standardTime}, so it does not cover tonight. We’ve alerted the hosts now so they can help you quickly.`,
+      alertManagement,
+    };
+  }
+
+  if (checkIn?.date === observedDate && observedTime < standardTime) {
+    return {
+      topic: "urgent_arrival",
+      action: "before_check_in",
+      reply: `Hi, we’ve seen your message. Check-in is from ${standardTime}. We’ve alerted the hosts now so they can confirm whether the studio is ready earlier.`,
+      alertManagement,
+    };
+  }
+
+  const parking = /\bpark(?:ing)?\b/i.test(text) ? factText(facts.parking) : null;
+  return {
+    topic: "urgent_arrival",
+    action: "arrival_help",
+    reply: parking
+      ? `Hi, we’ve seen your message. ${parking} We’ve alerted the hosts too in case you need more help getting in.`
+      : "Hi, we’ve seen your message and alerted the hosts now so we can help you get in quickly.",
+    alertManagement,
+  };
 }
 
 function requestSegment(message, requestType) {
@@ -374,15 +475,18 @@ export function supportDisposition(classification) {
     confidence,
     autoReply,
     status: autoReply ? "approved_for_guard" : "needs_human",
-    alertManagement: !autoReply,
+    alertManagement: classification?.alertManagement === true || !autoReply,
   };
 }
 
-export function withAutomatedReplyFooter(text) {
+export function withoutAutomatedReplyFooter(text) {
   const body = String(text ?? "").trim();
   if (!body) throw new Error("Reply text is empty.");
-  if (body.endsWith(AUTOMATED_REPLY_FOOTER)) return body;
-  return `${body}\n\n${AUTOMATED_REPLY_FOOTER}`;
+  return body.replace(new RegExp(`\\s*${AUTOMATED_REPLY_FOOTER.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\s*$`), "").trim();
+}
+
+export function withAutomatedReplyFooter(text) {
+  return withoutAutomatedReplyFooter(text);
 }
 
 export function supportEscalationStages({ latestEventAt, now = new Date() }) {

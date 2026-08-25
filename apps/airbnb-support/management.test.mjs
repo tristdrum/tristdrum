@@ -53,6 +53,16 @@ test("support Management alert is concise and does not include raw message text"
   assert.match(text, /Review: https:\/\/www\.tristdrum\.com\/dashboard\/airbnb$/);
 });
 
+test("urgent arrivals are labelled as immediate property help", () => {
+  const item = alert("urgent", "immediate");
+  item.details.topic = "urgent_arrival";
+  item.details.classificationSummary = "The guest is waiting at the property.";
+  assert.match(
+    renderSupportManagementAlert(item),
+    /^\*Airbnb guest needs help at the property\*/,
+  );
+});
+
 test("ambiguous delivery alerts ask for explicit reconciliation", () => {
   const item = alert("ambiguous", "delivery_ambiguous");
   item.details.classificationSummary = "Check Sent mail, then mark the reply sent, retry it, or cancel it.";

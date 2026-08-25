@@ -9,7 +9,7 @@ import {
   storeSupportDraft,
 } from "./repository.mjs";
 
-test("unresolved guest threads remain candidates after the initial 24 hours", async () => {
+test("candidate loading uses an explicit activation cutoff instead of a rolling age window", async () => {
   let queryText = "";
   const sql = (strings) => {
     queryText = strings.join("?");
@@ -29,10 +29,12 @@ test("unresolved guest threads remain candidates after the initial 24 hours", as
   const candidates = await loadShadowCandidates(sql, {
     householdId: "22222222-2222-4222-8222-222222222222",
     limit: 8,
+    notBefore: "2026-08-25T12:00:00.000Z",
   });
 
   assert.equal(candidates.length, 1);
-  assert.doesNotMatch(queryText, /last_guest_at\s*>=/i);
+  assert.match(queryText, /thread\.last_guest_at\s*>=/i);
+  assert.doesNotMatch(queryText, /now\(\)\s*-/i);
   assert.deepEqual(candidates[0].facts, {});
 });
 

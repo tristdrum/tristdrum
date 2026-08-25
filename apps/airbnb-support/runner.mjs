@@ -44,6 +44,18 @@ function earlierOfRecentCursor(now, cursor, initialLookbackDays) {
   return overlap > initial ? overlap : initial;
 }
 
+function optionalInstant(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const parsed = new Date(text);
+  if (!Number.isFinite(parsed.getTime())) {
+    throw Object.assign(new Error("AIRBNB_SUPPORT_AUTOMATION_NOT_BEFORE is invalid."), {
+      code: "INVALID_AUTOMATION_CUTOFF",
+    });
+  }
+  return parsed.toISOString();
+}
+
 function fallbackClassification(error) {
   return {
     topic: "unknown",
@@ -163,6 +175,7 @@ export async function runSupport({
     const candidates = await loadShadowCandidates(ownDatabase.sql, {
       householdId,
       limit: Number.parseInt(env.AIRBNB_SUPPORT_CANDIDATE_LIMIT ?? "8", 10),
+      notBefore: optionalInstant(env.AIRBNB_SUPPORT_AUTOMATION_NOT_BEFORE),
     });
     const drafts = [];
     const timeRequests = [];
@@ -174,8 +187,11 @@ export async function runSupport({
       } else try {
         classification = await classify({
           guestMessage: candidate.guestMessage,
+          guestName: candidate.guestDisplayName,
           listingName: candidate.listingName,
           facts: candidate.facts,
+          stayLabel: candidate.stayLabel,
+          latestEventAt: candidate.latestEventAt,
           activeTimeRequest: candidate.activeTimeRequest,
           conversationContext: candidate.conversationContext,
           now: startedAt,

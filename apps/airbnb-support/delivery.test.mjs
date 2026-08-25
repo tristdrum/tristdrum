@@ -109,7 +109,7 @@ test("event comparison treats a repeated identical message as a new event", () =
   }]);
 });
 
-test("stable canonical thread sends exactly once with the automated footer", async () => {
+test("stable canonical thread sends exactly once without the automated footer", async () => {
   const currentEmail = conversationEmail([{ name: "Guest Alpha", role: "Guest", text: "Hello" }]);
   const { calls, options } = harness(currentEmail);
   const result = await processDeliveryGuard(options);
@@ -117,7 +117,7 @@ test("stable canonical thread sends exactly once with the automated footer", asy
   const sends = calls.filter(([name]) => name === "send");
   assert.equal(sends.length, 1);
   assert.equal(sends[0][1].messageId, outboundMessageId);
-  assert.match(sends[0][1].text, /Automated reply on behalf of your hosts\.$/);
+  assert.equal(sends[0][1].text, "Hello, and welcome!");
   assert.deepEqual(calls.at(-1), ["sent", outboundMessageId]);
   assert.deepEqual(calls.map(([name]) => name), [
     "claim",

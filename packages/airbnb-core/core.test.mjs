@@ -23,6 +23,7 @@ import {
   supportTimeFollowUpDecision,
   supportTimeRequestIsFocused,
   supportTimeRequestDecision,
+  supportUrgentArrivalDecision,
   trustedAirbnbSender,
   withAutomatedReplyFooter,
 } from "./index.mjs";
@@ -254,10 +255,35 @@ test("support auto-reply gate is whitelist and verified-facts only", () => {
   }).autoReply, false);
 });
 
-test("automated footer is subtle, exact, and idempotent", () => {
+test("automated replies omit and strip the legacy AI footer", () => {
   const message = withAutomatedReplyFooter("The Wi-Fi details are in your check-in message.");
-  assert.ok(message.endsWith(AUTOMATED_REPLY_FOOTER));
-  assert.equal(withAutomatedReplyFooter(message), message);
+  assert.equal(message, "The Wi-Fi details are in your check-in message.");
+  assert.equal(
+    withAutomatedReplyFooter(`${message}\n\n${AUTOMATED_REPLY_FOOTER}`),
+    message,
+  );
+});
+
+test("an arrival before the booked night gets an immediate grounded reply and host alert", () => {
+  const decision = supportUrgentArrivalDecision({
+    message: "Hi Jane we are outside. Please help with parking",
+    stayLabel: "AUG 25 – 26",
+    observedAt: "2026-08-24T18:34:00.000Z",
+    facts: { checkInTime: "15:00" },
+    conversationContext: [{
+      direction: "host",
+      text: "Confirming the dates of your stay: 25 Aug 2026 15:00 to 26 Aug 2026 10:00",
+    }],
+  });
+  assert.equal(decision.action, "booking_starts_later");
+  assert.equal(decision.alertManagement, true);
+  assert.match(decision.reply, /starts on 25 August, with check-in from 15:00/i);
+  assert.match(decision.reply, /alerted the hosts/i);
+  assert.doesNotMatch(decision.reply, /password|code/i);
+  assert.equal(supportUrgentArrivalDecision({
+    message: "We are outside and the door is broken, please refund us.",
+    observedAt: "2026-08-24T18:34:00.000Z",
+  }), null);
 });
 
 test("support auto-reply templates use verified facts rather than model prose", async () => {

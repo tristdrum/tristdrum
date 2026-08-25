@@ -24,7 +24,9 @@ export function latestSupportAlerts(alerts) {
 
 export function renderSupportManagementAlert(alert, dashboardUrl = "https://www.tristdrum.com/dashboard/airbnb") {
   const stage = alert.details?.stage ?? "immediate";
-  const heading = stage === "delivery_ambiguous"
+  const heading = alert.details?.topic === "urgent_arrival"
+    ? "Airbnb guest needs help at the property"
+    : stage === "delivery_ambiguous"
     ? "Airbnb reply delivery needs confirmation"
     : stage === "overdue"
     ? "Airbnb guest reply overdue"
@@ -60,6 +62,7 @@ export async function notifySupportManagement({
   const alerts = latestSupportAlerts(await loadAlerts(sql, {
     householdId,
     limit: scanLimit,
+    notBefore: String(env.AIRBNB_SUPPORT_AUTOMATION_NOT_BEFORE ?? "").trim() || null,
   })).slice(0, limit);
   const results = [];
   for (const alert of alerts) {
