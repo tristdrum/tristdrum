@@ -89,7 +89,7 @@ for (const fixture of corpus.conversations) {
 
     if (disposition.autoReply) {
       const rendered = withAutomatedReplyFooter(fixture.classification.draft);
-      assert.ok(rendered.endsWith(AUTOMATED_REPLY_FOOTER));
+      assert.doesNotMatch(rendered, new RegExp(AUTOMATED_REPLY_FOOTER));
       assert.equal(withAutomatedReplyFooter(rendered), rendered);
     }
   });

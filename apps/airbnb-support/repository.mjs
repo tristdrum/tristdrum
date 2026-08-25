@@ -193,7 +193,7 @@ export async function ingestSupplementalConversation(sql, { householdId, email, 
   };
 }
 
-export async function loadShadowCandidates(sql, { householdId, limit = 8 }) {
+export async function loadShadowCandidates(sql, { householdId, limit = 8, notBefore = null }) {
   const rows = await sql`
     select
       thread.id,
@@ -276,6 +276,7 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8 }) {
     where thread.household_id = ${householdId}
       and thread.status in ('open', 'needs_human')
       and (thread.last_host_at is null or thread.last_host_at < thread.last_guest_at)
+      and (${notBefore}::timestamptz is null or thread.last_guest_at >= ${notBefore}::timestamptz)
       and coalesce(existing.status, 'draft') not in ('sent', 'handled_by_human', 'cancelled', 'ambiguous')
     order by (existing.classification is null) desc, thread.last_guest_at desc
     limit ${limit}
@@ -765,7 +766,7 @@ async function recordSupportAudit(transaction, {
   `;
 }
 
-export async function loadSuppressedSupportAlerts(sql, { householdId, limit = 24 }) {
+export async function loadSuppressedSupportAlerts(sql, { householdId, limit = 24, notBefore = null }) {
   return sql`
     with ranked as (
       select alert.id, alert.alert_type, alert.severity, alert.dedupe_key,
@@ -789,6 +790,7 @@ export async function loadSuppressedSupportAlerts(sql, { householdId, limit = 24
       where alert.household_id = ${householdId}
         and alert.status = 'suppressed'
         and alert.alert_type in ('guest_escalation', 'guest_overdue')
+        and (${notBefore}::timestamptz is null or thread.last_guest_at >= ${notBefore}::timestamptz)
         and thread.status = 'needs_human'
         and (thread.last_host_at is null or thread.last_host_at < thread.last_guest_at)
         and (

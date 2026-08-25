@@ -66,6 +66,52 @@ test("missing credentials fails before creating an IMAP client", async () => {
   assert.equal(created, false);
 });
 
+test("the MIME read cap preserves an older confirmation ahead of supplemental replies", async () => {
+  const fetched = [];
+  const envelopes = [
+    { uid: 31, date: "2026-07-15T09:00:00Z", subject: "Reservation confirmed - Stephanie arrives Aug 25" },
+    { uid: 32, date: "2026-08-24T15:43:00Z", subject: "RE: Reservation for Jasmine Studio Stay, Aug 25 - 30" },
+    { uid: 33, date: "2026-08-25T11:43:00Z", subject: "RE: Reservation for Jasmine Studio Stay, Aug 25 - 30" },
+  ];
+  const client = {
+    usable: true,
+    async connect() {},
+    async getMailboxLock() { return { release() {} }; },
+    async search() { return envelopes.map(({ uid }) => uid); },
+    async *fetch() {
+      for (const envelope of envelopes) {
+        yield {
+          uid: envelope.uid,
+          internalDate: new Date(envelope.date),
+          envelope: { subject: envelope.subject, from: [{ address: "automated@airbnb.com" }] },
+        };
+      }
+    },
+    async fetchOne(uid) {
+      fetched.push(uid);
+      return { source: Buffer.from(`From: Airbnb <automated@airbnb.com>\r\nSubject: Airbnb\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nmessage ${uid}\r\n`) };
+    },
+    async logout() {},
+    close() {},
+  };
+  const result = await collectAirbnbMessages({
+    afterDate: "2026-05-27",
+    maxRead: 2,
+    env: { AIRBNB_GMAIL_USER: "test@example.com", AIRBNB_GMAIL_APP_PASSWORD: "not-a-real-secret" },
+    createClient: () => client,
+    candidateEnvelope: () => true,
+    subjectMayTouchTarget: () => true,
+    describeEvidence: ({ envelope }) => ({
+      evidenceKind: /^Reservation confirmed/i.test(envelope.subject) ? "confirmed" : "supplemental",
+      evidenceSubtype: /^Reservation confirmed/i.test(envelope.subject) ? "confirmed" : "reply",
+    }),
+  });
+
+  assert.equal(result.envelopesFound, 2);
+  assert.deepEqual(fetched, [33, 31]);
+  assert.deepEqual(result.messages.map(({ envelope }) => envelope.id), ["33", "31"]);
+});
+
 test("fetches the original confirmation when a target-date update changes the booking dates", async () => {
   const calls = [];
   const envelopes = [

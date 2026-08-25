@@ -67,10 +67,22 @@ export async function collectAirbnbMessages({
       if (candidateEnvelope(envelope)) envelopes.push(envelope);
     }
 
-    const selected = envelopes
+    const touching = envelopes
       .filter((envelope) => subjectMayTouchTarget(envelope.subject ?? ""))
-      .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
-      .slice(0, maxRead);
+      .sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
+    const evidencePriority = (envelope) => {
+      if (!describeEvidence) return 1;
+      const evidence = describeEvidence({ envelope, body: "" });
+      if (["confirmed", "cancelled"].includes(evidence?.evidenceKind)) return 0;
+      if (evidence?.evidenceSubtype === "update") return 1;
+      if (evidence?.evidenceKind === "supplemental") return 2;
+      return 3;
+    };
+    const selected = touching
+      .sort((left, right) => evidencePriority(left) - evidencePriority(right)
+        || Date.parse(right.date) - Date.parse(left.date))
+      .slice(0, maxRead)
+      .sort((left, right) => Date.parse(right.date) - Date.parse(left.date));
     const readMessage = async (envelope) => {
       const message = await client.fetchOne(Number(envelope.id), { source: true }, { uid: true });
       if (!message?.source) return null;
