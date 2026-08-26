@@ -122,7 +122,7 @@ export async function collectAirbnbMessages({
 
       const anchorSince = new Date(`${afterDate}T00:00:00Z`);
       anchorSince.setUTCDate(anchorSince.getUTCDate() - 400);
-      for (const confirmationCode of [...missingCodes].slice(0, 8)) {
+      for (const confirmationCode of [...missingCodes].slice(0, 16)) {
         const anchorUids = await client.search({
           since: anchorSince,
           from: "airbnb.com",
