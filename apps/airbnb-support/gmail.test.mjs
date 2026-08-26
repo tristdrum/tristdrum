@@ -171,7 +171,10 @@ test("collector closes a stalled IMAP import at the configured deadline", async 
   const client = {
     usable: false,
     connect: () => new Promise(() => {}),
-    close() { closed = true; },
+    close() {
+      closed = true;
+      throw new Error("Connection not available");
+    },
   };
   await assert.rejects(
     collectConversationMessages({

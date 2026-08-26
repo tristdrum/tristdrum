@@ -40,6 +40,23 @@ function positiveInteger(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function closeClientNoThrow(client) {
+  try {
+    client.close();
+  } catch {
+    // ImapFlow can already be disconnected when a deadline closes the socket.
+  }
+}
+
+async function finishClient(client) {
+  try {
+    if (client.usable) await client.logout();
+    else closeClientNoThrow(client);
+  } catch {
+    closeClientNoThrow(client);
+  }
+}
+
 function rfcMessageId(value) {
   const normalized = String(value ?? "").trim();
   return /^<[^<>\s]+@[^<>\s]+>$/.test(normalized) ? normalized : null;
@@ -156,7 +173,7 @@ export async function collectConversationMessages({
     })();
     const deadline = new Promise((_, reject) => {
       deadlineTimer = setTimeout(() => {
-        client.close();
+        closeClientNoThrow(client);
         reject(importDeadlineError(deadlineMs));
       }, deadlineMs);
     });
@@ -164,8 +181,7 @@ export async function collectConversationMessages({
   } finally {
     clearTimeout(deadlineTimer);
     lock?.release();
-    if (client.usable) await client.logout();
-    else client.close();
+    await finishClient(client);
   }
 }
 
@@ -228,7 +244,7 @@ export async function collectBookingLifecycleMessages({
     })();
     const deadline = new Promise((_, reject) => {
       deadlineTimer = setTimeout(() => {
-        client.close();
+        closeClientNoThrow(client);
         reject(importDeadlineError(deadlineMs));
       }, deadlineMs);
     });
@@ -236,8 +252,7 @@ export async function collectBookingLifecycleMessages({
   } finally {
     clearTimeout(deadlineTimer);
     lock?.release();
-    if (client.usable) await client.logout();
-    else client.close();
+    await finishClient(client);
   }
 }
 
@@ -261,8 +276,7 @@ export async function findSentMessageIds({
     return found;
   } finally {
     lock?.release();
-    if (client.usable) await client.logout();
-    else client.close();
+    await finishClient(client);
   }
 }
 
@@ -326,8 +340,7 @@ export async function findSentThreadEvidence({
     return { messageIds: found, humanReplyAt };
   } finally {
     lock?.release();
-    if (client.usable) await client.logout();
-    else client.close();
+    await finishClient(client);
   }
 }
 
