@@ -177,6 +177,7 @@ test("fetches the original confirmation when a target-date update changes the bo
 
 test("recovers a confirmation anchor by code when it predates the ordinary lookback", async () => {
   const calls = [];
+  let anchorQuery = null;
   const envelopes = new Map([
     [40, { uid: 40, date: "2026-01-10T10:00:00Z", subject: "Reservation confirmed - Historical Guest arrives Aug 20" }],
     [41, { uid: 41, date: "2026-08-25T10:00:00Z", subject: "Reservation updated for HMHISTORIC1" }],
@@ -191,6 +192,7 @@ test("recovers a confirmation anchor by code when it predates the ordinary lookb
     async getMailboxLock() { return { release: () => calls.push("release") }; },
     async search(query) {
       if (query.body) {
+        anchorQuery = query;
         calls.push(`anchor-search:${query.body}`);
         return [40, 41];
       }
@@ -238,6 +240,8 @@ test("recovers a confirmation anchor by code when it predates the ordinary lookb
   });
 
   assert.equal(result.missingConfirmationAnchorCount, 0);
+  assert.equal(anchorQuery.body, "HMHISTORIC1");
+  assert.ok(anchorQuery.since < new Date("2026-05-27T00:00:00Z"));
   assert.deepEqual(result.messages.map(({ envelope }) => envelope.id), ["41", "40"]);
   assert.deepEqual(calls, [
     "connect",

@@ -120,26 +120,14 @@ export async function collectAirbnbMessages({
           .map(({ evidence }) => evidence.confirmationCode)
       );
 
-      if (missingCodes.size) {
-        const selectedIds = new Set(selected.map((envelope) => envelope.id));
-        const confirmationCandidates = envelopes
-          .filter((envelope) => !selectedIds.has(envelope.id))
-          .filter((envelope) => describeEvidence({ envelope, body: "" })?.evidenceKind === "confirmed")
-          .sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
-
-        for (const envelope of confirmationCandidates) {
-          const message = await readMessage(envelope);
-          if (!message) continue;
-          const evidence = describeEvidence(message);
-          if (evidence?.evidenceKind !== "confirmed" || !missingCodes.has(evidence.confirmationCode)) continue;
-          messages.push(message);
-          missingCodes.delete(evidence.confirmationCode);
-          if (!missingCodes.size) break;
-        }
-      }
-
-      for (const confirmationCode of [...missingCodes]) {
-        const anchorUids = await client.search({ from: "airbnb.com", body: confirmationCode }, { uid: true });
+      const anchorSince = new Date(`${afterDate}T00:00:00Z`);
+      anchorSince.setUTCDate(anchorSince.getUTCDate() - 400);
+      for (const confirmationCode of [...missingCodes].slice(0, 8)) {
+        const anchorUids = await client.search({
+          since: anchorSince,
+          from: "airbnb.com",
+          body: confirmationCode,
+        }, { uid: true });
         if (!anchorUids.length) continue;
         const anchorEnvelopes = [];
         for await (const message of client.fetch(
