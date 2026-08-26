@@ -455,6 +455,7 @@ export async function storeSupportDraft(sql, {
 }) {
   const classificationToStore = candidate.replyCapable === true
     && candidate.existingDecision?.deterministicGuard === "initial_inquiry_requires_airbnb_ui"
+    && classification.alertManagement !== true
     ? {
       ...classification,
       retiredDeterministicGuard: "initial_inquiry_requires_airbnb_ui",

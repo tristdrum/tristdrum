@@ -922,6 +922,113 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
         and status in ('suppressed', 'notified')
         and details->>'replyDeliveryId' = ${promotedDraft.id}
     `)[0].count, 0);
+
+    const hostActionInitialEmail = {
+      ...initialInquiryEmail,
+      providerMessageId: `<host-action-initial-${randomUUID()}@example.test>`,
+      occurredAt: "2026-08-21T22:10:00.000Z",
+      body: [
+        "RESPOND TO AMANDA'S INQUIRY",
+        "Amanda",
+        "https://www.airbnb.co.za/hosting/thread/9876543219?thread_type=home_booking",
+        "Identity verified · 4 reviews",
+        "Could you confirm the monthly rate and whether there is secure parking?",
+        "Pre-approve / Decline",
+      ].join("\n"),
+    };
+    await ingestConversation(database.sql, {
+      householdId,
+      email: hostActionInitialEmail,
+      parsed: parseAirbnbInitialInquiryEmail(hostActionInitialEmail),
+    });
+    const hostActionInitialCandidate = (await loadShadowCandidates(database.sql, { householdId, limit: 50 }))
+      .find((candidate) => candidate.providerThreadId === "9876543219");
+    await storeSupportDraft(database.sql, {
+      householdId,
+      candidate: hostActionInitialCandidate,
+      classification: {
+        topic: "pricing",
+        riskTier: "high",
+        replyNeeded: true,
+        summary: "A monthly rate needs a host decision.",
+        draft: "Thanks, Amanda. We will confirm the monthly rate shortly.",
+        autoReply: false,
+        status: "needs_human",
+        alertManagement: true,
+        decisionVersion: 2,
+        decisionSource: "adaptive_agent",
+        deterministicGuard: "initial_inquiry_requires_airbnb_ui",
+      },
+      now: new Date("2026-08-21T22:11:00.000Z"),
+      shadowMode: false,
+    });
+    const hostActionExpressEmail = {
+      mailboxScope: "tristan",
+      providerMessageId: `<host-action-express-${randomUUID()}@example.test>`,
+      rfcMessageId: `<host-action-express-source-${randomUUID()}@example.test>`,
+      subject: "RE: Inquiry for Jasmine Studio Stay, Sep 15 - 17, 2026",
+      from: "express@airbnb.com",
+      replyTo: "reply-token@reply.airbnb.com",
+      references: ["<host-action-initial@example.test>"],
+      inReplyTo: "<host-action-initial@example.test>",
+      occurredAt: "2026-08-21T22:15:00.000Z",
+      body: [
+        "INQUIRY FOR JASMINE STUDIO STAY, SEP 15 - 17, 2026",
+        "For your protection and safety, always communicate through Airbnb.",
+        "AMANDA",
+        "Booker",
+        "Could you confirm the monthly rate and whether there is secure parking?",
+        "Reply",
+        "https://www.airbnb.co.za/hosting/thread/9876543219?thread_type=home_booking",
+      ].join("\n"),
+    };
+    await ingestConversation(database.sql, {
+      householdId,
+      email: hostActionExpressEmail,
+      parsed: parseAirbnbConversationEmail(hostActionExpressEmail),
+    });
+    const hostActionPromotedCandidate = (await loadShadowCandidates(database.sql, { householdId, limit: 50 }))
+      .find((candidate) => candidate.providerThreadId === "9876543219");
+    const hostActionDraft = await storeSupportDraft(database.sql, {
+      householdId,
+      candidate: hostActionPromotedCandidate,
+      classification: {
+        topic: "pricing",
+        riskTier: "high",
+        replyNeeded: true,
+        summary: "Acknowledge now; Management must decide the monthly rate.",
+        draft: "Thanks, Amanda. We will confirm the monthly rate shortly. There is secure off-street parking.",
+        autoReply: true,
+        status: "ready",
+        alertManagement: true,
+        decisionVersion: 2,
+        decisionSource: "adaptive_agent",
+      },
+      now: new Date("2026-08-21T22:16:00.000Z"),
+      shadowMode: false,
+      automaticallyApprove: true,
+    });
+    const hostActionDeliveryResult = await processDeliveryGuard({
+      sql: database.sql,
+      householdId,
+      deliveryId: hostActionDraft.id,
+      now: () => new Date("2026-08-21T22:17:00.000Z"),
+      env: {
+        AIRBNB_SUPPORT_JANE_GMAIL_USER: "jane@example.test",
+        AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD: "configured",
+      },
+      collectMessages: async ({ mailboxScope }) => ({
+        messages: mailboxScope === "tristan" ? [hostActionExpressEmail] : [],
+        envelopesFound: mailboxScope === "tristan" ? 1 : 0,
+      }),
+      reconcileSent: async () => [],
+      sendReply: async ({ messageId }) => ({ messageId }),
+    });
+    assert.equal(hostActionDeliveryResult.action, "sent");
+    const survivingHostActionAlerts = (await loadSuppressedSupportAlerts(database.sql, { householdId }))
+      .filter((alert) => alert.details.replyDeliveryId === hostActionDraft.id);
+    assert.equal(survivingHostActionAlerts.length, 1);
+    assert.equal(survivingHostActionAlerts[0].details.requiresManagementAction, true);
   } finally {
     await database?.close();
     await admin.end({ timeout: 5 });
