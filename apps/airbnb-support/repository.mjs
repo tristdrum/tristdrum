@@ -453,10 +453,17 @@ export async function storeSupportDraft(sql, {
   shadowMode = true,
   automaticallyApprove = false,
 }) {
+  const classificationToStore = candidate.replyCapable === true
+    && candidate.existingDecision?.deterministicGuard === "initial_inquiry_requires_airbnb_ui"
+    ? {
+      ...classification,
+      retiredDeterministicGuard: "initial_inquiry_requires_airbnb_ui",
+    }
+    : classification;
   const idempotencyKey = `airbnb-support:${candidate.providerThreadId}:${candidate.sourceFingerprint}`;
   const outboundMessageId = `<${contentFingerprint(`${householdId}:${idempotencyKey}`).slice(0, 32)}@airbnb.tristdrum.com>`;
-  const noReplyNeeded = classification.replyNeeded === false;
-  const requiresManagementAction = classification.alertManagement === true;
+  const noReplyNeeded = classificationToStore.replyNeeded === false;
+  const requiresManagementAction = classificationToStore.alertManagement === true;
   const terminalNoReply = noReplyNeeded && !shadowMode;
   const initialStatus = terminalNoReply ? "cancelled" : automaticallyApprove ? "approved" : "needs_approval";
   const initialCancellationReason = terminalNoReply ? "No reply needed." : null;
@@ -467,8 +474,8 @@ export async function storeSupportDraft(sql, {
       idempotency_key, outbound_message_id
     ) values (
       ${householdId}, ${candidate.id}, ${candidate.sourceFingerprint}, ${candidate.latestEventAt},
-      ${classification.topic}, ${classification.riskTier},
-      ${sql.json({ ...classification, shadowMode })}, ${classification.draft},
+      ${classificationToStore.topic}, ${classificationToStore.riskTier},
+      ${sql.json({ ...classificationToStore, shadowMode })}, ${classificationToStore.draft},
       ${initialStatus}, ${initialCancellationReason}, ${idempotencyKey}, ${outboundMessageId}
     )
     on conflict (household_id, idempotency_key)
@@ -503,7 +510,7 @@ export async function storeSupportDraft(sql, {
   await sql`
     update airbnb.guest_threads
     set status = ${terminalNoReply && !requiresManagementAction ? "handled" : "needs_human"},
-        risk_tier = ${classification.riskTier}
+        risk_tier = ${classificationToStore.riskTier}
     where household_id = ${householdId} and id = ${candidate.id}
   `;
   if (terminalNoReply) {
@@ -527,7 +534,7 @@ export async function storeSupportDraft(sql, {
         and coalesce(details->>'shadowMode', 'true') = 'true'
     `;
   }
-  const escalationStages = classification.alertManagement === true
+  const escalationStages = classificationToStore.alertManagement === true
     ? supportEscalationStages({ latestEventAt: candidate.latestEventAt, now })
     : [];
   for (const escalation of escalationStages) {
@@ -548,10 +555,10 @@ export async function storeSupportDraft(sql, {
           replyDeliveryId: rows[0].id,
           stage: escalation.stage,
           minutesOpen: escalation.minutesOpen,
-          topic: classification.topic,
+          topic: classificationToStore.topic,
           listingName: candidate.listingName,
           guestName: candidate.guestDisplayName,
-          decisionSummary: classification.summary,
+          decisionSummary: classificationToStore.summary,
           requiresManagementAction,
           shadowMode,
         })}
@@ -1238,7 +1245,7 @@ export async function markDeliverySent(sql, {
       where household_id = ${householdId}
         and id = ${deliveryId}
         and status = 'sending'
-      returning id, thread_id, status
+      returning id, thread_id, status, classification
     `;
     if (!rows[0]) return null;
     await transaction`
@@ -1261,6 +1268,17 @@ export async function markDeliverySent(sql, {
         and details->>'threadId' = ${rows[0].threadId}
         and not (details @> '{"requiresManagementAction": true}'::jsonb)
     `;
+    if (rows[0].classification?.retiredDeterministicGuard === "initial_inquiry_requires_airbnb_ui") {
+      await transaction`
+        update airbnb.alerts
+        set status = 'resolved', resolved_at = ${now}, updated_at = ${now}
+        where household_id = ${householdId}
+          and status in ('suppressed', 'notified')
+          and alert_type in ('guest_escalation', 'guest_overdue')
+          and details->>'threadId' = ${rows[0].threadId}
+          and details->>'replyDeliveryId' = ${deliveryId}
+      `;
+    }
     await recordSupportAudit(transaction, {
       householdId,
       action: "guest_reply_sent",

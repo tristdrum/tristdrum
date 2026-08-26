@@ -915,6 +915,13 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
       from airbnb.reply_deliveries
       where household_id = ${householdId} and id = ${promotedDraft.id}
     `)[0].status, "sent");
+    assert.equal((await admin`
+      select count(*)::integer as count
+      from airbnb.alerts
+      where household_id = ${householdId}
+        and status in ('suppressed', 'notified')
+        and details->>'replyDeliveryId' = ${promotedDraft.id}
+    `)[0].count, 0);
   } finally {
     await database?.close();
     await admin.end({ timeout: 5 });
