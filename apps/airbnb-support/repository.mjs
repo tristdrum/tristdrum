@@ -222,7 +222,7 @@ export async function reconcileBookingLifecycle(sql, { householdId, email, lifec
         subject, evidence_kind, evidence_subtype, occurred_at, content_hash, normalized_payload
       ) values (
         ${householdId}, 'tristan', 'gmail', ${email.providerMessageId}, ${email.from},
-        ${email.subject}, 'ignored', 'booking_request_expired', ${email.occurredAt},
+        ${email.subject}, 'conversation', 'booking_request_expired', ${email.occurredAt},
         ${contentFingerprint(JSON.stringify(lifecycle))}, ${transaction.json(lifecycle)}
       )
       on conflict (household_id, mailbox_scope, provider, provider_message_id)
@@ -253,7 +253,7 @@ export async function reconcileBookingLifecycle(sql, { householdId, email, lifec
         and property.unit_number = ${lifecycle.unitNumber}
         and thread.status in ('open', 'needs_human')
         and thread.last_guest_at <= ${email.occurredAt}
-        and lower(regexp_replace(coalesce(thread.guest_display_name, ''), '[^a-z0-9]', '', 'g')) = ${normalizedGuest}
+        and regexp_replace(lower(coalesce(thread.guest_display_name, '')), '[^a-z0-9]', '', 'g') = ${normalizedGuest}
       order by thread.last_guest_at desc
     `;
     const matches = candidates.filter((candidate) => supportStayLabelMatches(
@@ -296,7 +296,7 @@ export async function reconcileBookingLifecycle(sql, { householdId, email, lifec
       insert into airbnb.audit_events (
         household_id, actor_type, actor_id, action, entity_type, entity_id, details, occurred_at
       ) values (
-        ${householdId}, 'system', 'support-lifecycle', 'guest_booking_request_expired',
+        ${householdId}, 'worker', 'support', 'guest_booking_request_expired',
         'guest_thread', ${thread.id},
         ${transaction.json({ reason: "airbnb_nonpayment_auto_decline", evidenceId: evidenceRows[0].id })},
         ${email.occurredAt}

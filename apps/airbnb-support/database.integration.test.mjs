@@ -19,6 +19,7 @@ import {
   loadReadyTimeRequests,
   markDeliverySent,
   markSupportAlertNotified,
+  reconcileBookingLifecycle,
   recordAmbiguousDeliveryFailure,
   recordDeliveryAttempt,
   storeSupportDraft,
@@ -713,6 +714,47 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
       && alert.details.shadowMode === false
       && alert.details.requiresManagementAction === true
     )), true);
+
+    const lifecycleThreadId = "9876543217";
+    const lifecycleConversation = emailFixture({
+      mailboxScope: "tristan",
+      providerMessageId: `<lifecycle-conversation-${randomUUID()}@example.test>`,
+      providerThreadId: lifecycleThreadId,
+      occurredAt: "2026-08-21T21:00:00.000Z",
+      entries: [{ name: "Lifecycle Guest", role: "Guest", text: "Please confirm my booking request." }],
+    });
+    await ingestConversation(database.sql, {
+      householdId,
+      email: lifecycleConversation,
+      parsed: parseAirbnbConversationEmail(lifecycleConversation),
+    });
+    const lifecycleOutcome = await reconcileBookingLifecycle(database.sql, {
+      householdId,
+      email: {
+        providerMessageId: `<lifecycle-expired-${randomUUID()}@example.test>`,
+        from: "automated@airbnb.com",
+        subject: "Aug 22 - 23 request dismissed - no payment",
+        occurredAt: "2026-08-21T21:10:00.000Z",
+      },
+      lifecycle: {
+        kind: "request_expired",
+        reason: "nonpayment",
+        guestName: "Lifecycle Guest",
+        unitNumber: 3,
+        listingName: "Jasmine Studio Stay",
+        checkIn: "2026-08-22",
+        checkOut: "2026-08-23",
+      },
+    });
+    assert.equal(lifecycleOutcome.status, "resolved");
+    assert.deepEqual({ ...(await admin`
+      select evidence_kind, evidence_subtype
+      from airbnb.evidence
+      where household_id = ${householdId} and id = ${lifecycleOutcome.evidenceId}
+    `)[0] }, {
+      evidence_kind: "conversation",
+      evidence_subtype: "booking_request_expired",
+    });
   } finally {
     await database?.close();
     await admin.end({ timeout: 5 });
