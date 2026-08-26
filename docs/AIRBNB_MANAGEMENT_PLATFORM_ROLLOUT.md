@@ -143,6 +143,40 @@ being skipped with a sanitized timeout receipt.
   found no actionable stock observation, sent no Management alert, and retained
   `orderPlacementAllowed: false`.
 
+### Support go-live and cleaner reconciliation repair
+
+The support writer went live on 25 August and the monitored repair sequence
+completed on 26 August.
+
+- Migration history now matches through `20260825125026`. One live support job
+  runs every five minutes; the shadow job is inactive. Eight cleaner and four
+  stock jobs remain active.
+- Current cleaner image: `deployment-01M0YT1D2KKCJNTGFSH2X26ZKW`.
+- Current support image: `deployment-01M0YVPKYWH2RFGNE955VME08Y`.
+- The Anele late-arrival incident is a regression: an arrival before the booked
+  date receives an immediate grounded acknowledgement and Management alert,
+  while the final Tristan/Jane Sent-mail check can still veto delivery.
+- Automatic guest replies no longer contain an AI footer. The first two live
+  sends were provider-confirmed thank-you replies with no ambiguity or newer
+  human response. Monitoring then replaced their rigid pre-stay wording with
+  context-aware model wording.
+- Messages with `replyNeeded: false` now become terminal `cancelled` deliveries
+  with reason `No reply needed`, mark the thread handled, and resolve stale
+  alerts. Human-review alerts are created only when a reply is genuinely needed
+  or the classifier explicitly marks the case urgent.
+- Cleaner MIME selection now preserves confirmations under the ordinary read
+  cap and recovers missing update anchors by confirmation code in a bounded
+  400-day window. Supabase `date` values are normalized before ledger planning.
+- The 25 August replay completed in 48 seconds with clean confidence and
+  correctly classified Stephanie Tilley as a one-guest Unit 3 turnover.
+- The recovered 26 August live run sent one verified `Updated Airbnb plan` for
+  Bright Agu, one guest, synced 90 evidence rows and 41 reservations, and
+  preserved Units 2 and 3 as stayovers. Exact cleaners-chat readback matched.
+- A deployment-interrupted support run is retained as an explicit
+  `DEPLOY_INTERRUPTED` error rather than deleted or presented as success.
+- Stock remains observation/Management-only. Order placement is disabled and
+  there are no order-placement audit events.
+
 ## Production verification
 
 Use this order so no scheduled request can cross a mixed schema/app version:
@@ -175,13 +209,15 @@ After that guarded cutover:
 1. Confirm all eight personal cleaner jobs are active and all eight old Min jobs
    remain inactive.
 2. Confirm the four stock jobs are active, including the Tuesday 06:00/06:20
-   review attempts, and the support job remains inactive.
+   review attempts, and exactly one support-live job is active.
 3. Run cleaner preview and dry-run, then reconcile the latest receipt, ledger,
    confidence result, database sync, and exact cleaner-chat readback.
 4. Run stock observation mode and confirm WhatsApp evidence contains no raw
    body, creates no inventory movement, places no order, and only flags matched
    items for counting.
-5. Run support shadow mode and confirm zero replies and zero Management alerts.
+5. Inspect each support-live receipt, Sent-mail reply, final human-reply guard,
+   and Management readback. Require zero ambiguous deliveries and no alert for
+   a message that needs no reply.
 6. Verify `/dashboard/airbnb` serves the deployed build and exposes no
    credential-shaped fields.
 
@@ -189,12 +225,13 @@ After that guarded cutover:
 
 - Heartbeat `airbnb-cleaner-midday-cutover-check` performs the daily personal
   platform and rollback audit at 14:25 SAST.
-- Require 72 clean hours after the 2026-08-24 09:10 SAST hardening cutover before
-  treating the replacement as stable. The earliest stability checkpoint is
-  2026-08-27 09:10 SAST.
+- The latest cleaner and support repairs reset the clean-run clock at
+  2026-08-26 12:50 SAST. Require 72 clean hours before treating the replacement
+  as stable; the new stability checkpoint is 2026-08-29 12:50 SAST.
 - Do not delete the stopped Min app or rollback data before the seven-day gate.
-  The earliest retirement checkpoint is 2026-08-31 09:10 SAST, after seven full
-  clean days. Extend the heartbeat if verification delays retirement.
+  The earliest retirement checkpoint is 2026-09-02 12:50 SAST, after seven full
+  clean days from the latest repairs. Extend the heartbeat if verification
+  delays retirement.
 - Delete old infrastructure only after schedules, receipts, WhatsApp readback,
   current Gmail reservation evidence, stock observations, and dashboard state
   all remain clean.
