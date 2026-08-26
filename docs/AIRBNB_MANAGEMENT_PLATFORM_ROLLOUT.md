@@ -152,7 +152,7 @@ completed on 26 August.
   runs every five minutes; the shadow job is inactive. Eight cleaner and four
   stock jobs remain active.
 - Current cleaner image: `deployment-01M0YT1D2KKCJNTGFSH2X26ZKW`.
-- Current support image: `deployment-01M0Z02YDNGCQ8502PP9ZH6B4W`.
+- Current support image: `deployment-01M0Z8QZ45F7T2J1BZZMAR1EHM`.
 - The Anele late-arrival incident is a regression: an arrival before the booked
   date receives an immediate grounded acknowledgement and Management alert,
   while the final Tristan/Jane Sent-mail check can still veto delivery.
@@ -180,8 +180,9 @@ completed on 26 August.
 ### Adaptive support agent rollout
 
 The classifier and topic allowlist were removed on 26 August in PR #19, with a
-focused lifecycle ownership hotfix in PR #20. Production source is merge commit
-`2b67802c29fe88b848397da23e5291fe4d6987ab`.
+focused lifecycle ownership hotfix in PR #20 and bounded IMAP cleanup repair in
+PR #22. Production source is merge commit
+`b0130fb4a518e433097645fe215838b364e95018`.
 
 - One `gpt-5.6-sol` Responses API decision at `xhigh` reasoning now receives the
   recent conversation, stay phase, listing and guest identity, verified property
@@ -206,10 +207,24 @@ focused lifecycle ownership hotfix in PR #20. Production source is merge commit
   with one provider-confirmed reply, zero ambiguity, and zero decision failures.
   Sent Mail contains the exact address/airport-transfer follow-up with no AI
   footer. Existing verified Management alerts prevented duplicate notifications.
-- The release gate passed 74 pgTAP assertions and 263 application tests,
-  including 95 support tests against the real local RLS role, plus web lint and
-  production build. Two independent review rounds and the focused hotfix review
-  ended with no unresolved findings.
+- A later IMAP import deadline closed an already-disconnected ImapFlow client;
+  its synchronous `Connection not available` exception escaped the timer callback,
+  terminated the worker, and left run `60aab190-639a-431c-bcb0-c0e2188901bd`
+  started. The heartbeat paused support immediately and recorded the run as an
+  explicit `PROCESS_CRASH_IMAP_DEADLINE_CLEANUP` error.
+- PR #22 made socket close idempotent, bounded logout cleanup, added outer
+  Sent-mail guard deadlines, and proved deadline failures remain retry-safe before
+  SMTP. Accepted shadow run `bc37a0bd-ea2a-4919-90fd-cfd262aabdef` and live run
+  `fea00522-5b16-494c-886f-e377463c1745` then succeeded. The live run sent one
+  provider-confirmed Bright late-arrival acknowledgement with no footer,
+  ambiguity, or decision failure.
+- One stock Management run observed a transient WhatsApp HTTP 404 and sent
+  nothing. The writer was paused; both groups then returned HTTP 200 and two
+  observation runs loaded 103 messages with no read error, after which the writer
+  was restored. Order placement remained disabled throughout.
+- The final release gate passed 74 pgTAP assertions and 266 application tests,
+  including 98 support tests against the real local RLS role, plus web lint and
+  production build. Independent review ended with no unresolved findings.
 
 ## Production verification
 
@@ -257,13 +272,14 @@ After that guarded cutover:
 
 ## Monitoring and retirement
 
-- Heartbeat `airbnb-cleaner-midday-cutover-check` performs the daily personal
-  platform and rollback audit at 14:25 SAST.
+- Heartbeat `airbnb-cleaner-midday-cutover-check` performs hourly daytime personal
+  platform and exact outbound-message audits at 25 minutes past each hour from
+  07:25 through 21:25 SAST.
 - The latest cleaner and support repairs reset the clean-run clock at
-  2026-08-26 14:26 SAST. Require 72 clean hours before treating the replacement
-  as stable; the new stability checkpoint is 2026-08-29 14:26 SAST.
+  2026-08-26 16:56 SAST. Require 72 clean hours before treating the replacement
+  as stable; the new stability checkpoint is 2026-08-29 16:56 SAST.
 - Do not delete the stopped Min app or rollback data before the seven-day gate.
-  The earliest retirement checkpoint is 2026-09-02 14:26 SAST, after seven full
+  The earliest retirement checkpoint is 2026-09-02 16:56 SAST, after seven full
   clean days from the latest repairs. Extend the heartbeat if verification
   delays retirement.
 - Delete old infrastructure only after schedules, receipts, WhatsApp readback,
