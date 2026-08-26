@@ -124,6 +124,37 @@ test("clear natural phrasing may use a verified fact without an exact template m
   assert.equal(result.draft, "Parking: Please park in the marked bay for Unit 1.");
 });
 
+test("post-stay thanks keep context-aware model wording", async () => {
+  const result = await classifyGuestMessage({
+    guestMessage: "What a beautiful clean place. I would love to come back again!",
+    listingName: "The Spekboom Studio",
+    facts: {},
+    stayLabel: "AUG 22 – 23",
+    latestEventAt: "2026-08-26T06:55:28.000Z",
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: async () => ({
+      ok: true,
+      async json() {
+        return { output_text: JSON.stringify({
+          topic: "thanks",
+          riskTier: "low",
+          confidence: 0.99,
+          factsVerified: true,
+          replyNeeded: true,
+          summary: "The guest loved their completed stay.",
+          draft: "Thank you so much for the lovely feedback. We’d be very happy to welcome you back!",
+          canReplyAutonomously: true,
+          managementAlertNeeded: false,
+        }) };
+      },
+    }),
+  });
+  assert.equal(result.autoReply, true);
+  assert.equal(result.deterministicGuard, "verified_model_draft");
+  assert.match(result.draft, /welcome you back/i);
+  assert.doesNotMatch(result.draft, /enjoy your stay|Automated reply/i);
+});
+
 test("high-risk guest language forces human review despite a low-risk model label", async () => {
   const result = await classifyGuestMessage({
     guestMessage: "Hello, please refund me and change my booking dates.",
