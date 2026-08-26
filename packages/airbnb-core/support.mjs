@@ -430,7 +430,6 @@ export function supportMessageMatchesTopic(message, topic) {
 
 export function verifiedSupportDraft(topic, facts = {}) {
   if (topic === "greeting") return "Hello! Thank you for your message. We look forward to hosting you.";
-  if (topic === "thanks") return "You are very welcome. We hope you enjoy your stay.";
   if (topic === "address") {
     const address = factText(facts.address);
     return address ? `The address is ${address}.` : null;
