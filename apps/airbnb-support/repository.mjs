@@ -16,7 +16,23 @@ export async function ingestConversation(sql, { householdId, email, parsed }) {
   if ((email.mailboxScope ?? "tristan") !== "tristan") {
     throw new Error("Canonical Airbnb conversations must come from Tristan's mailbox.");
   }
+  const evidenceSubtype = parsed.sourceKind === "initial_inquiry"
+    ? "airbnb_initial_inquiry"
+    : "airbnb_thread";
   return sql.begin(async (transaction) => {
+    const priorInitialInquiry = parsed.sourceKind === "initial_inquiry" ? true : Boolean((await transaction`
+      select 1
+      from airbnb.evidence
+      where household_id = ${householdId}
+        and mailbox_scope = 'tristan'
+        and provider_thread_id = ${parsed.providerThreadId}
+        and evidence_subtype = 'airbnb_initial_inquiry'
+      limit 1
+    `).length);
+    const useCanonicalInquiryIdentity = priorInitialInquiry && Boolean(parsed.canonicalSourceFingerprint);
+    const sourceFingerprint = useCanonicalInquiryIdentity
+      ? parsed.canonicalSourceFingerprint
+      : parsed.sourceFingerprint;
     const evidenceRows = await transaction`
       insert into airbnb.evidence (
         household_id, mailbox_scope, provider, provider_message_id, provider_thread_id,
@@ -24,13 +40,16 @@ export async function ingestConversation(sql, { householdId, email, parsed }) {
         content_hash, normalized_payload
       ) values (
         ${householdId}, 'tristan', 'gmail', ${email.providerMessageId}, ${parsed.providerThreadId},
-        ${email.from}, ${email.subject}, 'conversation', 'airbnb_thread', ${email.occurredAt},
-        ${contentFingerprint(parsed.sourceFingerprint)},
+        ${email.from}, ${email.subject}, 'conversation', ${evidenceSubtype}, ${email.occurredAt},
+        ${contentFingerprint(sourceFingerprint)},
         ${transaction.json({
           listingName: parsed.listingName,
           stayLabel: parsed.stayLabel,
           entryCount: parsed.entries.length,
           replyTo: parsed.replyTo,
+          sourceKind: parsed.sourceKind ?? "conversation_reply",
+          replyRequired: parsed.replyRequired === true,
+          replyCapable: parsed.replyCapable !== false && Boolean(parsed.replyTo),
           inReplyTo: email.inReplyTo,
           references: parsed.references,
         })}
@@ -60,7 +79,7 @@ export async function ingestConversation(sql, { householdId, email, parsed }) {
       ) values (
         ${householdId}, ${parsed.providerThreadId}, 'tristan', ${propertyRows[0]?.id ?? null}, ${latestGuest?.name ?? null},
         ${latest.direction === "host" ? "handled" : "open"}, 'unknown',
-        ${latestGuestAt}, ${latestHostAt}, ${parsed.sourceFingerprint}
+        ${latestGuestAt}, ${latestHostAt}, ${sourceFingerprint}
       )
       on conflict (household_id, canonical_mailbox, provider_thread_id)
       do update set property_id = case
@@ -110,14 +129,17 @@ export async function ingestConversation(sql, { householdId, email, parsed }) {
     `;
     const thread = threadRows[0];
     for (const entry of parsed.entries) {
-      const providerEntryId = conversationEntryKey(parsed.providerThreadId, entry);
+      const messageIdentity = useCanonicalInquiryIdentity
+        ? { ...entry, contentHash: entry.canonicalContentHash }
+        : entry;
+      const providerEntryId = conversationEntryKey(parsed.providerThreadId, messageIdentity);
       await transaction`
         insert into airbnb.guest_messages (
           household_id, thread_id, provider_message_id, provider_thread_id, direction,
           sender_label, sender_mailbox, body_normalized, content_hash, provider_sent_at
         ) values (
           ${householdId}, ${thread.id}, ${providerEntryId}, ${parsed.providerThreadId}, ${entry.direction},
-          ${`${entry.name} / ${entry.role}`}, 'tristan', ${entry.text}, ${entry.contentHash},
+          ${`${entry.name} / ${entry.role}`}, 'tristan', ${entry.text}, ${messageIdentity.contentHash},
           ${eventTime(email.occurredAt, entry.sequence)}
         )
         on conflict (household_id, provider_message_id) do nothing
@@ -323,6 +345,9 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8, notBef
       latest.body_normalized as guest_message,
       latest.provider_sent_at as latest_event_at,
       conversation.stay_label,
+      conversation.source_kind,
+      conversation.reply_required,
+      conversation.reply_capable,
       active_time_request.request_type as active_time_request_type,
       active_time_request.stay_date as active_time_request_stay_date,
       active_time_request.effective_time as active_time_request_effective_time,
@@ -340,7 +365,13 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8, notBef
       limit 1
     ) latest on true
     left join lateral (
-      select evidence.normalized_payload->>'stayLabel' as stay_label
+      select evidence.normalized_payload->>'stayLabel' as stay_label,
+             evidence.normalized_payload->>'sourceKind' as source_kind,
+             coalesce((evidence.normalized_payload->>'replyRequired')::boolean, false) as reply_required,
+             coalesce(
+               (evidence.normalized_payload->>'replyCapable')::boolean,
+               evidence.evidence_subtype <> 'airbnb_initial_inquiry'
+             ) as reply_capable
       from airbnb.evidence evidence
       where evidence.household_id = thread.household_id
         and evidence.mailbox_scope = 'tristan'
@@ -397,6 +428,9 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8, notBef
   return rows.map((row) => ({
     ...row,
     facts: row.facts ?? {},
+    sourceKind: row.sourceKind ?? "conversation_reply",
+    replyRequired: row.replyRequired === true,
+    replyCapable: row.replyCapable === true,
     existingDecision: row.existingDecision
       ? { ...row.existingDecision, draft: row.existingDraft }
       : null,
@@ -915,6 +949,7 @@ export async function loadDeliveryGuardCandidates(sql, { householdId, now, limit
     from airbnb.reply_deliveries
     where household_id = ${householdId}
       and status = 'approved'
+      and coalesce(classification->>'deterministicGuard', '') <> 'initial_inquiry_requires_airbnb_ui'
       and (
         approved_by is not null
         or (
@@ -1050,6 +1085,14 @@ export async function claimDeliveryForGuard(sql, { householdId, deliveryId, now 
         delivery.send_attempted_at,
         thread.provider_thread_id,
         thread.source_fingerprint as latest_thread_fingerprint,
+        exists (
+          select 1
+          from airbnb.evidence evidence
+          where evidence.household_id = delivery.household_id
+            and evidence.mailbox_scope = 'tristan'
+            and evidence.provider_thread_id = thread.provider_thread_id
+            and evidence.evidence_subtype = 'airbnb_initial_inquiry'
+        ) as initial_inquiry_identity,
         coalesce((
           select jsonb_agg(jsonb_build_object(
             'direction', message.direction,

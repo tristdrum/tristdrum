@@ -31,14 +31,19 @@ export function latestCanonicalConversation(messages, providerThreadId) {
     .at(-1) ?? null;
 }
 
-export function eventsAddedAfterDraft(parsed, occurredAt, sourceEvents = []) {
+export function eventsAddedAfterDraft(parsed, occurredAt, sourceEvents = [], {
+  canonicalIdentity = false,
+} = {}) {
   const remaining = new Map();
   for (const event of sourceEvents) {
     const key = `${event.direction}:${event.contentHash}`;
     remaining.set(key, (remaining.get(key) ?? 0) + 1);
   }
   return parsed.entries.flatMap((entry) => {
-    const key = `${entry.direction}:${entry.contentHash}`;
+    const contentHash = canonicalIdentity
+      ? entry.canonicalContentHash ?? entry.contentHash
+      : entry.contentHash;
+    const key = `${entry.direction}:${contentHash}`;
     const knownCount = remaining.get(key) ?? 0;
     if (knownCount > 0) {
       remaining.set(key, knownCount - 1);
@@ -95,6 +100,7 @@ async function collectFreshDeliverySnapshot({
     canonical.parsed,
     canonical.email.occurredAt,
     claimed.sourceEvents,
+    { canonicalIdentity: claimed.initialInquiryIdentity === true },
   );
   const supplemental = latestCanonicalConversation(
     janeCollection.messages,
@@ -105,6 +111,7 @@ async function collectFreshDeliverySnapshot({
       supplemental.parsed,
       supplemental.email.occurredAt,
       claimed.sourceEvents,
+      { canonicalIdentity: claimed.initialInquiryIdentity === true },
     ));
   }
   const sentRequest = {
@@ -134,7 +141,9 @@ async function collectFreshDeliverySnapshot({
     canonical,
     decision: finalSendDecision({
       sourceFingerprint: claimed.sourceFingerprint,
-      latestFingerprint: canonical.parsed.sourceFingerprint,
+      latestFingerprint: claimed.initialInquiryIdentity === true
+        ? canonical.parsed.canonicalSourceFingerprint
+        : canonical.parsed.sourceFingerprint,
       sourceLastEventAt: claimed.sourceLastEventAt,
       latestEvents,
       outboundMessageId: claimed.outboundMessageId,

@@ -2,7 +2,10 @@
 
 import postgres from "postgres";
 import { fileURLToPath } from "node:url";
-import { parseAirbnbConversationEmail } from "@tristdrum/airbnb-core";
+import {
+  parseAirbnbConversationEmail,
+  parseAirbnbInitialInquiryEmail,
+} from "@tristdrum/airbnb-core";
 import { createAirbnbDatabase } from "@tristdrum/airbnb-db";
 import { collectConversationMessages } from "./gmail.mjs";
 import { ingestConversation, ingestSupplementalConversation } from "./repository.mjs";
@@ -33,7 +36,7 @@ async function importMailbox({ database, householdId, mailboxScope, env }) {
     if (!batch.envelopesFound) break;
     envelopesFound += batch.envelopesFound;
     for (const email of batch.messages) {
-      const parsed = parseAirbnbConversationEmail(email);
+      const parsed = parseAirbnbConversationEmail(email) ?? parseAirbnbInitialInquiryEmail(email);
       if (!parsed) continue;
       if (mailboxScope === "tristan") {
         await ingestConversation(database.sql, { householdId, email, parsed });

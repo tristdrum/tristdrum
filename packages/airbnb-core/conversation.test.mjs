@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseAirbnbConversationEmail } from "./conversation.mjs";
+import {
+  parseAirbnbConversationEmail,
+  parseAirbnbInitialInquiryEmail,
+} from "./conversation.mjs";
 
 function conversationEmail({
   from = "express@airbnb.com",
@@ -77,4 +80,82 @@ test("Airbnb conversation parser rejects unrelated Airbnb reply subjects", () =>
     heading: "YOUR AIRBNB PAYOUT",
   }));
   assert.equal(parsed, null);
+});
+
+test("initial Airbnb inquiry notices become non-SMTP support conversations", () => {
+  const parsed = parseAirbnbInitialInquiryEmail({
+    providerMessageId: "<initial-inquiry@example.test>",
+    from: "automated@airbnb.com",
+    subject: "Inquiry for Jasmine Studio Stay for Sep 15 – 17, 2026",
+    occurredAt: "2026-08-26T16:36:00Z",
+    body: [
+      "RESPOND TO PRINSLOO’S INQUIRY",
+      "Prinsloo",
+      "https://www.airbnb.co.za/hosting/thread/2647473081?thread_type=home_booking",
+      "Identity verified · 9 reviews",
+      "good day. I am looking to book 3 months. Sep-Nov.",
+      "what will be your monthly rate. thanks",
+      "Pre-approve / Decline",
+    ].join("\n"),
+  });
+  assert.equal(parsed.providerThreadId, "2647473081");
+  assert.equal(parsed.listingName, "Jasmine Studio Stay");
+  assert.match(parsed.stayLabel, /Sep 15 – 17, 2026/);
+  assert.equal(parsed.entries[0].name, "Prinsloo");
+  assert.match(parsed.entries[0].text, /monthly rate/i);
+  assert.equal(parsed.replyRequired, true);
+  assert.equal(parsed.replyCapable, false);
+});
+
+test("initial inquiries converge with later express thread copies", () => {
+  const cases = [
+    {
+      threadId: "2647469620",
+      listing: "Bougainvillea Courtyard Studio",
+      stay: "Sep 15 - 18, 2026",
+      text: "good day. I would like to book for 3 months. Sep-Nov. what will be your monthly rate",
+    },
+    {
+      threadId: "2647473081",
+      listing: "Jasmine Studio Stay",
+      stay: "Sep 15 - 17, 2026",
+      text: "good day. I am looking to book 3 months. Sep-Nov. what will be your monthly rate. thanks",
+    },
+  ];
+  for (const fixture of cases) {
+    const initial = parseAirbnbInitialInquiryEmail({
+      providerMessageId: `<initial-${fixture.threadId}@example.test>`,
+      from: "automated@airbnb.com",
+      subject: `Inquiry for ${fixture.listing} for ${fixture.stay}`,
+      occurredAt: "2026-08-26T16:32:00Z",
+      body: [
+        "RESPOND TO PRINSLOO'S INQUIRY",
+        "Prinsloo",
+        `https://www.airbnb.co.za/hosting/thread/${fixture.threadId}?thread_type=home_booking`,
+        "Identity verified · 9 reviews",
+        fixture.text,
+        "Pre-approve / Decline",
+      ].join("\n"),
+    });
+    const reply = parseAirbnbConversationEmail({
+      providerMessageId: `<reply-${fixture.threadId}@example.test>`,
+      from: "express@airbnb.com",
+      subject: `RE: Inquiry for ${fixture.listing}, ${fixture.stay}`,
+      occurredAt: "2026-08-26T16:40:00Z",
+      replyTo: "reply-token@reply.airbnb.com",
+      body: [
+        `INQUIRY FOR ${fixture.listing.toUpperCase()}, ${fixture.stay.toUpperCase()}`,
+        "For your protection and safety, always communicate through Airbnb.",
+        "PRINSLOO",
+        "Booker",
+        fixture.text,
+        "Reply",
+        `https://www.airbnb.co.za/hosting/thread/${fixture.threadId}?thread_type=home_booking`,
+      ].join("\n"),
+    });
+    assert.equal(initial.providerThreadId, reply.providerThreadId);
+    assert.notEqual(initial.entries[0].contentHash, reply.entries[0].contentHash);
+    assert.equal(initial.entries[0].canonicalContentHash, reply.entries[0].canonicalContentHash);
+    assert.equal(initial.canonicalSourceFingerprint, reply.canonicalSourceFingerprint);
+  }
 });

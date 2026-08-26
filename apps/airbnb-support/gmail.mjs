@@ -5,6 +5,7 @@ import nodemailer from "nodemailer";
 import {
   isAirbnbBookingLifecycleSubject,
   isAirbnbConversationSubject,
+  isAirbnbInitialInquirySubject,
   trustedAirbnbSender,
 } from "@tristdrum/airbnb-core";
 
@@ -162,15 +163,29 @@ export async function collectConversationMessages({
         env,
         String(env.AIRBNB_SUPPORT_GMAIL_FOLDER ?? DEFAULT_FOLDER),
       ));
-      const expectedSender = mailboxScope === "tristan" ? "express@airbnb.com" : "airbnb.com";
-      const uids = await client.search({ since, from: expectedSender }, { uid: true });
+      const senderQueries = mailboxScope === "tristan"
+        ? [
+          { since, from: "express@airbnb.com" },
+          { since, from: "automated@airbnb.com", subject: "Inquiry for" },
+        ]
+        : [{ since, from: "airbnb.com" }];
+      const uidSet = new Set();
+      for (const senderQuery of senderQueries) {
+        const matches = await client.search(senderQuery, { uid: true });
+        for (const uid of matches ?? []) uidSet.add(Number(uid));
+      }
+      const uids = [...uidSet].sort((left, right) => left - right);
       if (!uids.length) return { messages: [], envelopesFound: 0, lastUid: Number(afterUid) };
       const candidates = [];
       for await (const message of client.fetch(uids, { envelope: true, internalDate: true, uid: true }, { uid: true })) {
         const sender = String(message.envelope?.from?.[0]?.address ?? "").toLowerCase();
         const subject = message.envelope?.subject ?? "";
-        if (!trustedAirbnbSender(sender) || !isAirbnbConversationSubject(subject)) continue;
-        if (mailboxScope === "tristan" && sender !== "express@airbnb.com") continue;
+        const isReplyConversation = isAirbnbConversationSubject(subject);
+        const isInitialInquiry = mailboxScope === "tristan"
+          && sender === "automated@airbnb.com"
+          && isAirbnbInitialInquirySubject(subject);
+        if (!trustedAirbnbSender(sender) || (!isReplyConversation && !isInitialInquiry)) continue;
+        if (mailboxScope === "tristan" && sender !== "express@airbnb.com" && !isInitialInquiry) continue;
         if (Number(message.uid) <= Number(afterUid)) continue;
         candidates.push({ uid: Number(message.uid), occurredAt: message.internalDate?.toISOString?.() ?? null, from: sender, subject });
       }
@@ -233,7 +248,11 @@ export async function collectBookingLifecycleMessages({
         env,
         String(env.AIRBNB_SUPPORT_GMAIL_FOLDER ?? DEFAULT_FOLDER),
       ));
-      const uids = await client.search({ since, from: "automated@airbnb.com" }, { uid: true });
+      const uids = await client.search({
+        since,
+        from: "automated@airbnb.com",
+        subject: "request",
+      }, { uid: true });
       if (!uids.length) return { messages: [], envelopesFound: 0 };
       const candidates = [];
       for await (const message of client.fetch(uids, { envelope: true, internalDate: true, uid: true }, { uid: true })) {

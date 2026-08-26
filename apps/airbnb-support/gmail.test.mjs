@@ -24,6 +24,7 @@ test("booking lifecycle collector keeps only trusted non-payment dismissals", as
     async getMailboxLock() { return { release() {} }; },
     async search(query) {
       assert.equal(query.from, "automated@airbnb.com");
+      assert.equal(query.subject, "request");
       return [1, 2];
     },
     async *fetch(_range, query) {
@@ -114,6 +115,59 @@ test("canonical collector accepts only Tristan's express stream and closes IMAP"
   assert.equal(clientOptions.socketTimeout, 30_000);
   assert.equal(released, true);
   assert.equal(loggedOut, true);
+});
+
+test("canonical collector includes trusted initial inquiry notices", async () => {
+  const source = Buffer.from([
+    "Message-ID: <initial-inquiry@example.test>",
+    "From: Airbnb <automated@airbnb.com>",
+    "Subject: Inquiry for Jasmine Studio Stay for Sep 15 - 17, 2026",
+    "Content-Type: text/plain; charset=utf-8",
+    "",
+    "RESPOND TO PRINSLOO'S INQUIRY",
+    "Prinsloo",
+    "https://www.airbnb.co.za/hosting/thread/2647473081?thread_type=home_booking",
+    "Identity verified · 9 reviews",
+    "What will be your monthly rate for three months?",
+    "Pre-approve / Decline",
+  ].join("\r\n"));
+  const searches = [];
+  const client = {
+    usable: true,
+    async connect() {},
+    async getMailboxLock() { return { release() {} }; },
+    async search(query) {
+      searches.push({ from: query.from, subject: query.subject ?? null });
+      return query.from === "automated@airbnb.com" ? [7] : [];
+    },
+    async *fetch(_range, query) {
+      if (query.source) yield { uid: 7, source };
+      else yield {
+        uid: 7,
+        internalDate: new Date("2026-08-26T16:36:00Z"),
+        envelope: {
+          subject: "Inquiry for Jasmine Studio Stay for Sep 15 - 17, 2026",
+          from: [{ address: "automated@airbnb.com" }],
+        },
+      };
+    },
+    async logout() {},
+    close() {},
+  };
+  const result = await collectConversationMessages({
+    since: new Date("2026-08-25T00:00:00Z"),
+    env: {
+      AIRBNB_SUPPORT_GMAIL_USER: "tristan@example.test",
+      AIRBNB_SUPPORT_GMAIL_APP_PASSWORD: "not-a-secret",
+    },
+    createClient: () => client,
+  });
+  assert.deepEqual(searches, [
+    { from: "express@airbnb.com", subject: null },
+    { from: "automated@airbnb.com", subject: "Inquiry for" },
+  ]);
+  assert.equal(result.envelopesFound, 1);
+  assert.equal(result.messages[0].providerMessageId, "<initial-inquiry@example.test>");
 });
 
 test("historical collection pages forward by UID without rereading newer mail", async () => {

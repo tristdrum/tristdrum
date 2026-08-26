@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import postgres from "postgres";
-import { parseAirbnbConversationEmail } from "@tristdrum/airbnb-core";
+import {
+  parseAirbnbConversationEmail,
+  parseAirbnbInitialInquiryEmail,
+} from "@tristdrum/airbnb-core";
 import { createAirbnbDatabase } from "@tristdrum/airbnb-db";
+import { processDeliveryGuard } from "./delivery.mjs";
 import {
   applyDeliveryGuardDecision,
   cancelActiveGuestTimeRequests,
@@ -755,6 +759,162 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
       evidence_kind: "conversation",
       evidence_subtype: "booking_request_expired",
     });
+
+    const initialInquiryEmail = {
+      mailboxScope: "tristan",
+      providerMessageId: `<initial-inquiry-${randomUUID()}@example.test>`,
+      subject: "Inquiry for Jasmine Studio Stay for Sep 15 - 17, 2026",
+      from: "automated@airbnb.com",
+      replyTo: null,
+      references: [],
+      inReplyTo: null,
+      occurredAt: "2026-08-21T22:00:00.000Z",
+      body: [
+        "RESPOND TO PRINSLOO'S INQUIRY",
+        "Prinsloo",
+        "https://www.airbnb.co.za/hosting/thread/9876543218?thread_type=home_booking",
+        "Identity verified · 9 reviews",
+        "What will be your monthly rate for three months?",
+        "Pre-approve / Decline",
+      ].join("\n"),
+    };
+    const initialInquiryParsed = parseAirbnbInitialInquiryEmail(initialInquiryEmail);
+    const initialInquiryIngested = await ingestConversation(database.sql, {
+      householdId,
+      email: initialInquiryEmail,
+      parsed: initialInquiryParsed,
+    });
+    const initialInquiryCandidate = (await loadShadowCandidates(database.sql, { householdId, limit: 50 }))
+      .find((candidate) => candidate.providerThreadId === "9876543218");
+    assert.equal(initialInquiryCandidate.sourceKind, "initial_inquiry");
+    assert.equal(initialInquiryCandidate.replyRequired, true);
+    assert.equal(initialInquiryCandidate.replyCapable, false);
+    assert.deepEqual({ ...(await admin`
+      select evidence_subtype, normalized_payload->>'sourceKind' as source_kind
+      from airbnb.evidence
+      where household_id = ${householdId} and id = ${initialInquiryIngested.evidenceId}
+    `)[0] }, {
+      evidence_subtype: "airbnb_initial_inquiry",
+      source_kind: "initial_inquiry",
+    });
+
+    const promotedDraft = await storeSupportDraft(database.sql, {
+      householdId,
+      candidate: initialInquiryCandidate,
+      classification: {
+        topic: "pricing",
+        riskTier: "high",
+        replyNeeded: true,
+        summary: "A monthly-rate inquiry needs an Airbnb app reply.",
+        draft: "Thanks, Prinsloo. We will check the monthly rate and get back to you.",
+        autoReply: false,
+        status: "needs_human",
+        alertManagement: true,
+        decisionVersion: 2,
+        decisionSource: "adaptive_agent",
+        deterministicGuard: "initial_inquiry_requires_airbnb_ui",
+      },
+      now: new Date("2026-08-21T22:01:00.000Z"),
+      shadowMode: false,
+    });
+    const replyCapableInquiryEmail = {
+      mailboxScope: "tristan",
+      providerMessageId: `<reply-capable-inquiry-${randomUUID()}@example.test>`,
+      subject: "RE: Inquiry for Jasmine Studio Stay, Sep 15 - 17, 2026",
+      from: "express@airbnb.com",
+      replyTo: "reply-token@reply.airbnb.com",
+      references: ["<initial-inquiry@example.test>"],
+      inReplyTo: "<initial-inquiry@example.test>",
+      occurredAt: "2026-08-21T22:05:00.000Z",
+      body: [
+        "INQUIRY FOR JASMINE STUDIO STAY, SEP 15 - 17, 2026",
+        "For your protection and safety, always communicate through Airbnb.",
+        "PRINSLOO",
+        "Booker",
+        "What will be your monthly rate for three months?",
+        "Reply",
+        "https://www.airbnb.co.za/hosting/thread/9876543218?thread_type=home_booking",
+      ].join("\n"),
+    };
+    const replyCapableParsed = parseAirbnbConversationEmail(replyCapableInquiryEmail);
+    await ingestConversation(database.sql, {
+      householdId,
+      email: replyCapableInquiryEmail,
+      parsed: replyCapableParsed,
+    });
+    const promotedInquiryCandidate = (await loadShadowCandidates(database.sql, { householdId, limit: 50 }))
+      .find((candidate) => candidate.providerThreadId === "9876543218");
+    assert.equal(promotedInquiryCandidate.replyCapable, true);
+    assert.equal(promotedInquiryCandidate.sourceFingerprint, initialInquiryCandidate.sourceFingerprint);
+    await storeSupportDraft(database.sql, {
+      householdId,
+      candidate: promotedInquiryCandidate,
+      classification: {
+        topic: "pricing",
+        riskTier: "low",
+        replyNeeded: true,
+        summary: "The guest asked for a three-month rate.",
+        draft: "Thanks, Prinsloo. We will check the monthly rate and get back to you.",
+        autoReply: true,
+        status: "ready",
+        alertManagement: false,
+        decisionVersion: 2,
+        decisionSource: "adaptive_agent",
+      },
+      now: new Date("2026-08-21T22:06:00.000Z"),
+      shadowMode: false,
+      automaticallyApprove: true,
+    });
+    assert.deepEqual({ ...(await admin`
+      select
+        (select count(*)::integer
+         from airbnb.guest_messages message
+         where message.household_id = ${householdId}
+           and message.thread_id = ${initialInquiryCandidate.id}) as messages,
+        (select count(*)::integer
+         from airbnb.reply_deliveries delivery
+         where delivery.household_id = ${householdId}
+           and delivery.thread_id = ${initialInquiryCandidate.id}) as deliveries,
+        (select status
+         from airbnb.reply_deliveries delivery
+         where delivery.household_id = ${householdId}
+           and delivery.thread_id = ${initialInquiryCandidate.id}
+         limit 1) as delivery_status
+    `)[0] }, {
+      messages: 1,
+      deliveries: 1,
+      delivery_status: "approved",
+    });
+    let sendCount = 0;
+    const deliveryResult = await processDeliveryGuard({
+      sql: database.sql,
+      householdId,
+      deliveryId: promotedDraft.id,
+      now: () => new Date("2026-08-21T22:07:00.000Z"),
+      env: {
+        AIRBNB_SUPPORT_JANE_GMAIL_USER: "jane@example.test",
+        AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD: "configured",
+      },
+      collectMessages: async ({ mailboxScope }) => ({
+        messages: mailboxScope === "tristan" ? [{
+          ...replyCapableInquiryEmail,
+          rfcMessageId: replyCapableInquiryEmail.providerMessageId,
+        }] : [],
+        envelopesFound: mailboxScope === "tristan" ? 1 : 0,
+      }),
+      reconcileSent: async () => [],
+      sendReply: async ({ messageId }) => {
+        sendCount += 1;
+        return { messageId };
+      },
+    });
+    assert.equal(deliveryResult.action, "sent");
+    assert.equal(sendCount, 1);
+    assert.equal((await admin`
+      select status
+      from airbnb.reply_deliveries
+      where household_id = ${householdId} and id = ${promotedDraft.id}
+    `)[0].status, "sent");
   } finally {
     await database?.close();
     await admin.end({ timeout: 5 });
