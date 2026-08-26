@@ -474,7 +474,8 @@ export function supportDisposition(classification) {
     confidence,
     autoReply,
     status: autoReply ? "approved_for_guard" : "needs_human",
-    alertManagement: classification?.alertManagement === true || !autoReply,
+    alertManagement: classification?.alertManagement === true
+      || (classification?.replyNeeded === true && !autoReply),
   };
 }
 
