@@ -83,11 +83,16 @@ export async function collectAirbnbMessages({
         || Date.parse(right.date) - Date.parse(left.date))
       .slice(0, maxRead)
       .sort((left, right) => Date.parse(right.date) - Date.parse(left.date));
+    const messageByEnvelopeId = new Map();
     const readMessage = async (envelope) => {
+      const cached = messageByEnvelopeId.get(envelope.id);
+      if (cached) return cached;
       const message = await client.fetchOne(Number(envelope.id), { source: true }, { uid: true });
       if (!message?.source) return null;
       const parsed = await simpleParser(message.source, { skipHtmlToText: true, skipTextToHtml: true });
-      return { envelope, body: readableBody(parsed) };
+      const result = { envelope, body: readableBody(parsed) };
+      messageByEnvelopeId.set(envelope.id, result);
+      return result;
     };
 
     const messages = [];
@@ -130,6 +135,32 @@ export async function collectAirbnbMessages({
           messages.push(message);
           missingCodes.delete(evidence.confirmationCode);
           if (!missingCodes.size) break;
+        }
+      }
+
+      for (const confirmationCode of [...missingCodes]) {
+        const anchorUids = await client.search({ from: "airbnb.com", body: confirmationCode }, { uid: true });
+        if (!anchorUids.length) continue;
+        const anchorEnvelopes = [];
+        for await (const message of client.fetch(
+          anchorUids,
+          { envelope: true, internalDate: true, uid: true },
+          { uid: true },
+        )) {
+          const envelope = envelopeFromMessage(message);
+          if (describeEvidence({ envelope, body: "" })?.evidenceKind === "confirmed") {
+            anchorEnvelopes.push(envelope);
+          }
+        }
+        anchorEnvelopes.sort((left, right) => Date.parse(right.date) - Date.parse(left.date));
+        for (const envelope of anchorEnvelopes) {
+          const message = await readMessage(envelope);
+          if (!message) continue;
+          const evidence = describeEvidence(message);
+          if (evidence?.evidenceKind !== "confirmed" || evidence.confirmationCode !== confirmationCode) continue;
+          if (!messages.some((existing) => existing.envelope.id === envelope.id)) messages.push(message);
+          missingCodes.delete(confirmationCode);
+          break;
         }
       }
       missingConfirmationAnchorCount = missingCodes.size;

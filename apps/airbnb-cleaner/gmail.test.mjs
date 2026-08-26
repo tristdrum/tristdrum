@@ -174,3 +174,78 @@ test("fetches the original confirmation when a target-date update changes the bo
   assert.deepEqual(result.messages.map(({ envelope }) => envelope.id), ["21", "22"]);
   assert.deepEqual(calls, ["connect", "source:21", "source:23", "source:22", "release", "logout"]);
 });
+
+test("recovers a confirmation anchor by code when it predates the ordinary lookback", async () => {
+  const calls = [];
+  const envelopes = new Map([
+    [40, { uid: 40, date: "2026-01-10T10:00:00Z", subject: "Reservation confirmed - Historical Guest arrives Aug 20" }],
+    [41, { uid: 41, date: "2026-08-25T10:00:00Z", subject: "Reservation updated for HMHISTORIC1" }],
+  ]);
+  const bodies = {
+    40: "Confirmed booking\nCONFIRMATION CODE\nHMHISTORIC1",
+    41: "Reservation update\nCONFIRMATION CODE\nHMHISTORIC1",
+  };
+  const client = {
+    usable: true,
+    async connect() { calls.push("connect"); },
+    async getMailboxLock() { return { release: () => calls.push("release") }; },
+    async search(query) {
+      if (query.body) {
+        calls.push(`anchor-search:${query.body}`);
+        return [40, 41];
+      }
+      calls.push("window-search");
+      return [41];
+    },
+    async *fetch(uids) {
+      for (const uid of uids) {
+        const envelope = envelopes.get(uid);
+        yield {
+          uid,
+          internalDate: new Date(envelope.date),
+          envelope: { subject: envelope.subject, from: [{ name: "Airbnb", address: "automated@airbnb.com" }] },
+        };
+      }
+    },
+    async fetchOne(uid) {
+      calls.push(`source:${uid}`);
+      return { source: Buffer.from(
+        `From: Airbnb <automated@airbnb.com>\r\nSubject: ${envelopes.get(uid).subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${bodies[uid]}\r\n`,
+      ) };
+    },
+    async logout() { calls.push("logout"); },
+    close() {},
+  };
+  const describeEvidence = ({ envelope, body }) => {
+    const evidenceKind = /updated/i.test(envelope.subject)
+      ? "supplemental"
+      : /confirmed/i.test(envelope.subject) ? "confirmed" : "ignored";
+    return {
+      evidenceKind,
+      evidenceSubtype: evidenceKind === "supplemental" ? "update" : evidenceKind,
+      confirmationCode: /CONFIRMATION CODE\s+([A-Z0-9]+)/i.exec(body)?.[1] ?? "",
+    };
+  };
+
+  const result = await collectAirbnbMessages({
+    afterDate: "2026-05-27",
+    maxRead: 10,
+    env: { AIRBNB_GMAIL_USER: "test@example.com", AIRBNB_GMAIL_APP_PASSWORD: "not-a-real-secret" },
+    createClient: () => client,
+    candidateEnvelope: () => true,
+    subjectMayTouchTarget: (subject) => /updated/i.test(subject),
+    describeEvidence,
+  });
+
+  assert.equal(result.missingConfirmationAnchorCount, 0);
+  assert.deepEqual(result.messages.map(({ envelope }) => envelope.id), ["41", "40"]);
+  assert.deepEqual(calls, [
+    "connect",
+    "window-search",
+    "source:41",
+    "anchor-search:HMHISTORIC1",
+    "source:40",
+    "release",
+    "logout",
+  ]);
+});
