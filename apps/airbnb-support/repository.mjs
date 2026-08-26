@@ -308,16 +308,19 @@ export async function storeSupportDraft(sql, {
 }) {
   const idempotencyKey = `airbnb-support:${candidate.providerThreadId}:${candidate.sourceFingerprint}`;
   const outboundMessageId = `<${contentFingerprint(`${householdId}:${idempotencyKey}`).slice(0, 32)}@airbnb.tristdrum.com>`;
-  const initialStatus = automaticallyApprove ? "approved" : "needs_approval";
+  const noReplyNeeded = classification.replyNeeded === false;
+  const initialStatus = noReplyNeeded ? "cancelled" : automaticallyApprove ? "approved" : "needs_approval";
+  const initialCancellationReason = noReplyNeeded ? "No reply needed." : null;
   const rows = await sql`
     insert into airbnb.reply_deliveries (
       household_id, thread_id, source_fingerprint, source_last_event_at, topic,
-      risk_tier, classification, draft_text, status, idempotency_key, outbound_message_id
+      risk_tier, classification, draft_text, status, cancellation_reason,
+      idempotency_key, outbound_message_id
     ) values (
       ${householdId}, ${candidate.id}, ${candidate.sourceFingerprint}, ${candidate.latestEventAt},
       ${classification.topic}, ${classification.riskTier},
       ${sql.json({ ...classification, shadowMode })}, ${classification.draft},
-      ${initialStatus}, ${idempotencyKey}, ${outboundMessageId}
+      ${initialStatus}, ${initialCancellationReason}, ${idempotencyKey}, ${outboundMessageId}
     )
     on conflict (household_id, idempotency_key)
     do update set source_last_event_at = excluded.source_last_event_at,
@@ -326,20 +329,39 @@ export async function storeSupportDraft(sql, {
                   classification = excluded.classification,
                   draft_text = excluded.draft_text,
                   status = case
+                    when airbnb.reply_deliveries.status in ('sent', 'handled_by_human', 'ambiguous')
+                    then airbnb.reply_deliveries.status
+                    when excluded.classification @> '{"replyNeeded": false}'::jsonb
+                    then 'cancelled'
                     when airbnb.reply_deliveries.status = 'approved'
                       and airbnb.reply_deliveries.approved_by is null
                       and not (excluded.classification @> '{"messageWhitelisted": true}'::jsonb)
                     then 'needs_approval'
                     else airbnb.reply_deliveries.status
                   end,
+                  cancellation_reason = case
+                    when excluded.classification @> '{"replyNeeded": false}'::jsonb
+                    then 'No reply needed.'
+                    else airbnb.reply_deliveries.cancellation_reason
+                  end,
                   updated_at = now()
     returning id, status
   `;
   await sql`
     update airbnb.guest_threads
-    set status = 'needs_human', risk_tier = ${classification.riskTier}
+    set status = ${noReplyNeeded ? "handled" : "needs_human"}, risk_tier = ${classification.riskTier}
     where household_id = ${householdId} and id = ${candidate.id}
   `;
+  if (noReplyNeeded) {
+    await sql`
+      update airbnb.alerts
+      set status = 'resolved', resolved_at = ${now}, updated_at = ${now}
+      where household_id = ${householdId}
+        and status in ('open', 'suppressed', 'notified')
+        and alert_type in ('guest_escalation', 'guest_overdue')
+        and details->>'threadId' = ${candidate.id}
+    `;
+  }
   const escalationStages = classification.alertManagement === true
     ? supportEscalationStages({ latestEventAt: candidate.latestEventAt, now })
     : [];

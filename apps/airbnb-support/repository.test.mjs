@@ -76,6 +76,51 @@ test("automatically answerable drafts do not create Management escalations", asy
   assert.equal(queries.some(({ query }) => query.includes("insert into airbnb.alerts")), false);
 });
 
+test("messages needing no reply become terminal and resolve old alerts", async () => {
+  const queries = [];
+  const sql = async (strings, ...values) => {
+    const query = strings.join("?");
+    queries.push({ query, values });
+    if (query.includes("insert into airbnb.reply_deliveries")) {
+      return [{ id: "delivery-quiet", status: "cancelled" }];
+    }
+    return [];
+  };
+  sql.json = (value) => value;
+  const stored = await storeSupportDraft(sql, {
+    householdId: "22222222-2222-4222-8222-222222222222",
+    candidate: {
+      id: "33333333-3333-4333-8333-333333333333",
+      providerThreadId: "thread-quiet",
+      sourceFingerprint: "source-quiet",
+      latestEventAt: "2026-08-26T05:50:01.000Z",
+      listingName: "Bougainvillea Courtyard Studio",
+      guestDisplayName: "Guest",
+    },
+    classification: {
+      topic: "thanks",
+      riskTier: "low",
+      confidence: 0.99,
+      replyNeeded: false,
+      draft: null,
+      summary: "No reply is needed.",
+      alertManagement: false,
+    },
+    now: new Date("2026-08-26T05:51:00.000Z"),
+    shadowMode: false,
+  });
+
+  assert.equal(stored.status, "cancelled");
+  assert.deepEqual(stored.alertStages, []);
+  assert.equal(queries[0].values.includes("No reply needed."), true);
+  assert.equal(queries.some(({ query, values }) => (
+    query.includes("update airbnb.guest_threads") && values.includes("handled")
+  )), true);
+  assert.equal(queries.some(({ query }) => (
+    query.includes("update airbnb.alerts") && query.includes("status = 'resolved'")
+  )), true);
+});
+
 test("support alert loading revalidates thread and delivery state", async () => {
   let query = "";
   const sql = async (strings) => {
