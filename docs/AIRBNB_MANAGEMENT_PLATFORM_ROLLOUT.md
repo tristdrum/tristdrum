@@ -152,7 +152,7 @@ completed on 26 August.
   runs every five minutes; the shadow job is inactive. Eight cleaner and four
   stock jobs remain active.
 - Current cleaner image: `deployment-01M0YT1D2KKCJNTGFSH2X26ZKW`.
-- Current support image: `deployment-01M0YVPKYWH2RFGNE955VME08Y`.
+- Current support image: `deployment-01M0Z02YDNGCQ8502PP9ZH6B4W`.
 - The Anele late-arrival incident is a regression: an arrival before the booked
   date receives an immediate grounded acknowledgement and Management alert,
   while the final Tristan/Jane Sent-mail check can still veto delivery.
@@ -163,7 +163,7 @@ completed on 26 August.
 - Messages with `replyNeeded: false` now become terminal `cancelled` deliveries
   with reason `No reply needed`, mark the thread handled, and resolve stale
   alerts. Human-review alerts are created only when a reply is genuinely needed
-  or the classifier explicitly marks the case urgent.
+  or the adaptive agent requests host attention.
 - Cleaner MIME selection now preserves confirmations under the ordinary read
   cap and recovers missing update anchors by confirmation code in a bounded
   400-day window. Supabase `date` values are normalized before ledger planning.
@@ -176,6 +176,40 @@ completed on 26 August.
   `DEPLOY_INTERRUPTED` error rather than deleted or presented as success.
 - Stock remains observation/Management-only. Order placement is disabled and
   there are no order-placement audit events.
+
+### Adaptive support agent rollout
+
+The classifier and topic allowlist were removed on 26 August in PR #19, with a
+focused lifecycle ownership hotfix in PR #20. Production source is merge commit
+`2b67802c29fe88b848397da23e5291fe4d6987ab`.
+
+- One `gpt-5.6-sol` Responses API decision at `xhigh` reasoning now receives the
+  recent conversation, stay phase, listing and guest identity, verified property
+  facts, hosting knowledge, and active timing request. Its output is limited to
+  reply need, send/hold, Management attention, summary, and natural draft.
+- The code-level invariants are the final Tristan/Jane human-reply race check,
+  stable idempotency and Sent reconciliation, verified destinations, and exact
+  cleaner timing side effects. There is no topic classifier or reply allowlist.
+- Exact Monde and Zisanda regressions prove completed-stay tense, natural guest
+  names, and warm emoji matching. Additional replay covers the before-booking
+  arrival incident, complaints, booking changes, early-check-in creation and
+  withdrawal, late-checkout refusal, readiness confirmation, and prompt injection.
+- The first production shadow run failed closed with zero external writes and
+  exposed that booking-expiry evidence and its audit actor did not satisfy the
+  support worker RLS policies. PR #20 aligned both records with their existing
+  support ownership and added a real support-role integration replay.
+- The accepted shadow run `68795b8f-fb7a-409a-b9d1-ad2e2ee0f892` processed 27
+  canonical emails, resolved one booking lifecycle event, produced one Sol/xhigh
+  decision, and had zero decision failures, replies, Management sends, timing
+  writes, or ambiguous deliveries.
+- The first ordinary live poll `26210a40-9b1c-4753-b244-4546d7044cb0` succeeded
+  with one provider-confirmed reply, zero ambiguity, and zero decision failures.
+  Sent Mail contains the exact address/airport-transfer follow-up with no AI
+  footer. Existing verified Management alerts prevented duplicate notifications.
+- The release gate passed 74 pgTAP assertions and 263 application tests,
+  including 95 support tests against the real local RLS role, plus web lint and
+  production build. Two independent review rounds and the focused hotfix review
+  ended with no unresolved findings.
 
 ## Production verification
 
@@ -226,10 +260,10 @@ After that guarded cutover:
 - Heartbeat `airbnb-cleaner-midday-cutover-check` performs the daily personal
   platform and rollback audit at 14:25 SAST.
 - The latest cleaner and support repairs reset the clean-run clock at
-  2026-08-26 13:06 SAST. Require 72 clean hours before treating the replacement
-  as stable; the new stability checkpoint is 2026-08-29 13:06 SAST.
+  2026-08-26 14:26 SAST. Require 72 clean hours before treating the replacement
+  as stable; the new stability checkpoint is 2026-08-29 14:26 SAST.
 - Do not delete the stopped Min app or rollback data before the seven-day gate.
-  The earliest retirement checkpoint is 2026-09-02 13:06 SAST, after seven full
+  The earliest retirement checkpoint is 2026-09-02 14:26 SAST, after seven full
   clean days from the latest repairs. Extend the heartbeat if verification
   delays retirement.
 - Delete old infrastructure only after schedules, receipts, WhatsApp readback,
