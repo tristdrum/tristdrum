@@ -3,6 +3,7 @@ import postgres from "postgres";
 import {
   parseAirbnbBookingLifecycleEmail,
   parseAirbnbConversationEmail,
+  parseAirbnbInitialInquiryEmail,
 } from "@tristdrum/airbnb-core";
 import {
   createAirbnbDatabase,
@@ -79,12 +80,29 @@ function fallbackDecision(error) {
   };
 }
 
-export function canReuseStoredDecision(decision, mode) {
+export function canReuseStoredDecision(decision, mode, candidate = null) {
   return Boolean(
     decision?.decisionVersion === 2
     && decision?.decisionSource === "adaptive_agent"
-    && !(mode === "live" && decision?.shadowMode === true),
+    && !(mode === "live" && decision?.shadowMode === true)
+    && !(
+      decision?.deterministicGuard === "initial_inquiry_requires_airbnb_ui"
+      && candidate?.replyCapable === true
+    )
   );
+}
+
+export function applyReplyRouteGuard(decision, candidate) {
+  if (candidate?.replyRequired !== true || candidate?.replyCapable === true) return decision;
+  return {
+    ...decision,
+    replyNeeded: true,
+    autoReply: false,
+    status: "needs_human",
+    alertManagement: true,
+    riskTier: "high",
+    deterministicGuard: "initial_inquiry_requires_airbnb_ui",
+  };
 }
 
 export async function runSupport({
@@ -168,7 +186,7 @@ export async function runSupport({
     const collected = canonicalResult.value;
     const ingested = [];
     for (const email of collected.messages) {
-      const parsed = parseAirbnbConversationEmail(email);
+      const parsed = parseAirbnbConversationEmail(email) ?? parseAirbnbInitialInquiryEmail(email);
       if (!parsed) continue;
       ingested.push(await ingestConversation(ownDatabase.sql, { householdId, email, parsed }));
     }
@@ -216,7 +234,7 @@ export async function runSupport({
     let decisionFailureCount = 0;
     const decideAndStore = async (candidate) => {
       let decision;
-      const existingDecision = canReuseStoredDecision(candidate.existingDecision, mode)
+      const existingDecision = canReuseStoredDecision(candidate.existingDecision, mode, candidate)
         ? candidate.existingDecision
         : null;
       if (existingDecision) {
@@ -238,6 +256,7 @@ export async function runSupport({
         decisionFailureCount += 1;
         decision = fallbackDecision(error);
       }
+      decision = applyReplyRouteGuard(decision, candidate);
       let timeRequestOutcome = null;
       const operationalRequest = decision.operationalRequest;
       if (

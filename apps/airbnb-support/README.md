@@ -1,6 +1,6 @@
 # Airbnb support
 
-Private Fly worker for Tristan's canonical `express@airbnb.com` conversation stream.
+Private Fly worker for Tristan's Airbnb conversation stream.
 
 - Every Airbnb `Host` event is treated as a human reply; the worker never tries to infer whether Tristan or Jane typed it.
 - OpenAI Responses calls use `gpt-5.6-sol`, xhigh reasoning, strict JSON schema, `store: false`, and no tools.
@@ -11,6 +11,7 @@ Private Fly worker for Tristan's canonical `express@airbnb.com` conversation str
 - A cleaner must explicitly say the named unit is ready before the guest is told it is ready, and that message is never queued before 13:00. Without a cleaner response, the worker stays quiet unless the guest follows up.
 - Tristan and Jane Gmail sources are fetched concurrently with a 30-second deadline. OpenAI requests default to 25 seconds and live delivery is limited to one guarded reply per run, keeping work inside the scheduler's 180-second budget.
 - Tristan's `express@airbnb.com` copy is always the SMTP thread target. Jane's trusted Airbnb copies are supplemental veto evidence only, so a newer host or guest event can stop delivery without rerouting the reply through Jane's mailbox.
+- Trusted initial inquiry notices from `automated@airbnb.com` are ingested even before an SMTP-capable thread copy exists. The agent drafts the response and alerts Management, but cannot email the guest until Airbnb supplies the matching `express@airbnb.com` route; both copies converge into one conversation and delivery.
 - An ambiguous SMTP result never retries automatically. It raises one Management alert and must be marked sent, explicitly retried, or cancelled from the dashboard after Sent mail is checked.
 - Management delivery is limited to one verified WhatsApp alert per run.
 - The deployed service defaults to `shadow` mode. Live execution fails closed unless the global confirmation gate and the separate reviewed-delivery, autonomous-reply, or Management-alert switches are explicitly enabled.

@@ -78,6 +78,9 @@ test("candidate loading uses an explicit activation cutoff instead of a rolling 
       latestEventAt: "2026-08-01T10:00:00.000Z",
       guestMessage: "Is the Wi-Fi available?",
       facts: null,
+      sourceKind: "initial_inquiry",
+      replyRequired: true,
+      replyCapable: false,
       existingDecision: null,
       existingDraft: null,
     }];
@@ -93,6 +96,10 @@ test("candidate loading uses an explicit activation cutoff instead of a rolling 
   assert.match(queryText, /thread\.last_guest_at\s*>=/i);
   assert.doesNotMatch(queryText, /now\(\)\s*-/i);
   assert.deepEqual(candidates[0].facts, {});
+  assert.equal(candidates[0].sourceKind, "initial_inquiry");
+  assert.equal(candidates[0].replyRequired, true);
+  assert.equal(candidates[0].replyCapable, false);
+  assert.match(queryText, /airbnb_initial_inquiry/);
 });
 
 test("automatically answerable drafts do not create Management escalations", async () => {
@@ -329,6 +336,7 @@ test("delivery queue safely recovers stale claims and admits only versioned agen
     && /operational_readiness/.test(query)
     && /decisionVersion/.test(query)
     && /autoReply/.test(query)
+    && /initial_inquiry_requires_airbnb_ui/.test(query)
   )), true);
 });
 
