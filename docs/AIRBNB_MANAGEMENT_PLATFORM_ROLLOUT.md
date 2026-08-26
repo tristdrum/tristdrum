@@ -152,7 +152,7 @@ completed on 26 August.
   runs every five minutes; the shadow job is inactive. Eight cleaner and four
   stock jobs remain active.
 - Current cleaner image: `deployment-01M0YT1D2KKCJNTGFSH2X26ZKW`.
-- Current support image: `deployment-01M0Z8QZ45F7T2J1BZZMAR1EHM`.
+- Current support image: `deployment-01M0ZM70DTYK7JAHRBW9VTJ7E5`.
 - The Anele late-arrival incident is a regression: an arrival before the booked
   date receives an immediate grounded acknowledgement and Management alert,
   while the final Tristan/Jane Sent-mail check can still veto delivery.
@@ -180,9 +180,9 @@ completed on 26 August.
 ### Adaptive support agent rollout
 
 The classifier and topic allowlist were removed on 26 August in PR #19, with a
-focused lifecycle ownership hotfix in PR #20 and bounded IMAP cleanup repair in
-PR #22. Production source is merge commit
-`b0130fb4a518e433097645fe215838b364e95018`.
+focused lifecycle ownership hotfix in PR #20, bounded IMAP cleanup repair in
+PR #22, and initial-inquiry ingestion repair in PR #24. Production source is
+merge commit `a824b1833fb83ec53f701407fdd6674d351021ba`.
 
 - One `gpt-5.6-sol` Responses API decision at `xhigh` reasoning now receives the
   recent conversation, stay phase, listing and guest identity, verified property
@@ -218,12 +218,24 @@ PR #22. Production source is merge commit
   `fea00522-5b16-494c-886f-e377463c1745` then succeeded. The live run sent one
   provider-confirmed Bright late-arrival acknowledgement with no footer,
   ambiguity, or decision failure.
+- PR #24 added trusted `automated@airbnb.com` initial inquiries to the canonical
+  support stream. A notice without an SMTP route can now produce an intelligent
+  draft and verified Management alert but never a guest email. Its later
+  `express@airbnb.com` copy converges into the same message and delivery, retains
+  the final human-reply guard, and retires only the obsolete route alert after a
+  confirmed send. A genuine host-action alert survives a simultaneous reply.
+- Production shadow run `a29c62c3-4b6b-40bd-a7e2-9c1d93774998` ingested 34
+  canonical emails and produced three Sol/xhigh decisions with zero failures and
+  zero external writes. Live runs `bbc5b2ef-26f9-435d-a6a0-966320285be4` and
+  `bb1daaf1-bae7-41a4-afa6-c62ed3e6459a` then sent and read back exactly two
+  Management alerts for the previously missed Prinsloo long-stay inquiries;
+  no guest reply was attempted because Airbnb had not supplied a reply route.
 - One stock Management run observed a transient WhatsApp HTTP 404 and sent
   nothing. The writer was paused; both groups then returned HTTP 200 and two
   observation runs loaded 103 messages with no read error, after which the writer
   was restored. Order placement remained disabled throughout.
-- The final release gate passed 74 pgTAP assertions and 266 application tests,
-  including 98 support tests against the real local RLS role, plus web lint and
+- The final release gate passed 74 pgTAP assertions and 270 application tests,
+  including 100 support tests against the real local RLS role, plus web lint and
   production build. Independent review ended with no unresolved findings.
 
 ## Production verification
@@ -275,11 +287,12 @@ After that guarded cutover:
 - Heartbeat `airbnb-cleaner-midday-cutover-check` performs hourly daytime personal
   platform and exact outbound-message audits at 25 minutes past each hour from
   07:25 through 21:25 SAST.
-- The latest cleaner and support repairs reset the clean-run clock at
-  2026-08-26 16:56 SAST. Require 72 clean hours before treating the replacement
-  as stable; the new stability checkpoint is 2026-08-29 16:56 SAST.
+- The latest support repair reset the clean-run clock at the second verified live
+  acceptance on 2026-08-26 20:24:45 SAST. Require 72 clean hours before treating
+  the replacement as stable; the new stability checkpoint is
+  2026-08-29 20:24:45 SAST.
 - Do not delete the stopped Min app or rollback data before the seven-day gate.
-  The earliest retirement checkpoint is 2026-09-02 16:56 SAST, after seven full
+  The earliest retirement checkpoint is 2026-09-02 20:24:45 SAST, after seven full
   clean days from the latest repairs. Extend the heartbeat if verification
   delays retirement.
 - Delete old infrastructure only after schedules, receipts, WhatsApp readback,
