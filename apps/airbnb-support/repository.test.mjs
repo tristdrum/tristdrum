@@ -4,10 +4,67 @@ import {
   loadDeliveryGuardCandidates,
   loadShadowCandidates,
   loadSuppressedSupportAlerts,
+  reconcileBookingLifecycle,
   recordAmbiguousDeliveryFailure,
   recordDeliveryGuardFailure,
   storeSupportDraft,
+  supportStayLabelMatches,
 } from "./repository.mjs";
+
+test("booking lifecycle matching requires the same stay dates", () => {
+  assert.equal(supportStayLabelMatches("SEP 4 – 6", "2026-09-04", "2026-09-06"), true);
+  assert.equal(supportStayLabelMatches("SEP 4 – 6", "2026-09-05", "2026-09-06"), false);
+  assert.equal(supportStayLabelMatches("DEC 31 – JAN 2", "2026-12-31", "2027-01-02"), true);
+});
+
+test("non-payment lifecycle evidence resolves exactly one matching support thread", async () => {
+  const queries = [];
+  const transaction = async (strings, ...values) => {
+    const query = strings.join("?");
+    queries.push({ query, values });
+    if (query.includes("insert into airbnb.evidence")) return [{ id: "evidence-expired" }];
+    if (query.includes("from airbnb.guest_threads thread")) {
+      return [{
+        id: "thread-somila",
+        providerThreadId: "thread-provider",
+        guestDisplayName: "SOMILA",
+        lastGuestAt: "2026-08-26T10:06:34.000Z",
+        stayLabel: "SEP 4 – 6",
+      }];
+    }
+    return [];
+  };
+  transaction.json = (value) => value;
+  const sql = async () => [];
+  sql.begin = async (callback) => callback(transaction);
+
+  const result = await reconcileBookingLifecycle(sql, {
+    householdId: "22222222-2222-4222-8222-222222222222",
+    email: {
+      providerMessageId: "<expired@example.test>",
+      from: "automated@airbnb.com",
+      subject: "Sep 4 - 6 request dismissed - no payment",
+      occurredAt: "2026-08-26T10:23:00.000Z",
+    },
+    lifecycle: {
+      kind: "request_expired",
+      reason: "nonpayment",
+      guestName: "Somila",
+      unitNumber: 1,
+      listingName: "Bougainvillea Courtyard Studio",
+      checkIn: "2026-09-04",
+      checkOut: "2026-09-06",
+    },
+  });
+
+  assert.equal(result.status, "resolved");
+  assert.equal(result.threadId, "thread-somila");
+  assert.equal(queries.some(({ query }) => query.includes("update airbnb.reply_deliveries")), true);
+  assert.equal(queries.some(({ query }) => query.includes("update airbnb.alerts")), true);
+  assert.equal(queries.some(({ query }) => (
+    query.includes("insert into airbnb.audit_events") && query.includes("guest_booking_request_expired")
+  )), true);
+});
 
 test("candidate loading uses an explicit activation cutoff instead of a rolling age window", async () => {
   let queryText = "";

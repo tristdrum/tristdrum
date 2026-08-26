@@ -193,6 +193,119 @@ export async function ingestSupplementalConversation(sql, { householdId, email, 
   };
 }
 
+const STAY_MONTHS = Object.freeze(new Map([
+  ["JAN", 1], ["FEB", 2], ["MAR", 3], ["APR", 4], ["MAY", 5], ["JUN", 6],
+  ["JUL", 7], ["AUG", 8], ["SEP", 9], ["OCT", 10], ["NOV", 11], ["DEC", 12],
+]));
+
+export function supportStayLabelMatches(stayLabel, checkIn, checkOut) {
+  const match = /\b([A-Z]{3})\s+(\d{1,2})\s*[\u2013\u2014-]\s*(?:([A-Z]{3})\s+)?(\d{1,2})\b/.exec(
+    String(stayLabel ?? "").normalize("NFKC").toUpperCase(),
+  );
+  if (!match) return false;
+  const start = new Date(`${checkIn}T00:00:00Z`);
+  const end = new Date(`${checkOut}T00:00:00Z`);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return false;
+  const startMonth = STAY_MONTHS.get(match[1]);
+  const endMonth = STAY_MONTHS.get(match[3] ?? match[1]);
+  return startMonth === start.getUTCMonth() + 1
+    && Number(match[2]) === start.getUTCDate()
+    && endMonth === end.getUTCMonth() + 1
+    && Number(match[4]) === end.getUTCDate();
+}
+
+export async function reconcileBookingLifecycle(sql, { householdId, email, lifecycle }) {
+  return sql.begin(async (transaction) => {
+    const evidenceRows = await transaction`
+      insert into airbnb.evidence (
+        household_id, mailbox_scope, provider, provider_message_id, sender_address,
+        subject, evidence_kind, evidence_subtype, occurred_at, content_hash, normalized_payload
+      ) values (
+        ${householdId}, 'tristan', 'gmail', ${email.providerMessageId}, ${email.from},
+        ${email.subject}, 'ignored', 'booking_request_expired', ${email.occurredAt},
+        ${contentFingerprint(JSON.stringify(lifecycle))}, ${transaction.json(lifecycle)}
+      )
+      on conflict (household_id, mailbox_scope, provider, provider_message_id)
+      do update set content_hash = excluded.content_hash,
+                    normalized_payload = excluded.normalized_payload,
+                    occurred_at = excluded.occurred_at
+      returning id
+    `;
+    const normalizedGuest = lifecycle.guestName.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const candidates = await transaction`
+      select thread.id, thread.provider_thread_id, thread.guest_display_name,
+             thread.last_guest_at, conversation.stay_label
+      from airbnb.guest_threads thread
+      join airbnb.properties property
+        on property.household_id = thread.household_id
+       and property.id = thread.property_id
+      left join lateral (
+        select evidence.normalized_payload->>'stayLabel' as stay_label
+        from airbnb.evidence evidence
+        where evidence.household_id = thread.household_id
+          and evidence.mailbox_scope = 'tristan'
+          and evidence.evidence_kind = 'conversation'
+          and evidence.provider_thread_id = thread.provider_thread_id
+        order by evidence.occurred_at desc
+        limit 1
+      ) conversation on true
+      where thread.household_id = ${householdId}
+        and property.unit_number = ${lifecycle.unitNumber}
+        and thread.status in ('open', 'needs_human')
+        and thread.last_guest_at <= ${email.occurredAt}
+        and lower(regexp_replace(coalesce(thread.guest_display_name, ''), '[^a-z0-9]', '', 'g')) = ${normalizedGuest}
+      order by thread.last_guest_at desc
+    `;
+    const matches = candidates.filter((candidate) => supportStayLabelMatches(
+      candidate.stayLabel,
+      lifecycle.checkIn,
+      lifecycle.checkOut,
+    ));
+    if (matches.length !== 1) {
+      return {
+        status: matches.length ? "ambiguous" : "not_found",
+        evidenceId: evidenceRows[0].id,
+        matchCount: matches.length,
+      };
+    }
+
+    const thread = matches[0];
+    await transaction`
+      update airbnb.reply_deliveries
+      set status = 'cancelled',
+          cancellation_reason = 'Airbnb automatically declined the reservation request after payment was not completed.',
+          updated_at = ${email.occurredAt}
+      where household_id = ${householdId}
+        and thread_id = ${thread.id}
+        and status not in ('sent', 'handled_by_human', 'cancelled', 'ambiguous')
+    `;
+    await transaction`
+      update airbnb.guest_threads
+      set status = 'handled', updated_at = ${email.occurredAt}
+      where household_id = ${householdId} and id = ${thread.id}
+    `;
+    await transaction`
+      update airbnb.alerts
+      set status = 'resolved', resolved_at = ${email.occurredAt}, updated_at = ${email.occurredAt}
+      where household_id = ${householdId}
+        and status in ('open', 'suppressed', 'notified')
+        and alert_type in ('guest_escalation', 'guest_overdue')
+        and details->>'threadId' = ${thread.id}
+    `;
+    await transaction`
+      insert into airbnb.audit_events (
+        household_id, actor_type, actor_id, action, entity_type, entity_id, details, occurred_at
+      ) values (
+        ${householdId}, 'system', 'support-lifecycle', 'guest_booking_request_expired',
+        'guest_thread', ${thread.id},
+        ${transaction.json({ reason: "airbnb_nonpayment_auto_decline", evidenceId: evidenceRows[0].id })},
+        ${email.occurredAt}
+      )
+    `;
+    return { status: "resolved", evidenceId: evidenceRows[0].id, threadId: thread.id, matchCount: 1 };
+  });
+}
+
 export async function loadShadowCandidates(sql, { householdId, limit = 8, notBefore = null }) {
   const rows = await sql`
     select

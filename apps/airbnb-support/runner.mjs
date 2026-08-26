@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
-import { parseAirbnbConversationEmail } from "@tristdrum/airbnb-core";
+import {
+  parseAirbnbBookingLifecycleEmail,
+  parseAirbnbConversationEmail,
+} from "@tristdrum/airbnb-core";
 import {
   createAirbnbDatabase,
   recordJobFinish,
@@ -9,7 +12,10 @@ import {
 } from "@tristdrum/airbnb-db";
 import { classifyGuestMessage } from "./classifier.mjs";
 import { processDeliveryGuard } from "./delivery.mjs";
-import { collectConversationMessages } from "./gmail.mjs";
+import {
+  collectBookingLifecycleMessages,
+  collectConversationMessages,
+} from "./gmail.mjs";
 import { notifySupportManagement } from "./management.mjs";
 import {
   captureGuestTimeRequest,
@@ -23,6 +29,7 @@ import {
   latestSupportRun,
   loadDeliveryGuardCandidates,
   loadShadowCandidates,
+  reconcileBookingLifecycle,
   reconcileGuestTimeRequestNotifications,
   storeSupportDraft,
 } from "./repository.mjs";
@@ -77,12 +84,14 @@ export async function runSupport({
   mode = "shadow",
   now = () => new Date(),
   collectMessages = collectConversationMessages,
+  collectLifecycleMessages = collectBookingLifecycleMessages,
   classify = classifyGuestMessage,
   processDelivery = processDeliveryGuard,
   notifyManagement = notifySupportManagement,
   captureTimeRequest = captureGuestTimeRequest,
   withdrawTimeRequest = withdrawGuestTimeRequest,
   processReadiness = processTimeRequestReadiness,
+  reconcileLifecycle = reconcileBookingLifecycle,
   database = null,
   env = process.env,
 } = {}) {
@@ -137,11 +146,18 @@ export async function runSupport({
         env,
       })
       : Promise.resolve({ messages: [], envelopesFound: 0 });
-    const [canonicalResult, supplementalResult] = await Promise.allSettled([
+    const lifecycleCollection = collectLifecycleMessages({
+      since,
+      maxRead: Number.parseInt(env.AIRBNB_SUPPORT_LIFECYCLE_MAX_EMAILS ?? "100", 10),
+      env,
+    });
+    const [canonicalResult, supplementalResult, lifecycleResult] = await Promise.allSettled([
       canonicalCollection,
       supplementalCollection,
+      lifecycleCollection,
     ]);
     if (canonicalResult.status === "rejected") throw canonicalResult.reason;
+    if (lifecycleResult.status === "rejected") throw lifecycleResult.reason;
     const collected = canonicalResult.value;
     const ingested = [];
     for (const email of collected.messages) {
@@ -171,6 +187,17 @@ export async function runSupport({
       supplementalError = sanitizedError(new Error("Jane's supplemental Gmail credentials are incomplete."));
     }
     const janeMailboxAvailable = janeConfigured && supplementalResult.status === "fulfilled";
+    const lifecycleCollected = lifecycleResult.value;
+    const lifecycleOutcomes = [];
+    for (const email of lifecycleCollected.messages) {
+      const lifecycle = parseAirbnbBookingLifecycleEmail(email);
+      if (!lifecycle) continue;
+      lifecycleOutcomes.push(await reconcileLifecycle(ownDatabase.sql, {
+        householdId,
+        email,
+        lifecycle,
+      }));
+    }
 
     const candidates = await loadShadowCandidates(ownDatabase.sql, {
       householdId,
@@ -327,6 +354,10 @@ export async function runSupport({
       supplementalEmailsFound: supplemental.envelopesFound,
       conversationsIngested: ingested.length,
       supplementalConversationsIngested: supplementalIngested.length,
+      lifecycleEmailsFound: lifecycleCollected.envelopesFound,
+      lifecycleResolvedCount: lifecycleOutcomes.filter((item) => item.status === "resolved").length,
+      lifecycleNotFoundCount: lifecycleOutcomes.filter((item) => item.status === "not_found").length,
+      lifecycleAmbiguousCount: lifecycleOutcomes.filter((item) => item.status === "ambiguous").length,
       supplementalMailboxStatus: supplementalError
         ? { status: "error", error: supplementalError }
         : janeUserConfigured && janePasswordConfigured
