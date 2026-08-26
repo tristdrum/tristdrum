@@ -74,10 +74,17 @@ function fallbackDecision(error) {
     status: "needs_human",
     alertManagement: true,
     decisionSource: "decision_error",
-    decisionVersion: 2,
     model: null,
     error: sanitizedError(error),
   };
+}
+
+export function canReuseStoredDecision(decision, mode) {
+  return Boolean(
+    decision?.decisionVersion === 2
+    && decision?.decisionSource === "adaptive_agent"
+    && !(mode === "live" && decision?.shadowMode === true),
+  );
 }
 
 export async function runSupport({
@@ -209,7 +216,7 @@ export async function runSupport({
     let decisionFailureCount = 0;
     const decideAndStore = async (candidate) => {
       let decision;
-      const existingDecision = candidate.existingDecision?.decisionVersion === 2
+      const existingDecision = canReuseStoredDecision(candidate.existingDecision, mode)
         ? candidate.existingDecision
         : null;
       if (existingDecision) {

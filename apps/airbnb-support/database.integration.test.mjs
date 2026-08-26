@@ -17,9 +17,11 @@ import {
   loadActiveGuestTimeRequestsForReplacement,
   loadDueReadinessRequests,
   loadReadyTimeRequests,
+  markDeliverySent,
   markSupportAlertNotified,
   recordAmbiguousDeliveryFailure,
   recordDeliveryAttempt,
+  storeSupportDraft,
   storeOperationalGuestReply,
   storeShadowDraft,
   upsertGuestTimeRequest,
@@ -518,6 +520,199 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
       source_fingerprint: newerParsed.sourceFingerprint,
       delivery_status: "needs_approval",
     });
+
+    const replyAndAlertThreadId = "9876543213";
+    const replyAndAlertEmail = emailFixture({
+      mailboxScope: "tristan",
+      providerMessageId: `<reply-alert-${randomUUID()}@example.test>`,
+      providerThreadId: replyAndAlertThreadId,
+      occurredAt: "2026-08-21T17:00:00.000Z",
+      entries: [{ name: "Guest Action", role: "Guest", text: "We are outside and need help." }],
+    });
+    await ingestConversation(database.sql, {
+      householdId,
+      email: replyAndAlertEmail,
+      parsed: parseAirbnbConversationEmail(replyAndAlertEmail),
+    });
+    const replyAndAlertCandidate = (await loadShadowCandidates(database.sql, { householdId, limit: 50 }))
+      .find((candidate) => candidate.providerThreadId === replyAndAlertThreadId);
+    const replyAndAlertDelivery = await storeSupportDraft(database.sql, {
+      householdId,
+      candidate: replyAndAlertCandidate,
+      classification: {
+        topic: "adaptive_support",
+        riskTier: "low",
+        decisionSource: "adaptive_agent",
+        decisionVersion: 2,
+        autoReply: true,
+        replyNeeded: true,
+        alertManagement: true,
+        summary: "The guest needs immediate host help at the property.",
+        draft: "We’ve seen your message and alerted the hosts so they can help quickly.",
+      },
+      now: new Date("2026-08-21T17:01:00.000Z"),
+      shadowMode: false,
+      automaticallyApprove: true,
+    });
+    assert.equal(replyAndAlertDelivery.status, "approved");
+    await admin`
+      update airbnb.reply_deliveries
+      set status = 'sending'
+      where household_id = ${householdId} and id = ${replyAndAlertDelivery.id}
+    `;
+    await markDeliverySent(database.sql, {
+      householdId,
+      deliveryId: replyAndAlertDelivery.id,
+      providerMessageId: `<sent-${randomUUID()}@example.test>`,
+      now: new Date("2026-08-21T17:02:00.000Z"),
+    });
+    const alertsAfterReply = await loadSuppressedSupportAlerts(database.sql, { householdId, limit: 50 });
+    assert.equal(alertsAfterReply.some((alert) => (
+      alert.details.threadId === replyAndAlertCandidate.id
+      && alert.details.requiresManagementAction === true
+    )), true);
+
+    const actionOnlyThreadId = "9876543214";
+    const actionOnlyEmail = emailFixture({
+      mailboxScope: "tristan",
+      providerMessageId: `<action-only-${randomUUID()}@example.test>`,
+      providerThreadId: actionOnlyThreadId,
+      occurredAt: "2026-08-21T18:00:00.000Z",
+      entries: [{ name: "Guest Action", role: "Guest", text: "No reply needed, but the outside light is broken." }],
+    });
+    await ingestConversation(database.sql, {
+      householdId,
+      email: actionOnlyEmail,
+      parsed: parseAirbnbConversationEmail(actionOnlyEmail),
+    });
+    const actionOnlyCandidate = (await loadShadowCandidates(database.sql, { householdId, limit: 50 }))
+      .find((candidate) => candidate.providerThreadId === actionOnlyThreadId);
+    const actionOnlyDelivery = await storeSupportDraft(database.sql, {
+      householdId,
+      candidate: actionOnlyCandidate,
+      classification: {
+        topic: "adaptive_support",
+        riskTier: "high",
+        decisionSource: "adaptive_agent",
+        decisionVersion: 2,
+        autoReply: false,
+        replyNeeded: false,
+        alertManagement: true,
+        summary: "Management needs to inspect a reported maintenance issue.",
+        draft: null,
+      },
+      now: new Date("2026-08-21T18:01:00.000Z"),
+      shadowMode: false,
+    });
+    assert.equal(actionOnlyDelivery.status, "cancelled");
+    assert.equal((await admin`
+      select status
+      from airbnb.guest_threads
+      where household_id = ${householdId} and id = ${actionOnlyCandidate.id}
+    `)[0].status, "needs_human");
+    const alertsAfterNoReply = await loadSuppressedSupportAlerts(database.sql, { householdId, limit: 50 });
+    assert.equal(alertsAfterNoReply.some((alert) => (
+      alert.details.threadId === actionOnlyCandidate.id
+      && alert.details.requiresManagementAction === true
+    )), true);
+
+    const shadowThreadId = "9876543215";
+    const shadowEmail = emailFixture({
+      mailboxScope: "tristan",
+      providerMessageId: `<shadow-live-${randomUUID()}@example.test>`,
+      providerThreadId: shadowThreadId,
+      occurredAt: "2026-08-21T19:00:00.000Z",
+    });
+    await ingestConversation(database.sql, {
+      householdId,
+      email: shadowEmail,
+      parsed: parseAirbnbConversationEmail(shadowEmail),
+    });
+    const shadowCandidate = (await loadShadowCandidates(database.sql, { householdId, limit: 50 }))
+      .find((candidate) => candidate.providerThreadId === shadowThreadId);
+    const adaptiveDecision = {
+      topic: "adaptive_support",
+      riskTier: "low",
+      decisionSource: "adaptive_agent",
+      decisionVersion: 2,
+      autoReply: true,
+      replyNeeded: true,
+      alertManagement: false,
+      summary: "A fresh adaptive reply.",
+      draft: "Thanks for your message.",
+    };
+    const shadowDelivery = await storeSupportDraft(database.sql, {
+      householdId,
+      candidate: shadowCandidate,
+      classification: { ...adaptiveDecision, alertManagement: true },
+      now: new Date("2026-08-21T19:01:00.000Z"),
+      shadowMode: true,
+    });
+    assert.equal(shadowDelivery.status, "needs_approval");
+    const promotedDelivery = await storeSupportDraft(database.sql, {
+      householdId,
+      candidate: shadowCandidate,
+      classification: adaptiveDecision,
+      now: new Date("2026-08-21T19:02:00.000Z"),
+      shadowMode: false,
+      automaticallyApprove: true,
+    });
+    assert.equal(promotedDelivery.status, "approved");
+    assert.deepEqual((await admin`
+      select distinct status
+      from airbnb.alerts
+      where household_id = ${householdId}
+        and details->>'threadId' = ${shadowCandidate.id}
+    `).map((row) => row.status), ["resolved"]);
+
+    const shadowNoReplyThreadId = "9876543216";
+    const shadowNoReplyEmail = emailFixture({
+      mailboxScope: "tristan",
+      providerMessageId: `<shadow-no-reply-${randomUUID()}@example.test>`,
+      providerThreadId: shadowNoReplyThreadId,
+      occurredAt: "2026-08-21T20:00:00.000Z",
+      entries: [{ name: "Guest Action", role: "Guest", text: "Please note the outside light is broken." }],
+    });
+    await ingestConversation(database.sql, {
+      householdId,
+      email: shadowNoReplyEmail,
+      parsed: parseAirbnbConversationEmail(shadowNoReplyEmail),
+    });
+    const shadowNoReplyCandidate = (await loadShadowCandidates(database.sql, { householdId, limit: 50 }))
+      .find((candidate) => candidate.providerThreadId === shadowNoReplyThreadId);
+    const noReplyActionDecision = {
+      topic: "adaptive_support",
+      riskTier: "high",
+      decisionSource: "adaptive_agent",
+      decisionVersion: 2,
+      autoReply: false,
+      replyNeeded: false,
+      alertManagement: true,
+      summary: "Management needs to inspect the reported light.",
+      draft: null,
+    };
+    const shadowNoReplyDelivery = await storeSupportDraft(database.sql, {
+      householdId,
+      candidate: shadowNoReplyCandidate,
+      classification: noReplyActionDecision,
+      now: new Date("2026-08-21T20:01:00.000Z"),
+      shadowMode: true,
+    });
+    assert.equal(shadowNoReplyDelivery.status, "needs_approval");
+    const liveNoReplyDelivery = await storeSupportDraft(database.sql, {
+      householdId,
+      candidate: shadowNoReplyCandidate,
+      classification: noReplyActionDecision,
+      now: new Date("2026-08-21T20:02:00.000Z"),
+      shadowMode: false,
+    });
+    assert.equal(liveNoReplyDelivery.status, "cancelled");
+    const reopenedAlerts = await loadSuppressedSupportAlerts(database.sql, { householdId, limit: 50 });
+    assert.equal(reopenedAlerts.some((alert) => (
+      alert.details.threadId === shadowNoReplyCandidate.id
+      && alert.details.shadowMode === false
+      && alert.details.requiresManagementAction === true
+    )), true);
   } finally {
     await database?.close();
     await admin.end({ timeout: 5 });

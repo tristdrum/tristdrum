@@ -183,9 +183,31 @@ export function supportTimeRequestDecision(message, facts = {}) {
   };
 }
 
-export function supportTimeFollowUpDecision(message, activeRequest, now = new Date()) {
+export function supportTimeFollowUpDecision(message, activeRequest, now = new Date(), facts = {}) {
   if (activeRequest?.requestType !== "early_checkin") return null;
   const text = String(message ?? "").normalize("NFKC").trim();
+  const standardCheckIn = clockMinutes(facts.checkInTime, 15 * 60);
+  const standardTime = clockLabel(standardCheckIn);
+  const requestedMinutes = requestedClockMinutes(text, "early_checkin", standardCheckIn);
+  const explicitlyWithdraws = /\b(?:no longer (?:need|want)|do not need|don't need|dont need|no need(?: for| to have| to use)?|cancel|forget|ignore)\b[^.!?]{0,50}\b(?:early|earlier|check[ -]?in)\b/i.test(text)
+    || /\b(?:standard|usual|normal)\b[^.!?]{0,30}\b(?:check[ -]?in|time)\b[^.!?]{0,30}\b(?:fine|works?|okay|ok)\b/i.test(text)
+    || (
+      requestedMinutes === standardCheckIn
+      && /\b(?:fine|works?|okay|ok|instead|rather|stick|arriv(?:e|ing)|check[ -]?in)\b/i.test(text)
+    );
+  if (explicitlyWithdraws) {
+    return {
+      topic: "early_check_in_follow_up",
+      requestType: "early_checkin",
+      action: "standard_time",
+      requestedTime: standardTime,
+      effectiveTime: standardTime,
+      createsOperationalRequest: false,
+      cancelsOperationalRequest: true,
+      needsCleanerNotification: true,
+      reply: `No problem, we’ll use the standard ${standardTime} check-in time instead.`,
+    };
+  }
   const isFollowUp = /\b(?:is (?:the )?(?:room|studio|unit|place) ready|can (?:i|we) (?:check[ -]?in|come|go through) now|any (?:news|update).*(?:early|check[ -]?in)|are (?:we|you).*(?:ready|check[ -]?in))\b/i.test(text);
   if (!isFollowUp) return null;
   const requestedAt = Date.parse(`${activeRequest.stayDate}T${activeRequest.effectiveTime}:00+02:00`);

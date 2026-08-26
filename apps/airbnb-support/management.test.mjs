@@ -53,13 +53,13 @@ test("support Management alert is concise and does not include raw message text"
   assert.match(text, /Review: https:\/\/www\.tristdrum\.com\/dashboard\/airbnb$/);
 });
 
-test("urgent arrivals are labelled as immediate property help", () => {
+test("explicit agent escalations use a strong host-attention heading", () => {
   const item = alert("urgent", "immediate");
-  item.details.topic = "urgent_arrival";
+  item.details.requiresManagementAction = true;
   item.details.decisionSummary = "The guest is waiting at the property.";
   assert.match(
     renderSupportManagementAlert(item),
-    /^\*Airbnb guest needs help at the property\*/,
+    /^\*Airbnb guest needs host attention\*/,
   );
 });
 

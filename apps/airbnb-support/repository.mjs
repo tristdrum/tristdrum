@@ -422,8 +422,10 @@ export async function storeSupportDraft(sql, {
   const idempotencyKey = `airbnb-support:${candidate.providerThreadId}:${candidate.sourceFingerprint}`;
   const outboundMessageId = `<${contentFingerprint(`${householdId}:${idempotencyKey}`).slice(0, 32)}@airbnb.tristdrum.com>`;
   const noReplyNeeded = classification.replyNeeded === false;
-  const initialStatus = noReplyNeeded ? "cancelled" : automaticallyApprove ? "approved" : "needs_approval";
-  const initialCancellationReason = noReplyNeeded ? "No reply needed." : null;
+  const requiresManagementAction = classification.alertManagement === true;
+  const terminalNoReply = noReplyNeeded && !shadowMode;
+  const initialStatus = terminalNoReply ? "cancelled" : automaticallyApprove ? "approved" : "needs_approval";
+  const initialCancellationReason = terminalNoReply ? "No reply needed." : null;
   const rows = await sql`
     insert into airbnb.reply_deliveries (
       household_id, thread_id, source_fingerprint, source_last_event_at, topic,
@@ -444,8 +446,12 @@ export async function storeSupportDraft(sql, {
                   status = case
                     when airbnb.reply_deliveries.status in ('sent', 'handled_by_human', 'ambiguous')
                     then airbnb.reply_deliveries.status
-                    when excluded.classification @> '{"replyNeeded": false}'::jsonb
+                    when excluded.status = 'cancelled'
                     then 'cancelled'
+                    when excluded.status = 'approved'
+                      and airbnb.reply_deliveries.status = 'needs_approval'
+                      and airbnb.reply_deliveries.approved_by is null
+                    then 'approved'
                     when airbnb.reply_deliveries.status = 'approved'
                       and airbnb.reply_deliveries.approved_by is null
                       and not (excluded.classification @> '{"autoReply": true}'::jsonb)
@@ -453,7 +459,7 @@ export async function storeSupportDraft(sql, {
                     else airbnb.reply_deliveries.status
                   end,
                   cancellation_reason = case
-                    when excluded.classification @> '{"replyNeeded": false}'::jsonb
+                    when excluded.status = 'cancelled'
                     then 'No reply needed.'
                     else airbnb.reply_deliveries.cancellation_reason
                   end,
@@ -462,10 +468,11 @@ export async function storeSupportDraft(sql, {
   `;
   await sql`
     update airbnb.guest_threads
-    set status = ${noReplyNeeded ? "handled" : "needs_human"}, risk_tier = ${classification.riskTier}
+    set status = ${terminalNoReply && !requiresManagementAction ? "handled" : "needs_human"},
+        risk_tier = ${classification.riskTier}
     where household_id = ${householdId} and id = ${candidate.id}
   `;
-  if (noReplyNeeded) {
+  if (terminalNoReply) {
     await sql`
       update airbnb.alerts
       set status = 'resolved', resolved_at = ${now}, updated_at = ${now}
@@ -473,6 +480,17 @@ export async function storeSupportDraft(sql, {
         and status in ('open', 'suppressed', 'notified')
         and alert_type in ('guest_escalation', 'guest_overdue')
         and details->>'threadId' = ${candidate.id}
+    `;
+  }
+  if (!shadowMode && !requiresManagementAction) {
+    await sql`
+      update airbnb.alerts
+      set status = 'resolved', resolved_at = ${now}, updated_at = ${now}
+      where household_id = ${householdId}
+        and status = 'suppressed'
+        and alert_type in ('guest_escalation', 'guest_overdue')
+        and details->>'threadId' = ${candidate.id}
+        and coalesce(details->>'shadowMode', 'true') = 'true'
     `;
   }
   const escalationStages = classification.alertManagement === true
@@ -500,13 +518,36 @@ export async function storeSupportDraft(sql, {
           listingName: candidate.listingName,
           guestName: candidate.guestDisplayName,
           decisionSummary: classification.summary,
+          requiresManagementAction,
+          shadowMode,
         })}
       )
       on conflict (household_id, dedupe_key)
       do update set alert_type = excluded.alert_type,
                     severity = excluded.severity,
+                    status = case
+                      when excluded.details @> '{"requiresManagementAction": true, "shadowMode": false}'::jsonb
+                        and airbnb.alerts.status = 'resolved'
+                        and coalesce(airbnb.alerts.details->>'shadowMode', 'true') = 'true'
+                      then 'suppressed'
+                      else airbnb.alerts.status
+                    end,
                     summary = excluded.summary,
                     details = excluded.details,
+                    notified_at = case
+                      when excluded.details @> '{"requiresManagementAction": true, "shadowMode": false}'::jsonb
+                        and airbnb.alerts.status = 'resolved'
+                        and coalesce(airbnb.alerts.details->>'shadowMode', 'true') = 'true'
+                      then null
+                      else airbnb.alerts.notified_at
+                    end,
+                    resolved_at = case
+                      when excluded.details @> '{"requiresManagementAction": true, "shadowMode": false}'::jsonb
+                        and airbnb.alerts.status = 'resolved'
+                        and coalesce(airbnb.alerts.details->>'shadowMode', 'true') = 'true'
+                      then null
+                      else airbnb.alerts.resolved_at
+                    end,
                     updated_at = now()
     `;
   }
@@ -929,13 +970,21 @@ export async function loadSuppressedSupportAlerts(sql, { householdId, limit = 24
         and alert.status = 'suppressed'
         and alert.alert_type in ('guest_escalation', 'guest_overdue')
         and (${notBefore}::timestamptz is null or thread.last_guest_at >= ${notBefore}::timestamptz)
-        and thread.status = 'needs_human'
         and (thread.last_host_at is null or thread.last_host_at < thread.last_guest_at)
         and (
-          delivery.status not in ('sent', 'handled_by_human', 'cancelled', 'ambiguous')
+          (
+            alert.details @> '{"requiresManagementAction": true}'::jsonb
+            and delivery.status <> 'handled_by_human'
+          )
           or (
-            delivery.status = 'ambiguous'
-            and alert.details->>'stage' = 'delivery_ambiguous'
+            thread.status = 'needs_human'
+            and (
+              delivery.status not in ('sent', 'handled_by_human', 'cancelled', 'ambiguous')
+              or (
+                delivery.status = 'ambiguous'
+                and alert.details->>'stage' = 'delivery_ambiguous'
+              )
+            )
           )
         )
     )
@@ -1167,6 +1216,7 @@ export async function markDeliverySent(sql, {
         and status = 'suppressed'
         and alert_type in ('guest_escalation', 'guest_overdue')
         and details->>'threadId' = ${rows[0].threadId}
+        and not (details @> '{"requiresManagementAction": true}'::jsonb)
     `;
     await recordSupportAudit(transaction, {
       householdId,

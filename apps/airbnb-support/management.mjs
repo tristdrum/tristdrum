@@ -24,15 +24,15 @@ export function latestSupportAlerts(alerts) {
 
 export function renderSupportManagementAlert(alert, dashboardUrl = "https://www.tristdrum.com/dashboard/airbnb") {
   const stage = alert.details?.stage ?? "immediate";
-  const heading = alert.details?.topic === "urgent_arrival"
-    ? "Airbnb guest needs help at the property"
-    : stage === "delivery_ambiguous"
+  const heading = stage === "delivery_ambiguous"
     ? "Airbnb reply delivery needs confirmation"
     : stage === "overdue"
     ? "Airbnb guest reply overdue"
     : stage === "reminder"
       ? "Airbnb guest reply reminder"
-      : "Airbnb guest message needs review";
+      : alert.details?.requiresManagementAction === true
+        ? "Airbnb guest needs host attention"
+        : "Airbnb guest message needs review";
   const context = [
     alert.details?.listingName,
     alert.details?.guestName ? `Guest: ${alert.details.guestName}` : null,

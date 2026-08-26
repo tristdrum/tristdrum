@@ -316,6 +316,31 @@ test("early check-in follow-ups never offer entry before 13:00 and use the appro
   ), null);
 });
 
+test("returning to standard check-in cancels an active early instruction", () => {
+  const activeRequest = {
+    requestType: "early_checkin",
+    stayDate: "2026-08-24",
+    effectiveTime: "13:00",
+    status: "cleaners_notified",
+  };
+  for (const message of [
+    "Actually, 15:00 is fine.",
+    "We no longer need the early check-in.",
+    "No need for early check-in anymore.",
+    "The standard check-in time works for us.",
+  ]) {
+    const decision = supportTimeFollowUpDecision(
+      message,
+      activeRequest,
+      new Date("2026-08-23T12:00:00+02:00"),
+      { checkInTime: "15:00" },
+    );
+    assert.equal(decision.action, "standard_time", message);
+    assert.equal(decision.effectiveTime, "15:00", message);
+    assert.equal(decision.cancelsOperationalRequest, true, message);
+  }
+});
+
 test("support escalation stages are immediate, reminded at 45 minutes, and overdue at 60", () => {
   const latestEventAt = "2026-08-21T12:00:00Z";
   assert.deepEqual(
