@@ -1,101 +1,5 @@
 export const AUTOMATED_REPLY_FOOTER = "Automated reply on behalf of your hosts.";
 
-export const AUTO_REPLY_TOPICS = Object.freeze(new Set([
-  "wifi",
-  "address",
-  "directions",
-  "parking",
-  "verified_amenity",
-  "check_in_time",
-  "check_out_time",
-  "greeting",
-  "thanks",
-  "resend_standard_info",
-  "early_check_in",
-  "late_check_out",
-  "early_check_in_follow_up",
-  "urgent_arrival",
-]));
-
-const TIME_REQUEST_PATTERN = /\b(?:early check[ -]?in|late check[ -]?out)\b/i;
-const URGENT_ARRIVAL_PATTERN = /\b(?:(?:we(?:'re| are)?|i(?:'m| am)?)\s+(?:outside|here|at (?:the )?(?:gate|property|studio|house)|(?:have )?arrived)|(?:we|i) (?:just )?arrived|outside (?:the )?(?:gate|property|studio|house)|can(?:not|'t) get in|locked out)\b/i;
-const URGENT_ARRIVAL_MIXED_PATTERN = /\b(?:refund|cancel|payment|charge|discount|unsafe|danger|emergency|injur|police|dirty|broken|damage|not working|change (?:my|the) dates?)\b/i;
-const MONTHS = Object.freeze(new Map([
-  ["jan", 1], ["january", 1], ["feb", 2], ["february", 2], ["mar", 3], ["march", 3],
-  ["apr", 4], ["april", 4], ["may", 5], ["jun", 6], ["june", 6], ["jul", 7], ["july", 7],
-  ["aug", 8], ["august", 8], ["sep", 9], ["sept", 9], ["september", 9], ["oct", 10],
-  ["october", 10], ["nov", 11], ["november", 11], ["dec", 12], ["december", 12],
-]));
-
-const NON_TIME_HUMAN_REVIEW_PATTERNS = Object.freeze([
-  /\b(?:book|booking|reservation request|accept|decline|availability|available)\b/i,
-  /\b(?:refund|discount|price|pricing|rate|money|payment|charge|fee|waive)\b/i,
-  /\b(?:cancel|cancellation|modify|amend|shorten|lengthen|extend|reschedul\w*|change (?:my|the) dates?|move (?:my|the) stay)\b/i,
-  /\b(?:won't|will not|can't|cannot|not coming|unable to (?:come|arrive|stay))\b/i,
-  /\b(?:exception|special request)\b/i,
-  /\b(?:complaint|dirty|broken|not working|damage|noise|unhappy|disappointed|maintenance|repair|leak|blocked drain)\b/i,
-  /\b(?:sheet|linen|towel)s?\b.*\b(?:dirty|stain\w*|missing|smell\w*)\b/i,
-  /\b(?:no|without)\s+(?:hot\s+water|water|electricity|power|wi-?fi|internet)\b/i,
-  /\b(?:geyser|toilet|shower|tap|sink|fridge|stove|microwave|air\s*con(?:ditioner)?|heater|door|window|lock)\b.*\b(?:broken|leak\w*|stuck|blocked|not working)\b/i,
-  /\b(?:unsafe|danger|emergency|injur|fire|police|security issue)\b/i,
-]);
-
-const HUMAN_REVIEW_PATTERNS = Object.freeze([
-  ...NON_TIME_HUMAN_REVIEW_PATTERNS,
-  TIME_REQUEST_PATTERN,
-]);
-
-const LOW_RISK_MESSAGE_PATTERNS = Object.freeze({
-  greeting: Object.freeze([
-    /^(?:hi|hello|hey|good morning|good afternoon|good evening)(?:[,.! ]+thank you for hosting (?:me|us))?(?:[,.! ]+(?:i am|we are|i'm|we're) looking forward to (?:the|my|our) stay)?[.!]*$/,
-  ]),
-  thanks: Object.freeze([
-    /^(?:thanks|thank you|many thanks|thanks (?:so much|a lot)|thank you (?:so much|very much)|(?:great|perfect|okay|ok|got it)[,! ]+(?:thanks|thank you))[.!]*$/,
-  ]),
-  wifi: Object.freeze([
-    /^(?:(?:hi|hello|hey)[,!]? )?(?:can|could|would) you (?:please )?(?:send|share|give|resend) (?:me |us )?(?:the )?wi-?fi (?:details|information|info|password|network name|network name and password)(?: again)?(?: please)?[?.!]*$/,
-    /^(?:please )?resend (?:me |us )?(?:the )?wi-?fi (?:details|information|info|password|network name|network name and password)(?: please)?[.!]*$/,
-    /^what(?:'s| is) (?:the )?wi-?fi (?:details|information|info|password|network name|network name and password)[?.!]*$/,
-    /^wi-?fi (?:details|information|info|password|network name|network name and password)(?: please)?[?.!]*$/,
-  ]),
-  address: Object.freeze([
-    /^(?:(?:hi|hello|hey)[,!]? )?(?:can|could|would) you (?:please )?(?:send|share|give|resend) (?:me |us )?(?:the )?address(?: please)?[?.!]*$/,
-    /^what(?:'s| is) (?:the )?address[?.!]*$/,
-    /^(?:the )?address(?: please)?[?.!]*$/,
-  ]),
-  directions: Object.freeze([
-    /^(?:(?:hi|hello|hey)[,!]? )?(?:can|could|would) you (?:please )?(?:send|share|give|resend) (?:me |us )?(?:the )?directions(?: from (?:(?:the )?(?:east london )?airport|the city (?:centre|center)|n2|nahoon))?(?: please)?[?.!]*$/,
-    /^(?:please )?(?:send|share|resend) (?:me |us )?(?:the )?directions(?: from (?:(?:the )?(?:east london )?airport|the city (?:centre|center)|n2|nahoon))?(?: please)?[?.!]*$/,
-    /^how do (?:i|we) get (?:there|to (?:the )?(?:studio|property|address))[?.!]*$/,
-  ]),
-  parking: Object.freeze([
-    /^(?:(?:hi|hello|hey)[,!]? )?(?:can|could|would) you (?:please )?(?:send|share|give) (?:me |us )?(?:the )?parking (?:details|information|info)(?: please)?[?.!]*$/,
-    /^(?:where|how) (?:can|may|should) (?:i|we) park[?.!]*$/,
-    /^is parking available[?.!]*$/,
-    /^parking (?:details|information|info)(?: please)?[?.!]*$/,
-  ]),
-  check_in_time: Object.freeze([
-    /^what time (?:can|may|should|do) (?:i|we) check[ -]?in[?.!]*$/,
-    /^what time is (?:the )?(?:standard )?check[ -]?in[?.!]*$/,
-    /^what(?:'s| is) (?:the )?(?:standard )?check[ -]?in time[?.!]*$/,
-    /^when is check[ -]?in[?.!]*$/,
-  ]),
-  check_out_time: Object.freeze([
-    /^what time (?:can|must|should|do) (?:i|we) check[ -]?out[?.!]*$/,
-    /^what time is (?:the )?(?:standard )?check[ -]?out[?.!]*$/,
-    /^what(?:'s| is) (?:the )?(?:standard )?check[ -]?out time[?.!]*$/,
-    /^when is check[ -]?out[?.!]*$/,
-  ]),
-  resend_standard_info: Object.freeze([
-    /^(?:(?:hi|hello|hey)[,!]? )?(?:can|could|would) you (?:please )?resend (?:me |us )?(?:the )?(?:standard |check[ -]?in )?(?:information|info|details|instructions|message)(?: please)?[?.!]*$/,
-    /^(?:please )?resend (?:me |us )?(?:the )?(?:standard |check[ -]?in )?(?:information|info|details|instructions|message)(?: please)?[.!]*$/,
-  ]),
-});
-
-function factText(value) {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
 function clockMinutes(value, fallback) {
   const match = /^(\d{1,2}):(\d{2})$/.exec(String(value ?? "").trim());
   if (!match) return fallback;
@@ -110,98 +14,6 @@ function clockLabel(minutes) {
   return `${String(hours).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
 
-function zonedParts(value) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Africa/Johannesburg",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(value));
-  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
-}
-
-function isoDate(year, month, day) {
-  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-
-function contextualCheckIn({ stayLabel, conversationContext, observedAt }) {
-  const contextText = (conversationContext ?? []).map((message) => message?.text ?? "").join("\n");
-  const explicit = /\b(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})\s+(\d{1,2}:\d{2})\b/i.exec(contextText);
-  if (explicit) {
-    const month = MONTHS.get(explicit[2].toLowerCase());
-    if (month) return { date: isoDate(Number(explicit[3]), month, Number(explicit[1])), time: explicit[4] };
-  }
-
-  const label = /\b([A-Za-z]{3,9})\s+(\d{1,2})\b/i.exec(String(stayLabel ?? ""));
-  if (!label) return null;
-  const month = MONTHS.get(label[1].toLowerCase());
-  if (!month) return null;
-  const observed = zonedParts(observedAt);
-  let year = Number(observed.year);
-  const observedMonth = Number(observed.month);
-  if (month === 1 && observedMonth === 12) year += 1;
-  if (month === 12 && observedMonth === 1) year -= 1;
-  return { date: isoDate(year, month, Number(label[2])), time: null };
-}
-
-function humanDate(value) {
-  const [year, month, day] = String(value).split("-").map(Number);
-  return new Intl.DateTimeFormat("en-ZA", {
-    day: "numeric",
-    month: "long",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(year, month - 1, day)));
-}
-
-export function supportUrgentArrivalDecision({
-  message,
-  stayLabel = null,
-  conversationContext = [],
-  observedAt = new Date(),
-  facts = {},
-} = {}) {
-  const text = String(message ?? "").normalize("NFKC").trim();
-  if (!URGENT_ARRIVAL_PATTERN.test(text) || URGENT_ARRIVAL_MIXED_PATTERN.test(text)) return null;
-
-  const observed = zonedParts(observedAt);
-  const observedDate = isoDate(observed.year, observed.month, observed.day);
-  const observedTime = `${observed.hour}:${observed.minute}`;
-  const checkIn = contextualCheckIn({ stayLabel, conversationContext, observedAt });
-  const standardTime = factText(facts.checkInTime) ?? checkIn?.time ?? "15:00";
-  const alertManagement = true;
-
-  if (checkIn?.date && observedDate < checkIn.date) {
-    return {
-      topic: "urgent_arrival",
-      action: "booking_starts_later",
-      reply: `Hi, we’ve seen your message. Your reservation starts on ${humanDate(checkIn.date)}, with check-in from ${standardTime}, so it does not cover tonight. We’ve alerted the hosts now so they can help you quickly.`,
-      alertManagement,
-    };
-  }
-
-  if (checkIn?.date === observedDate && observedTime < standardTime) {
-    return {
-      topic: "urgent_arrival",
-      action: "before_check_in",
-      reply: `Hi, we’ve seen your message. Check-in is from ${standardTime}. We’ve alerted the hosts now so they can confirm whether the studio is ready earlier.`,
-      alertManagement,
-    };
-  }
-
-  const parking = /\bpark(?:ing)?\b/i.test(text) ? factText(facts.parking) : null;
-  return {
-    topic: "urgent_arrival",
-    action: "arrival_help",
-    reply: parking
-      ? `Hi, we’ve seen your message. ${parking} We’ve alerted the hosts too in case you need more help getting in.`
-      : "Hi, we’ve seen your message and alerted the hosts now so we can help you get in quickly.",
-    alertManagement,
-  };
-}
-
 function requestSegment(message, requestType) {
   const text = String(message ?? "").toLowerCase();
   const marker = requestType === "early_checkin"
@@ -212,7 +24,11 @@ function requestSegment(message, requestType) {
   const modal = /\b(?:can|could|may|might|would|want|like|hope|possible|please)\b/;
   const requested = matches.filter((match) => modal.test(text.slice(Math.max(0, match.index - 50), match.index)));
   const chosen = requested.at(-1) ?? matches.at(-1);
-  return text.slice(chosen.index, chosen.index + 100);
+  const precedingStart = Math.max(0, chosen.index - 60);
+  const preceding = text.slice(precedingStart, chosen.index);
+  const startsBeforeMarker = modal.test(preceding)
+    && /\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?\b/i.test(preceding);
+  return text.slice(startsBeforeMarker ? precedingStart : chosen.index, chosen.index + 100);
 }
 
 function requestedClockMinutes(message, requestType, standardMinutes) {
@@ -271,22 +87,16 @@ function timeRequestType(message) {
   if (/\b(?:can|could|may|might|would|want|hope|possible)\b[^?.!]{0,60}\b(?:check[ -]?in|checkin|arriv(?:e|ing))\b[^?.!]{0,30}\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?/i.test(text)) {
     return "early_checkin";
   }
+  if (/\b(?:can|could|may|might|would|want|hope|possible)\b[^?.!]{0,60}\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?\b[^?.!]{0,30}\b(?:check[ -]?in|checkin|arriv(?:e|ing))\b/i.test(text)) {
+    return "early_checkin";
+  }
   if (/\b(?:can|could|may|might|would|want|hope|possible)\b[^?.!]{0,60}\b(?:check[ -]?out|checkout|leav(?:e|ing))\b[^?.!]{0,30}\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?/i.test(text)) {
     return "late_checkout";
   }
+  if (/\b(?:can|could|may|might|would|want|hope|possible)\b[^?.!]{0,60}\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?\b[^?.!]{0,30}\b(?:check[ -]?out|checkout|leav(?:e|ing))\b/i.test(text)) {
+    return "late_checkout";
+  }
   return null;
-}
-
-export function supportTimeRequestIsFocused(message) {
-  const text = String(message ?? "").normalize("NFKC").trim();
-  if (!text || NON_TIME_HUMAN_REVIEW_PATTERNS.some((pattern) => pattern.test(text))) return false;
-  const withoutGreeting = text.replace(/^(?:hi|hello|hey|good (?:morning|afternoon|evening))[,!]\s*/i, "");
-  const withoutClockColons = withoutGreeting.replace(/(\d):(?=\d)/g, "$1");
-  if (/[,;:\n]/.test(withoutClockColons)) return false;
-  if (/\b(?:and|also|plus|as well as|another thing|because|but|although|though|however|while)\b/i.test(withoutGreeting)) return false;
-  if (/\b(?:wi-?fi|internet|password|address|directions?|parking|refund|booking|reservation|price|rate)\b/i.test(withoutGreeting)) return false;
-  if ((text.match(/\?/g) ?? []).length > 1) return false;
-  return !/[.!?]\s+[A-Za-z]/.test(text.replace(/[.!?]\s*$/, ""));
 }
 
 export function supportTimeRequestDecision(message, facts = {}) {
@@ -373,9 +183,31 @@ export function supportTimeRequestDecision(message, facts = {}) {
   };
 }
 
-export function supportTimeFollowUpDecision(message, activeRequest, now = new Date()) {
+export function supportTimeFollowUpDecision(message, activeRequest, now = new Date(), facts = {}) {
   if (activeRequest?.requestType !== "early_checkin") return null;
   const text = String(message ?? "").normalize("NFKC").trim();
+  const standardCheckIn = clockMinutes(facts.checkInTime, 15 * 60);
+  const standardTime = clockLabel(standardCheckIn);
+  const requestedMinutes = requestedClockMinutes(text, "early_checkin", standardCheckIn);
+  const explicitlyWithdraws = /\b(?:no longer (?:need|want)|do not need|don't need|dont need|no need(?: for| to have| to use)?|cancel|forget|ignore)\b[^.!?]{0,50}\b(?:early|earlier|check[ -]?in)\b/i.test(text)
+    || /\b(?:standard|usual|normal)\b[^.!?]{0,30}\b(?:check[ -]?in|time)\b[^.!?]{0,30}\b(?:fine|works?|okay|ok)\b/i.test(text)
+    || (
+      requestedMinutes === standardCheckIn
+      && /\b(?:fine|works?|okay|ok|instead|rather|stick|arriv(?:e|ing)|check[ -]?in)\b/i.test(text)
+    );
+  if (explicitlyWithdraws) {
+    return {
+      topic: "early_check_in_follow_up",
+      requestType: "early_checkin",
+      action: "standard_time",
+      requestedTime: standardTime,
+      effectiveTime: standardTime,
+      createsOperationalRequest: false,
+      cancelsOperationalRequest: true,
+      needsCleanerNotification: true,
+      reply: `No problem, we’ll use the standard ${standardTime} check-in time instead.`,
+    };
+  }
   const isFollowUp = /\b(?:is (?:the )?(?:room|studio|unit|place) ready|can (?:i|we) (?:check[ -]?in|come|go through) now|any (?:news|update).*(?:early|check[ -]?in)|are (?:we|you).*(?:ready|check[ -]?in))\b/i.test(text);
   if (!isFollowUp) return null;
   const requestedAt = Date.parse(`${activeRequest.stayDate}T${activeRequest.effectiveTime}:00+02:00`);
@@ -405,77 +237,6 @@ export function supportTimeFollowUpDecision(message, activeRequest, now = new Da
     createsOperationalRequest: false,
     needsCleanerNotification: false,
     reply,
-  };
-}
-
-export function supportMessageRequiresHuman(message) {
-  const text = String(message ?? "").trim();
-  return HUMAN_REVIEW_PATTERNS.some((pattern) => pattern.test(text));
-}
-
-export function supportMessageMatchesTopic(message, topic) {
-  const text = String(message ?? "")
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(/[\u2018\u2019]/g, "'")
-    .replace(/[\u2013\u2014]/g, "-")
-    .replace(/\s+/g, " ")
-    .trim();
-  const patterns = LOW_RISK_MESSAGE_PATTERNS[String(topic ?? "")];
-  if (["early_check_in", "late_check_out"].includes(String(topic ?? ""))) {
-    return supportTimeRequestDecision(text)?.topic === topic;
-  }
-  return Boolean(text && patterns?.some((pattern) => pattern.test(text)));
-}
-
-export function verifiedSupportDraft(topic, facts = {}) {
-  if (topic === "greeting") return "Hello! Thank you for your message. We look forward to hosting you.";
-  if (topic === "address") {
-    const address = factText(facts.address);
-    return address ? `The address is ${address}.` : null;
-  }
-  if (topic === "directions") {
-    const directions = factText(facts.directions);
-    return directions ? `Directions: ${directions}` : null;
-  }
-  if (topic === "parking") {
-    const parking = factText(facts.parking);
-    return parking ? `Parking: ${parking}` : null;
-  }
-  if (topic === "check_in_time") {
-    const checkInTime = factText(facts.checkInTime);
-    return checkInTime ? `Standard check-in is from ${checkInTime}.` : null;
-  }
-  if (topic === "check_out_time") {
-    const checkOutTime = factText(facts.checkOutTime);
-    return checkOutTime ? `Standard check-out is by ${checkOutTime}.` : null;
-  }
-  if (topic === "resend_standard_info") return factText(facts.standardInfo);
-  if (topic === "wifi") {
-    const wifi = factText(facts.wifi);
-    return wifi ? `Wi-Fi: ${wifi}` : null;
-  }
-  return null;
-}
-
-export function supportDisposition(classification) {
-  const topic = String(classification?.topic ?? "unknown");
-  const confidence = Number(classification?.confidence ?? 0);
-  const autoReply =
-    classification?.riskTier === "low"
-    && AUTO_REPLY_TOPICS.has(topic)
-    && classification?.messageWhitelisted === true
-    && classification?.factsVerified === true
-    && classification?.replyNeeded === true
-    && Boolean(String(classification?.draft ?? "").trim())
-    && confidence >= 0.9;
-  return {
-    topic,
-    confidence,
-    autoReply,
-    status: autoReply ? "approved_for_guard" : "needs_human",
-    alertManagement: classification?.alertManagement === true
-      || (classification?.replyNeeded === true && !autoReply),
   };
 }
 

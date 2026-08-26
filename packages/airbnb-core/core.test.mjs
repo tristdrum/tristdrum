@@ -16,14 +16,9 @@ import {
   projectInventory,
   setupGuestCount,
   stockObservationSkus,
-  supportDisposition,
   supportEscalationStages,
-  supportMessageMatchesTopic,
-  supportMessageRequiresHuman,
   supportTimeFollowUpDecision,
-  supportTimeRequestIsFocused,
   supportTimeRequestDecision,
-  supportUrgentArrivalDecision,
   trustedAirbnbSender,
   withAutomatedReplyFooter,
 } from "./index.mjs";
@@ -219,44 +214,6 @@ test("Sixty60 confirmations are provisional and only a 1 Bowie invoice credits s
   assert.equal(decideOrderEvidence({ kind: "invoice", deliveryAddress: "18 Other Road" }).ignore, true);
 });
 
-test("support auto-reply gate is whitelist and verified-facts only", () => {
-  assert.equal(supportDisposition({
-    topic: "wifi",
-    riskTier: "low",
-    messageWhitelisted: true,
-    factsVerified: true,
-    confidence: 0.97,
-    replyNeeded: true,
-    draft: "The verified Wi-Fi details are available.",
-  }).autoReply, true);
-  assert.equal(supportDisposition({
-    topic: "refund",
-    riskTier: "low",
-    factsVerified: true,
-    confidence: 0.99,
-    replyNeeded: true,
-    draft: "A refund has been approved.",
-  }).autoReply, false);
-  assert.equal(supportDisposition({
-    topic: "wifi",
-    riskTier: "low",
-    factsVerified: false,
-    confidence: 0.99,
-    replyNeeded: true,
-    draft: "Use an unverified password.",
-  }).autoReply, false);
-  const noReplyNeeded = supportDisposition({
-    topic: "thanks",
-    riskTier: "low",
-    factsVerified: true,
-    confidence: 0.99,
-    replyNeeded: false,
-    draft: null,
-  });
-  assert.equal(noReplyNeeded.autoReply, false);
-  assert.equal(noReplyNeeded.alertManagement, false);
-});
-
 test("automated replies omit and strip the legacy AI footer", () => {
   const message = withAutomatedReplyFooter("The Wi-Fi details are in your check-in message.");
   assert.equal(message, "The Wi-Fi details are in your check-in message.");
@@ -264,64 +221,6 @@ test("automated replies omit and strip the legacy AI footer", () => {
     withAutomatedReplyFooter(`${message}\n\n${AUTOMATED_REPLY_FOOTER}`),
     message,
   );
-});
-
-test("an arrival before the booked night gets an immediate grounded reply and host alert", () => {
-  const decision = supportUrgentArrivalDecision({
-    message: "Hi Jane we are outside. Please help with parking",
-    stayLabel: "AUG 25 – 26",
-    observedAt: "2026-08-24T18:34:00.000Z",
-    facts: { checkInTime: "15:00" },
-    conversationContext: [{
-      direction: "host",
-      text: "Confirming the dates of your stay: 25 Aug 2026 15:00 to 26 Aug 2026 10:00",
-    }],
-  });
-  assert.equal(decision.action, "booking_starts_later");
-  assert.equal(decision.alertManagement, true);
-  assert.match(decision.reply, /starts on 25 August, with check-in from 15:00/i);
-  assert.match(decision.reply, /alerted the hosts/i);
-  assert.doesNotMatch(decision.reply, /password|code/i);
-  assert.equal(supportUrgentArrivalDecision({
-    message: "We are outside and the door is broken, please refund us.",
-    observedAt: "2026-08-24T18:34:00.000Z",
-  }), null);
-});
-
-test("support auto-reply templates use verified facts rather than model prose", async () => {
-  const { verifiedSupportDraft } = await import("./support.mjs");
-  assert.equal(verifiedSupportDraft("greeting", {}), "Hello! Thank you for your message. We look forward to hosting you.");
-  assert.equal(
-    verifiedSupportDraft("address", { address: "1 Verified Street" }),
-    "The address is 1 Verified Street.",
-  );
-  assert.equal(verifiedSupportDraft("wifi", {}), null);
-  assert.equal(supportMessageRequiresHuman("Hello, can I get a refund and change my dates?"), true);
-  assert.equal(supportMessageRequiresHuman("Hello, we are looking forward to the stay."), false);
-});
-
-test("support message whitelist accepts only the matching low-risk template intent", () => {
-  assert.equal(supportMessageMatchesTopic("Please resend the Wi-Fi network name and password.", "wifi"), true);
-  assert.equal(supportMessageMatchesTopic("Could you please send directions from the airport?", "directions"), true);
-  assert.equal(supportMessageMatchesTopic("What time may I check in?", "check_in_time"), true);
-  assert.equal(supportMessageMatchesTopic("Thanks, I won't be coming after all", "thanks"), false);
-  assert.equal(supportMessageMatchesTopic("Please modify my reservation", "greeting"), false);
-  assert.equal(supportMessageMatchesTopic("There is no hot water", "thanks"), false);
-  assert.equal(
-    supportMessageMatchesTopic("Could you send directions from the airport and help with something?", "directions"),
-    false,
-  );
-});
-
-test("reservation changes, cancellations, and maintenance always require a human", () => {
-  for (const message of [
-    "Thanks, I won't be coming after all",
-    "Please modify my reservation",
-    "I need to shorten my stay",
-    "There is no hot water",
-  ]) {
-    assert.equal(supportMessageRequiresHuman(message), true, message);
-  }
 });
 
 test("early check-in policy accepts only the two-hour window and keeps the promise conditional", () => {
@@ -348,6 +247,10 @@ test("early check-in policy accepts only the two-hour window and keeps the promi
   );
   assert.equal(
     supportTimeRequestDecision("Could we check in at 2pm instead of 3pm?", {}).effectiveTime,
+    "14:00",
+  );
+  assert.equal(
+    supportTimeRequestDecision("Hi Jane! Would 2pm be possible for check-in?", {}).effectiveTime,
     "14:00",
   );
 });
@@ -384,16 +287,6 @@ test("late checkout policy politely declines every extension and never creates a
   assert.equal(standard.effectiveTime, "10:00");
 });
 
-test("timing autonomy rejects mixed requests", () => {
-  assert.equal(supportTimeRequestIsFocused("Could we check in early at 2pm?"), true);
-  assert.equal(supportTimeRequestIsFocused("Can we check out at 10:30am?"), true);
-  assert.equal(supportTimeRequestIsFocused("The room is dirty. Could we check in early at 2pm?"), false);
-  assert.equal(supportTimeRequestIsFocused("Could we check in early at 2pm and get a refund?"), false);
-  assert.equal(supportTimeRequestIsFocused("Can we check in early at 2pm, the sheets have stains?"), false);
-  assert.equal(supportTimeRequestIsFocused("Can we check in early at 2pm, what is the Wi-Fi password?"), false);
-  assert.equal(supportTimeRequestIsFocused("Can we check out at 10:30am: and send the Wi-Fi password?"), false);
-});
-
 test("early check-in follow-ups never offer entry before 13:00 and use the approved no-response wording", () => {
   const activeRequest = {
     requestType: "early_checkin",
@@ -421,6 +314,31 @@ test("early check-in follow-ups never offer entry before 13:00 and use the appro
     activeRequest,
     new Date("2026-08-25T13:00:00+02:00"),
   ), null);
+});
+
+test("returning to standard check-in cancels an active early instruction", () => {
+  const activeRequest = {
+    requestType: "early_checkin",
+    stayDate: "2026-08-24",
+    effectiveTime: "13:00",
+    status: "cleaners_notified",
+  };
+  for (const message of [
+    "Actually, 15:00 is fine.",
+    "We no longer need the early check-in.",
+    "No need for early check-in anymore.",
+    "The standard check-in time works for us.",
+  ]) {
+    const decision = supportTimeFollowUpDecision(
+      message,
+      activeRequest,
+      new Date("2026-08-23T12:00:00+02:00"),
+      { checkInTime: "15:00" },
+    );
+    assert.equal(decision.action, "standard_time", message);
+    assert.equal(decision.effectiveTime, "15:00", message);
+    assert.equal(decision.cancelsOperationalRequest, true, message);
+  }
 });
 
 test("support escalation stages are immediate, reminded at 45 minutes, and overdue at 60", () => {

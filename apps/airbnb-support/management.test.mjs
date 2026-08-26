@@ -17,7 +17,7 @@ function alert(id, stage, threadId = "thread-1") {
       stage,
       listingName: "Jasmine Studio Stay",
       guestName: "Guest Fixture",
-      classificationSummary: "A booking question needs a human answer.",
+      decisionSummary: "A booking question needs a human answer.",
     },
   };
 }
@@ -53,19 +53,19 @@ test("support Management alert is concise and does not include raw message text"
   assert.match(text, /Review: https:\/\/www\.tristdrum\.com\/dashboard\/airbnb$/);
 });
 
-test("urgent arrivals are labelled as immediate property help", () => {
+test("explicit agent escalations use a strong host-attention heading", () => {
   const item = alert("urgent", "immediate");
-  item.details.topic = "urgent_arrival";
-  item.details.classificationSummary = "The guest is waiting at the property.";
+  item.details.requiresManagementAction = true;
+  item.details.decisionSummary = "The guest is waiting at the property.";
   assert.match(
     renderSupportManagementAlert(item),
-    /^\*Airbnb guest needs help at the property\*/,
+    /^\*Airbnb guest needs host attention\*/,
   );
 });
 
 test("ambiguous delivery alerts ask for explicit reconciliation", () => {
   const item = alert("ambiguous", "delivery_ambiguous");
-  item.details.classificationSummary = "Check Sent mail, then mark the reply sent, retry it, or cancel it.";
+  item.details.decisionSummary = "Check Sent mail, then mark the reply sent, retry it, or cancel it.";
   const text = renderSupportManagementAlert(item);
   assert.match(text, /^\*Airbnb reply delivery needs confirmation\*/);
   assert.match(text, /Check Sent mail/);

@@ -3,19 +3,72 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
-  AUTOMATED_REPLY_FOOTER,
   canonicalConversationActor,
   conversationEntryKey,
   finalSendDecision,
   parseAirbnbConversationEmail,
-  supportDisposition,
-  supportMessageMatchesTopic,
-  withAutomatedReplyFooter,
 } from "@tristdrum/airbnb-core";
+import { decideGuestResponse } from "./agent.mjs";
 
 const corpus = JSON.parse(
   readFileSync(new URL("./fixtures/historical-support.json", import.meta.url), "utf8"),
 );
+
+const ADJUDICATED_DECISIONS = Object.freeze({
+  greeting: {
+    alertManagement: false,
+    draft: "Hello! We’re looking forward to hosting you.",
+  },
+  wifi: {
+    alertManagement: false,
+    draft: "Of course, I’ll resend the verified Wi-Fi details now.",
+  },
+  directions: {
+    alertManagement: false,
+    draft: "Of course, I’ll send the verified directions to the studio now.",
+  },
+  "check-in-time": {
+    alertManagement: false,
+    draft: "Standard check-in is from 15:00.",
+  },
+  "unanswered-request": {
+    alertManagement: true,
+    draft: "I’m sorry you’ve been waiting. We’ve alerted the hosts so they can respond properly as soon as possible.",
+  },
+  "booking-question": {
+    alertManagement: true,
+    draft: "Thanks for checking. We’ve asked the hosts to review the requested change; nothing has been changed yet.",
+  },
+  complaint: {
+    alertManagement: true,
+    draft: "I’m sorry the studio wasn’t clean. We’ve alerted the hosts so this can be handled quickly.",
+  },
+  "exception-request": {
+    alertManagement: false,
+    draft: "I’m sorry, but we can’t offer a late check-out. Standard check-out is by 10:00.",
+  },
+  "early-check-in-conditional": {
+    alertManagement: false,
+    draft: "We’ll do our best to have the studio ready by 13:00, depending on cleaning, but the earlier time can’t be guaranteed.",
+  },
+  "late-checkout-eleven": {
+    alertManagement: false,
+    draft: "I’m sorry, but we can’t offer a late check-out. Standard check-out is by 10:00.",
+  },
+  "late-checkout-after-eleven": {
+    alertManagement: false,
+    draft: "I’m sorry, but we can’t offer a late check-out. Standard check-out is by 10:00.",
+  },
+});
+
+function modelDecision(value) {
+  return async () => ({
+    ok: true,
+    async json() {
+      return { output_text: JSON.stringify(value) };
+    },
+  });
+}
 
 function parseFixture(fixture) {
   return parseAirbnbConversationEmail({
@@ -44,7 +97,7 @@ test("historical support corpus is bounded and explicitly anonymized", () => {
 });
 
 for (const fixture of corpus.conversations) {
-  test(`historical support evidence: ${fixture.id}`, () => {
+  test(`historical support evidence: ${fixture.id}`, async () => {
     const parsed = parseFixture(fixture);
     assert.ok(parsed, "fixture must parse as a trusted Airbnb conversation");
     assert.equal(parsed.providerThreadId, fixture.providerThreadId);
@@ -79,19 +132,37 @@ for (const fixture of corpus.conversations) {
     }
 
     assert.equal(latest.direction, "guest");
-    const disposition = supportDisposition({
-      ...fixture.classification,
-      messageWhitelisted: supportMessageMatchesTopic(latest.text, fixture.classification.topic),
+    const adjudicated = ADJUDICATED_DECISIONS[fixture.id];
+    assert.ok(adjudicated, `fixture ${fixture.id} needs an adjudicated adaptive decision`);
+    const decision = await decideGuestResponse({
+      guestMessage: latest.text,
+      guestName: latest.name,
+      listingName: parsed.listingName,
+      stayLabel: parsed.stayLabel,
+      latestEventAt: fixture.occurredAt,
+      conversationContext: parsed.entries.map((entry) => ({
+        direction: entry.direction,
+        text: entry.text,
+      })),
+      facts: {
+        checkInTime: "15:00",
+        checkOutTime: "10:00",
+        earliestCheckInTime: "13:00",
+        wifi: "Verified fixture Wi-Fi details",
+        directions: "Verified fixture directions",
+      },
+      env: { OPENAI_API_KEY: "test-key" },
+      fetchFn: modelDecision({
+        replyNeeded: true,
+        sendReply: true,
+        alertManagement: adjudicated.alertManagement,
+        summary: `Adjudicated historical case: ${fixture.id}`,
+        draft: adjudicated.draft,
+      }),
     });
-    assert.equal(disposition.autoReply, fixture.expected.autoReply);
-    assert.equal(disposition.status, fixture.expected.status);
-    assert.equal(disposition.alertManagement, fixture.expected.alertManagement);
-
-    if (disposition.autoReply) {
-      const rendered = withAutomatedReplyFooter(fixture.classification.draft);
-      assert.doesNotMatch(rendered, new RegExp(AUTOMATED_REPLY_FOOTER));
-      assert.equal(withAutomatedReplyFooter(rendered), rendered);
-    }
+    assert.equal(decision.autoReply, true);
+    assert.equal(decision.alertManagement, adjudicated.alertManagement);
+    assert.equal(decision.status, "approved_for_guard");
   });
 }
 
