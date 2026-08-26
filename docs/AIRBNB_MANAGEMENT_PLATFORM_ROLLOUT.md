@@ -226,10 +226,10 @@ After that guarded cutover:
 - Heartbeat `airbnb-cleaner-midday-cutover-check` performs the daily personal
   platform and rollback audit at 14:25 SAST.
 - The latest cleaner and support repairs reset the clean-run clock at
-  2026-08-26 12:50 SAST. Require 72 clean hours before treating the replacement
-  as stable; the new stability checkpoint is 2026-08-29 12:50 SAST.
+  2026-08-26 13:06 SAST. Require 72 clean hours before treating the replacement
+  as stable; the new stability checkpoint is 2026-08-29 13:06 SAST.
 - Do not delete the stopped Min app or rollback data before the seven-day gate.
-  The earliest retirement checkpoint is 2026-09-02 12:50 SAST, after seven full
+  The earliest retirement checkpoint is 2026-09-02 13:06 SAST, after seven full
   clean days from the latest repairs. Extend the heartbeat if verification
   delays retirement.
 - Delete old infrastructure only after schedules, receipts, WhatsApp readback,
