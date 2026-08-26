@@ -12,6 +12,8 @@ const DEFAULT_FOLDER = "[Gmail]/All Mail";
 const DEFAULT_CONNECTION_TIMEOUT_MS = 15_000;
 const DEFAULT_SOCKET_TIMEOUT_MS = 30_000;
 const DEFAULT_IMPORT_DEADLINE_MS = 30_000;
+const DEFAULT_GUARD_DEADLINE_MS = 20_000;
+const DEFAULT_CLEANUP_TIMEOUT_MS = 1_000;
 const DEFAULT_SENT_FOLDER = "[Gmail]/Sent Mail";
 
 function required(name, env) {
@@ -42,18 +44,44 @@ function positiveInteger(value, fallback) {
 
 function closeClientNoThrow(client) {
   try {
-    client.close();
+    const closing = client.close();
+    closing?.catch?.(() => {});
   } catch {
     // ImapFlow can already be disconnected when a deadline closes the socket.
   }
 }
 
-async function finishClient(client) {
-  try {
-    if (client.usable) await client.logout();
-    else closeClientNoThrow(client);
-  } catch {
+async function finishClient(client, timeoutMs = DEFAULT_CLEANUP_TIMEOUT_MS) {
+  if (!client.usable) {
     closeClientNoThrow(client);
+    return;
+  }
+  let timer;
+  const logout = Promise.resolve()
+    .then(() => client.logout())
+    .catch(() => closeClientNoThrow(client));
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      closeClientNoThrow(client);
+      resolve();
+    }, timeoutMs);
+  });
+  await Promise.race([logout, deadline]);
+  clearTimeout(timer);
+}
+
+async function withClientDeadline(client, work, timeoutMs, errorFactory) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      closeClientNoThrow(client);
+      reject(errorFactory(timeoutMs));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -66,6 +94,13 @@ function importDeadlineError(milliseconds) {
   return Object.assign(
     new Error(`Airbnb support Gmail import exceeded ${milliseconds}ms.`),
     { code: "IMAP_IMPORT_DEADLINE" },
+  );
+}
+
+function guardDeadlineError(milliseconds) {
+  return Object.assign(
+    new Error(`Airbnb support Sent-mail guard exceeded ${milliseconds}ms.`),
+    { code: "IMAP_GUARD_DEADLINE" },
   );
 }
 
@@ -114,7 +149,6 @@ export async function collectConversationMessages({
 }) {
   const client = createClient(imapOptions(mailboxScope, env));
   let lock;
-  let deadlineTimer;
   try {
     const deadlineMs = positiveInteger(
       env.AIRBNB_SUPPORT_GMAIL_IMPORT_DEADLINE_MS,
@@ -171,17 +205,13 @@ export async function collectConversationMessages({
         lastUid: selected.at(-1)?.uid ?? Number(afterUid),
       };
     })();
-    const deadline = new Promise((_, reject) => {
-      deadlineTimer = setTimeout(() => {
-        closeClientNoThrow(client);
-        reject(importDeadlineError(deadlineMs));
-      }, deadlineMs);
-    });
-    return await Promise.race([importWork, deadline]);
+    return await withClientDeadline(client, importWork, deadlineMs, importDeadlineError);
   } finally {
-    clearTimeout(deadlineTimer);
     lock?.release();
-    await finishClient(client);
+    await finishClient(
+      client,
+      positiveInteger(env.AIRBNB_SUPPORT_GMAIL_CLEANUP_TIMEOUT_MS, DEFAULT_CLEANUP_TIMEOUT_MS),
+    );
   }
 }
 
@@ -193,7 +223,6 @@ export async function collectBookingLifecycleMessages({
 }) {
   const client = createClient(imapOptions("tristan", env));
   let lock;
-  let deadlineTimer;
   try {
     const deadlineMs = positiveInteger(env.AIRBNB_SUPPORT_GMAIL_IMPORT_DEADLINE_MS, DEFAULT_IMPORT_DEADLINE_MS);
     const importWork = (async () => {
@@ -242,17 +271,13 @@ export async function collectBookingLifecycleMessages({
         envelopesFound: selected.length,
       };
     })();
-    const deadline = new Promise((_, reject) => {
-      deadlineTimer = setTimeout(() => {
-        closeClientNoThrow(client);
-        reject(importDeadlineError(deadlineMs));
-      }, deadlineMs);
-    });
-    return await Promise.race([importWork, deadline]);
+    return await withClientDeadline(client, importWork, deadlineMs, importDeadlineError);
   } finally {
-    clearTimeout(deadlineTimer);
     lock?.release();
-    await finishClient(client);
+    await finishClient(
+      client,
+      positiveInteger(env.AIRBNB_SUPPORT_GMAIL_CLEANUP_TIMEOUT_MS, DEFAULT_CLEANUP_TIMEOUT_MS),
+    );
   }
 }
 
@@ -266,17 +291,28 @@ export async function findSentMessageIds({
   const client = createClient(imapOptions("tristan", env));
   let lock;
   try {
-    await client.connect();
-    lock = await client.getMailboxLock(String(env.AIRBNB_SUPPORT_GMAIL_SENT_FOLDER ?? DEFAULT_SENT_FOLDER));
-    const found = [];
-    for (const messageId of wanted) {
-      const matches = await client.search({ header: { "message-id": messageId } }, { uid: true });
-      if (matches?.length) found.push(messageId);
-    }
-    return found;
+    const guardWork = (async () => {
+      await client.connect();
+      lock = await client.getMailboxLock(String(env.AIRBNB_SUPPORT_GMAIL_SENT_FOLDER ?? DEFAULT_SENT_FOLDER));
+      const found = [];
+      for (const messageId of wanted) {
+        const matches = await client.search({ header: { "message-id": messageId } }, { uid: true });
+        if (matches?.length) found.push(messageId);
+      }
+      return found;
+    })();
+    return await withClientDeadline(
+      client,
+      guardWork,
+      positiveInteger(env.AIRBNB_SUPPORT_GMAIL_GUARD_DEADLINE_MS, DEFAULT_GUARD_DEADLINE_MS),
+      guardDeadlineError,
+    );
   } finally {
     lock?.release();
-    await finishClient(client);
+    await finishClient(
+      client,
+      positiveInteger(env.AIRBNB_SUPPORT_GMAIL_CLEANUP_TIMEOUT_MS, DEFAULT_CLEANUP_TIMEOUT_MS),
+    );
   }
 }
 
@@ -296,51 +332,62 @@ export async function findSentThreadEvidence({
   const client = createClient(imapOptions(mailboxScope, env));
   let lock;
   try {
-    await client.connect();
-    lock = await client.getMailboxLock(mailboxValue(
-      mailboxScope,
-      "SENT_FOLDER",
-      env,
-      String(env.AIRBNB_SUPPORT_GMAIL_SENT_FOLDER ?? DEFAULT_SENT_FOLDER),
-    ));
-    const found = [];
-    for (const messageId of wanted) {
-      const matches = await client.search({ header: { "message-id": messageId } }, { uid: true });
-      if (matches?.length) found.push(messageId);
-    }
-
-    const candidateUids = await client.search({ since: cutoff }, { uid: true });
-    let humanReplyAt = null;
-    const selectedUids = (candidateUids ?? []).slice(-200);
-    if (selectedUids.length) {
-      for await (const message of client.fetch(
-        selectedUids,
-        { source: true, internalDate: true, uid: true },
-        { uid: true },
-      )) {
-        if (!message.source) continue;
-        const parsed = await simpleParser(message.source, { skipHtmlToText: true, skipTextToHtml: true });
-        const messageId = String(parsed.messageId ?? "").trim();
-        if (wanted.includes(messageId)) continue;
-        const recipients = addressList(parsed.to).map((value) => String(value).toLowerCase());
-        if (!recipients.some((address) => trustedAirbnbSender(address))) continue;
-        const occurredAt = message.internalDate ?? parsed.date;
-        const occurredAtMs = occurredAt instanceof Date ? occurredAt.getTime() : Date.parse(occurredAt);
-        if (!Number.isFinite(occurredAtMs) || occurredAtMs <= cutoff.getTime()) continue;
-        const sentReferences = [
-          parsed.inReplyTo,
-          ...(Array.isArray(parsed.references) ? parsed.references : parsed.references ? [parsed.references] : []),
-        ].map((value) => String(value ?? "").trim()).filter(Boolean);
-        const linkedByReference = sentReferences.some((value) => anchors.has(value));
-        if (!linkedByReference) continue;
-        const candidateTime = new Date(occurredAtMs).toISOString();
-        if (!humanReplyAt || Date.parse(candidateTime) > Date.parse(humanReplyAt)) humanReplyAt = candidateTime;
+    const guardWork = (async () => {
+      await client.connect();
+      lock = await client.getMailboxLock(mailboxValue(
+        mailboxScope,
+        "SENT_FOLDER",
+        env,
+        String(env.AIRBNB_SUPPORT_GMAIL_SENT_FOLDER ?? DEFAULT_SENT_FOLDER),
+      ));
+      const found = [];
+      for (const messageId of wanted) {
+        const matches = await client.search({ header: { "message-id": messageId } }, { uid: true });
+        if (matches?.length) found.push(messageId);
       }
-    }
-    return { messageIds: found, humanReplyAt };
+
+      const candidateUids = await client.search({ since: cutoff }, { uid: true });
+      let humanReplyAt = null;
+      const selectedUids = (candidateUids ?? []).slice(-200);
+      if (selectedUids.length) {
+        for await (const message of client.fetch(
+          selectedUids,
+          { source: true, internalDate: true, uid: true },
+          { uid: true },
+        )) {
+          if (!message.source) continue;
+          const parsed = await simpleParser(message.source, { skipHtmlToText: true, skipTextToHtml: true });
+          const messageId = String(parsed.messageId ?? "").trim();
+          if (wanted.includes(messageId)) continue;
+          const recipients = addressList(parsed.to).map((value) => String(value).toLowerCase());
+          if (!recipients.some((address) => trustedAirbnbSender(address))) continue;
+          const occurredAt = message.internalDate ?? parsed.date;
+          const occurredAtMs = occurredAt instanceof Date ? occurredAt.getTime() : Date.parse(occurredAt);
+          if (!Number.isFinite(occurredAtMs) || occurredAtMs <= cutoff.getTime()) continue;
+          const sentReferences = [
+            parsed.inReplyTo,
+            ...(Array.isArray(parsed.references) ? parsed.references : parsed.references ? [parsed.references] : []),
+          ].map((value) => String(value ?? "").trim()).filter(Boolean);
+          const linkedByReference = sentReferences.some((value) => anchors.has(value));
+          if (!linkedByReference) continue;
+          const candidateTime = new Date(occurredAtMs).toISOString();
+          if (!humanReplyAt || Date.parse(candidateTime) > Date.parse(humanReplyAt)) humanReplyAt = candidateTime;
+        }
+      }
+      return { messageIds: found, humanReplyAt };
+    })();
+    return await withClientDeadline(
+      client,
+      guardWork,
+      positiveInteger(env.AIRBNB_SUPPORT_GMAIL_GUARD_DEADLINE_MS, DEFAULT_GUARD_DEADLINE_MS),
+      guardDeadlineError,
+    );
   } finally {
     lock?.release();
-    await finishClient(client);
+    await finishClient(
+      client,
+      positiveInteger(env.AIRBNB_SUPPORT_GMAIL_CLEANUP_TIMEOUT_MS, DEFAULT_CLEANUP_TIMEOUT_MS),
+    );
   }
 }
 

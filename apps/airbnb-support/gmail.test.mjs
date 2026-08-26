@@ -191,6 +191,58 @@ test("collector closes a stalled IMAP import at the configured deadline", async 
   assert.equal(closed, true);
 });
 
+test("deadline cleanup stays bounded when a usable client's logout never settles", async () => {
+  let closed = false;
+  const client = {
+    usable: true,
+    connect: () => new Promise(() => {}),
+    logout: () => new Promise(() => {}),
+    close() { closed = true; },
+  };
+  const startedAt = Date.now();
+  await assert.rejects(
+    collectConversationMessages({
+      since: new Date("2026-08-01T00:00:00Z"),
+      env: {
+        AIRBNB_SUPPORT_GMAIL_USER: "tristan@example.test",
+        AIRBNB_SUPPORT_GMAIL_APP_PASSWORD: "not-a-secret",
+        AIRBNB_SUPPORT_GMAIL_IMPORT_DEADLINE_MS: "10",
+        AIRBNB_SUPPORT_GMAIL_CLEANUP_TIMEOUT_MS: "10",
+      },
+      createClient: () => client,
+    }),
+    { code: "IMAP_IMPORT_DEADLINE" },
+  );
+  assert.equal(closed, true);
+  assert.ok(Date.now() - startedAt < 250);
+});
+
+test("Sent-thread reconciliation has a bounded pre-SMTP deadline", async () => {
+  let closed = false;
+  const client = {
+    usable: true,
+    connect: () => new Promise(() => {}),
+    logout: () => new Promise(() => {}),
+    close() { closed = true; },
+  };
+  await assert.rejects(
+    findSentThreadEvidence({
+      messageIds: ["<outbound@example.test>"],
+      since: new Date("2026-08-01T00:00:00Z"),
+      referenceIds: ["<source@example.test>"],
+      env: {
+        AIRBNB_SUPPORT_GMAIL_USER: "tristan@example.test",
+        AIRBNB_SUPPORT_GMAIL_APP_PASSWORD: "not-a-secret",
+        AIRBNB_SUPPORT_GMAIL_GUARD_DEADLINE_MS: "10",
+        AIRBNB_SUPPORT_GMAIL_CLEANUP_TIMEOUT_MS: "10",
+      },
+      createClient: () => client,
+    }),
+    { code: "IMAP_GUARD_DEADLINE" },
+  );
+  assert.equal(closed, true);
+});
+
 test("supplemental collector uses Jane's isolated credentials and labels its evidence", async () => {
   let clientOptions;
   let searchQuery;

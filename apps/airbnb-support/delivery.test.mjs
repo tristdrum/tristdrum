@@ -290,3 +290,17 @@ test("a mailbox guard failure returns the delivery to a safe pre-SMTP retry", as
   assert.equal(calls.some(([name]) => name === "send"), false);
   assert.deepEqual(calls.at(-1), ["guard-failed", true]);
 });
+
+test("a Sent-mail deadline remains retry-safe before SMTP", async () => {
+  const currentEmail = conversationEmail([{ name: "Guest Alpha", role: "Guest", text: "Hello" }]);
+  const { calls, options } = harness(currentEmail, {
+    reconcileSent: async () => {
+      throw Object.assign(new Error("Sent-mail guard timed out."), { code: "IMAP_GUARD_DEADLINE" });
+    },
+    recordGuardFailure: async (_sql, value) => calls.push(["guard-failed", value.attemptRecorded]),
+  });
+  const result = await processDeliveryGuard(options);
+  assert.deepEqual(result, { action: "guard_error", retrySafeBeforeSmtp: true });
+  assert.equal(calls.some(([name]) => name === "send"), false);
+  assert.deepEqual(calls.at(-1), ["guard-failed", true]);
+});
