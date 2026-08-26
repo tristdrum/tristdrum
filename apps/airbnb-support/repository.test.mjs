@@ -78,7 +78,7 @@ test("candidate loading uses an explicit activation cutoff instead of a rolling 
       latestEventAt: "2026-08-01T10:00:00.000Z",
       guestMessage: "Is the Wi-Fi available?",
       facts: null,
-      existingClassification: null,
+      existingDecision: null,
       existingDraft: null,
     }];
   };
@@ -195,7 +195,7 @@ test("support alert loading revalidates thread and delivery state", async () => 
   assert.match(query, /when 'delivery_ambiguous' then 3/i);
 });
 
-test("delivery queue safely recovers stale claims and excludes legacy autonomous approvals", async () => {
+test("delivery queue safely recovers stale claims and admits only versioned agent decisions", async () => {
   const queries = [];
   const transaction = async (strings) => {
     queries.push(strings.join("?"));
@@ -226,7 +226,11 @@ test("delivery queue safely recovers stale claims and excludes legacy autonomous
   )), true);
   assert.equal(queries.some((query) => (
     /approved_by is not null/.test(query)
-    && /messageWhitelisted/.test(query)
+    && /decisionSource/.test(query)
+    && /adaptive_agent/.test(query)
+    && /operational_readiness/.test(query)
+    && /decisionVersion/.test(query)
+    && /autoReply/.test(query)
   )), true);
 });
 

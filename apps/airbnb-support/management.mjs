@@ -36,7 +36,7 @@ export function renderSupportManagementAlert(alert, dashboardUrl = "https://www.
   const context = [
     alert.details?.listingName,
     alert.details?.guestName ? `Guest: ${alert.details.guestName}` : null,
-    alert.details?.classificationSummary,
+    alert.details?.decisionSummary ?? alert.details?.classificationSummary,
   ].filter(Boolean);
   return [
     `*${heading}*`,

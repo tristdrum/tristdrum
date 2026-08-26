@@ -318,7 +318,7 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8, notBef
       thread.last_guest_at,
       property.listing_name,
       property.facts,
-      existing.classification as existing_classification,
+      existing.classification as existing_decision,
       existing.draft_text as existing_draft,
       latest.body_normalized as guest_message,
       latest.provider_sent_at as latest_event_at,
@@ -397,8 +397,8 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8, notBef
   return rows.map((row) => ({
     ...row,
     facts: row.facts ?? {},
-    existingClassification: row.existingClassification
-      ? { ...row.existingClassification, draft: row.existingDraft }
+    existingDecision: row.existingDecision
+      ? { ...row.existingDecision, draft: row.existingDraft }
       : null,
     activeTimeRequest: row.activeTimeRequestType ? {
       requestType: row.activeTimeRequestType,
@@ -448,7 +448,7 @@ export async function storeSupportDraft(sql, {
                     then 'cancelled'
                     when airbnb.reply_deliveries.status = 'approved'
                       and airbnb.reply_deliveries.approved_by is null
-                      and not (excluded.classification @> '{"messageWhitelisted": true}'::jsonb)
+                      and not (excluded.classification @> '{"autoReply": true}'::jsonb)
                     then 'needs_approval'
                     else airbnb.reply_deliveries.status
                   end,
@@ -499,7 +499,7 @@ export async function storeSupportDraft(sql, {
           topic: classification.topic,
           listingName: candidate.listingName,
           guestName: candidate.guestDisplayName,
-          classificationSummary: classification.summary,
+          decisionSummary: classification.summary,
         })}
       )
       on conflict (household_id, dedupe_key)
@@ -752,9 +752,9 @@ export async function storeOperationalGuestReply(sql, {
       ${sql.json({
         topic: 'early_check_in_ready',
         riskTier: 'low',
-        confidence: 1,
-        factsVerified: true,
-        messageWhitelisted: true,
+        decisionSource: 'operational_readiness',
+        decisionVersion: 2,
+        autoReply: true,
         replyNeeded: true,
         summary: 'The cleaners explicitly confirmed that the studio is ready.',
         operationalRequestId: requestId,
@@ -876,7 +876,10 @@ export async function loadDeliveryGuardCandidates(sql, { householdId, now, limit
       and status = 'approved'
       and (
         approved_by is not null
-        or classification @> '{"messageWhitelisted": true}'::jsonb
+        or (
+          classification->>'decisionSource' in ('adaptive_agent', 'operational_readiness')
+          and classification @> '{"decisionVersion": 2, "autoReply": true}'::jsonb
+        )
       )
     order by created_at
     limit ${limit}

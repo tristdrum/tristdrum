@@ -3,14 +3,10 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
-  AUTOMATED_REPLY_FOOTER,
   canonicalConversationActor,
   conversationEntryKey,
   finalSendDecision,
   parseAirbnbConversationEmail,
-  supportDisposition,
-  supportMessageMatchesTopic,
-  withAutomatedReplyFooter,
 } from "@tristdrum/airbnb-core";
 
 const corpus = JSON.parse(
@@ -79,19 +75,7 @@ for (const fixture of corpus.conversations) {
     }
 
     assert.equal(latest.direction, "guest");
-    const disposition = supportDisposition({
-      ...fixture.classification,
-      messageWhitelisted: supportMessageMatchesTopic(latest.text, fixture.classification.topic),
-    });
-    assert.equal(disposition.autoReply, fixture.expected.autoReply);
-    assert.equal(disposition.status, fixture.expected.status);
-    assert.equal(disposition.alertManagement, fixture.expected.alertManagement);
-
-    if (disposition.autoReply) {
-      const rendered = withAutomatedReplyFooter(fixture.classification.draft);
-      assert.doesNotMatch(rendered, new RegExp(AUTOMATED_REPLY_FOOTER));
-      assert.equal(withAutomatedReplyFooter(rendered), rendered);
-    }
+    assert.ok(latest.text.length > 0);
   });
 }
 

@@ -88,19 +88,23 @@ verification, duplicate checks, independent monitoring, and a rollback window.
 - Backfill historical conversations into the private schema and curate
   anonymized fixtures for greetings, Wi-Fi, directions, check-in, unanswered
   requests, booking questions, complaints, exceptions, and previous mistakes.
-- Automatically answer only verified low-risk topics: Wi-Fi, standard address,
-  directions, parking, confirmed amenities, standard check-in and check-out
-  times, greetings, thanks, and resending approved information.
-- Never automatically accept or decline bookings, promise availability, discuss
-  refunds or discounts, change dates, handle complaints or safety issues, grant
-  exceptions, or answer from uncertain property facts.
-- Alert Management immediately for non-whitelisted or uncertain messages,
-  remind after 45 minutes, and mark the case overdue after 60 minutes.
-- Generate classifications and drafts through the OpenAI Responses API using
-  `gpt-5.6-terra`, `store: false`, low reasoning, no external tools, and strict
-  JSON-schema output.
-- Send autonomous replies from Tristan's Gmail as a threaded reply ending with
-  `Automated reply on behalf of your hosts.`
+- Give one adaptive support agent the full recent conversation, reservation
+  timing, stay phase, guest and listing identity, current property facts,
+  hosting knowledge, and active operational requests. Do not classify the case
+  into a topic or restrict replies to an allowlist.
+- Let the agent decide whether a reply is needed, whether it can be sent now,
+  whether Management also needs an alert, and what a brief natural reply should
+  say. It may acknowledge a guest and alert Management at the same time.
+- Use the OpenAI Responses API with `gpt-5.6-sol`, `store: false`, medium
+  reasoning, no external tools, and a minimal strict JSON decision contract.
+- Current verified property facts and explicit timing policy remain authoritative;
+  the model must not invent availability, prices, refunds, booking changes,
+  access details, amenities, or promises.
+- Give an inconsistent post-stay reply one model revision attempt. If it still
+  contradicts the stay phase or misses clearly signalled personal tone, hold it
+  and alert Management instead of substituting a canned template.
+- Send autonomous replies from Tristan's Gmail as ordinary threaded replies with
+  no AI disclaimer or automated footer.
 - Immediately before sending, lock the thread, re-fetch its latest email events,
   and compare them with the draft's source fingerprint.
 - Cancel and re-evaluate if a newer guest event exists. Mark handled without

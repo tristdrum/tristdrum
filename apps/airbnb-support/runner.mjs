@@ -10,7 +10,7 @@ import {
   recordJobStart,
   sanitizedError,
 } from "@tristdrum/airbnb-db";
-import { classifyGuestMessage } from "./classifier.mjs";
+import { decideGuestResponse } from "./agent.mjs";
 import { processDeliveryGuard } from "./delivery.mjs";
 import {
   collectBookingLifecycleMessages,
@@ -63,18 +63,18 @@ function optionalInstant(value) {
   return parsed.toISOString();
 }
 
-function fallbackClassification(error) {
+function fallbackDecision(error) {
   return {
     topic: "unknown",
     riskTier: "unknown",
-    confidence: 0,
-    factsVerified: false,
     replyNeeded: true,
-    summary: "Classification failed; human review is required.",
+    summary: "The support decision failed; human review is required.",
     draft: null,
     autoReply: false,
     status: "needs_human",
     alertManagement: true,
+    decisionSource: "decision_error",
+    decisionVersion: 2,
     model: null,
     error: sanitizedError(error),
   };
@@ -85,7 +85,7 @@ export async function runSupport({
   now = () => new Date(),
   collectMessages = collectConversationMessages,
   collectLifecycleMessages = collectBookingLifecycleMessages,
-  classify = classifyGuestMessage,
+  decide = decideGuestResponse,
   processDelivery = processDeliveryGuard,
   notifyManagement = notifySupportManagement,
   captureTimeRequest = captureGuestTimeRequest,
@@ -206,13 +206,16 @@ export async function runSupport({
     });
     const drafts = [];
     const timeRequests = [];
-    let classificationFailureCount = 0;
-    const classifyAndStore = async (candidate) => {
-      let classification;
-      if (candidate.existingClassification) {
-        classification = candidate.existingClassification;
+    let decisionFailureCount = 0;
+    const decideAndStore = async (candidate) => {
+      let decision;
+      const existingDecision = candidate.existingDecision?.decisionVersion === 2
+        ? candidate.existingDecision
+        : null;
+      if (existingDecision) {
+        decision = existingDecision;
       } else try {
-        classification = await classify({
+        decision = await decide({
           guestMessage: candidate.guestMessage,
           guestName: candidate.guestDisplayName,
           listingName: candidate.listingName,
@@ -225,16 +228,16 @@ export async function runSupport({
           env,
         });
       } catch (error) {
-        classificationFailureCount += 1;
-        classification = fallbackClassification(error);
+        decisionFailureCount += 1;
+        decision = fallbackDecision(error);
       }
       let timeRequestOutcome = null;
-      const operationalRequest = classification.operationalRequest;
+      const operationalRequest = decision.operationalRequest;
       if (
         mode === "live"
         && capabilities.timeRequestsEnabled
-        && !candidate.existingClassification
-        && classification.autoReply === true
+        && !existingDecision
+        && decision.autoReply === true
         && (
           operationalRequest?.createsOperationalRequest === true
           || operationalRequest?.cancelsOperationalRequest === true
@@ -260,8 +263,8 @@ export async function runSupport({
             });
           timeRequests.push(timeRequestOutcome);
           if (!["notified", "already_notified", "cancelled", "no_change"].includes(timeRequestOutcome.status)) {
-            classification = {
-              ...classification,
+            decision = {
+              ...decision,
               autoReply: false,
               status: "needs_human",
               alertManagement: true,
@@ -281,20 +284,24 @@ export async function runSupport({
       return storeSupportDraft(ownDatabase.sql, {
         householdId,
         candidate,
-        classification,
+        // The database column keeps its legacy name while the runtime stores an adaptive decision.
+        classification: decision,
         now: startedAt,
         shadowMode: mode === "shadow",
         automaticallyApprove: mode === "live"
           && capabilities.autonomousRepliesEnabled
           && janeMailboxAvailable
-          && !candidate.existingClassification
+          && !existingDecision
           && timePolicyAllowed
-          && classification.autoReply === true,
+          && decision.autoReply === true,
       });
     };
-    const concurrency = Math.max(1, Math.min(4, Number.parseInt(env.AIRBNB_SUPPORT_CLASSIFICATION_CONCURRENCY ?? "4", 10)));
+    const concurrency = Math.max(1, Math.min(4, Number.parseInt(
+      env.AIRBNB_SUPPORT_DECISION_CONCURRENCY ?? "4",
+      10,
+    )));
     for (let index = 0; index < candidates.length; index += concurrency) {
-      const settled = await Promise.allSettled(candidates.slice(index, index + concurrency).map(classifyAndStore));
+      const settled = await Promise.allSettled(candidates.slice(index, index + concurrency).map(decideAndStore));
       drafts.push(...settled.filter((item) => item.status === "fulfilled").map((item) => item.value));
       const failure = settled.find((item) => item.status === "rejected");
       if (failure) throw failure.reason;
@@ -366,7 +373,8 @@ export async function runSupport({
       handledByHumanCount: ingested.filter((item) => item.latestDirection === "host").length,
       candidateCount: candidates.length,
       draftCount: drafts.length,
-      classificationFailureCount,
+      decisionFailureCount,
+      classificationFailureCount: decisionFailureCount,
       reminderCount: drafts.filter((draft) => draft.alertStages.includes("reminder")).length,
       overdueCount: drafts.filter((draft) => draft.alertStages.includes("overdue")).length,
       deliveryCandidateCount: deliveries.length,
