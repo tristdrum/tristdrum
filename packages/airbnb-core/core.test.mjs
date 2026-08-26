@@ -245,14 +245,16 @@ test("support auto-reply gate is whitelist and verified-facts only", () => {
     replyNeeded: true,
     draft: "Use an unverified password.",
   }).autoReply, false);
-  assert.equal(supportDisposition({
+  const noReplyNeeded = supportDisposition({
     topic: "thanks",
     riskTier: "low",
     factsVerified: true,
     confidence: 0.99,
     replyNeeded: false,
     draft: null,
-  }).autoReply, false);
+  });
+  assert.equal(noReplyNeeded.autoReply, false);
+  assert.equal(noReplyNeeded.alertManagement, false);
 });
 
 test("automated replies omit and strip the legacy AI footer", () => {
