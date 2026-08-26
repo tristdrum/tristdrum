@@ -2,7 +2,11 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { htmlToText } from "html-to-text";
 import nodemailer from "nodemailer";
-import { isAirbnbConversationSubject, trustedAirbnbSender } from "@tristdrum/airbnb-core";
+import {
+  isAirbnbBookingLifecycleSubject,
+  isAirbnbConversationSubject,
+  trustedAirbnbSender,
+} from "@tristdrum/airbnb-core";
 
 const DEFAULT_FOLDER = "[Gmail]/All Mail";
 const DEFAULT_CONNECTION_TIMEOUT_MS = 15_000;
@@ -148,6 +152,78 @@ export async function collectConversationMessages({
         messages: selected.map((envelope) => parsedByUid.get(envelope.uid)).filter(Boolean),
         envelopesFound: selected.length,
         lastUid: selected.at(-1)?.uid ?? Number(afterUid),
+      };
+    })();
+    const deadline = new Promise((_, reject) => {
+      deadlineTimer = setTimeout(() => {
+        client.close();
+        reject(importDeadlineError(deadlineMs));
+      }, deadlineMs);
+    });
+    return await Promise.race([importWork, deadline]);
+  } finally {
+    clearTimeout(deadlineTimer);
+    lock?.release();
+    if (client.usable) await client.logout();
+    else client.close();
+  }
+}
+
+export async function collectBookingLifecycleMessages({
+  since,
+  maxRead = 100,
+  env = process.env,
+  createClient = (options) => new ImapFlow(options),
+}) {
+  const client = createClient(imapOptions("tristan", env));
+  let lock;
+  let deadlineTimer;
+  try {
+    const deadlineMs = positiveInteger(env.AIRBNB_SUPPORT_GMAIL_IMPORT_DEADLINE_MS, DEFAULT_IMPORT_DEADLINE_MS);
+    const importWork = (async () => {
+      await client.connect();
+      lock = await client.getMailboxLock(mailboxValue(
+        "tristan",
+        "FOLDER",
+        env,
+        String(env.AIRBNB_SUPPORT_GMAIL_FOLDER ?? DEFAULT_FOLDER),
+      ));
+      const uids = await client.search({ since, from: "automated@airbnb.com" }, { uid: true });
+      if (!uids.length) return { messages: [], envelopesFound: 0 };
+      const candidates = [];
+      for await (const message of client.fetch(uids, { envelope: true, internalDate: true, uid: true }, { uid: true })) {
+        const sender = String(message.envelope?.from?.[0]?.address ?? "").toLowerCase();
+        const subject = message.envelope?.subject ?? "";
+        if (sender !== "automated@airbnb.com" || !isAirbnbBookingLifecycleSubject(subject)) continue;
+        candidates.push({
+          uid: Number(message.uid),
+          occurredAt: message.internalDate?.toISOString?.() ?? null,
+          from: sender,
+          subject,
+        });
+      }
+      const selected = candidates.sort((left, right) => left.uid - right.uid).slice(-maxRead);
+      if (!selected.length) return { messages: [], envelopesFound: 0 };
+      const selectedByUid = new Map(selected.map((envelope) => [envelope.uid, envelope]));
+      const parsedByUid = new Map();
+      for await (const message of client.fetch(
+        selected.map((envelope) => envelope.uid),
+        { source: true, uid: true },
+        { uid: true },
+      )) {
+        const envelope = selectedByUid.get(Number(message.uid));
+        if (!envelope || !message.source) continue;
+        const parsed = await simpleParser(message.source, { skipHtmlToText: true, skipTextToHtml: true });
+        parsedByUid.set(envelope.uid, {
+          ...envelope,
+          mailboxScope: "tristan",
+          providerMessageId: rfcMessageId(parsed.messageId) ?? `imap:${envelope.uid}`,
+          body: readableBody(parsed),
+        });
+      }
+      return {
+        messages: selected.map((envelope) => parsedByUid.get(envelope.uid)).filter(Boolean),
+        envelopesFound: selected.length,
       };
     })();
     const deadline = new Promise((_, reject) => {

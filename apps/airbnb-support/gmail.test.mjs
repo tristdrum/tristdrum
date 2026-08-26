@@ -1,11 +1,68 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  collectBookingLifecycleMessages,
   collectConversationMessages,
   findSentMessageIds,
   findSentThreadEvidence,
   sendThreadedReply,
 } from "./gmail.mjs";
+
+test("booking lifecycle collector keeps only trusted non-payment dismissals", async () => {
+  const source = Buffer.from([
+    "Message-ID: <expired-request@example.test>",
+    "From: Airbnb <automated@airbnb.com>",
+    "Subject: Sep 4 - 6 request at Bougainvillea Courtyard Studio dismissed - no payment",
+    "Content-Type: text/plain; charset=utf-8",
+    "",
+    "We didn't receive payment from Somila for their Sep 4 - 6 reservation request at Bougainvillea Courtyard Studio.",
+    "The reservation request has been automatically declined.",
+  ].join("\r\n"));
+  const client = {
+    usable: true,
+    async connect() {},
+    async getMailboxLock() { return { release() {} }; },
+    async search(query) {
+      assert.equal(query.from, "automated@airbnb.com");
+      return [1, 2];
+    },
+    async *fetch(_range, query) {
+      if (query.source) {
+        yield { uid: 1, source };
+        return;
+      }
+      yield {
+        uid: 1,
+        internalDate: new Date("2026-08-26T10:23:00Z"),
+        envelope: {
+          subject: "Sep 4 - 6 request at Bougainvillea Courtyard Studio dismissed - no payment",
+          from: [{ address: "automated@airbnb.com" }],
+        },
+      };
+      yield {
+        uid: 2,
+        internalDate: new Date("2026-08-26T10:24:00Z"),
+        envelope: {
+          subject: "Reservation confirmed - Unrelated Guest arrives Sep 4",
+          from: [{ address: "automated@airbnb.com" }],
+        },
+      };
+    },
+    async logout() {},
+    close() {},
+  };
+  const result = await collectBookingLifecycleMessages({
+    since: new Date("2026-08-25T00:00:00Z"),
+    env: {
+      AIRBNB_SUPPORT_GMAIL_USER: "tristan@example.test",
+      AIRBNB_SUPPORT_GMAIL_APP_PASSWORD: "not-a-secret",
+    },
+    createClient: () => client,
+  });
+  assert.equal(result.envelopesFound, 1);
+  assert.equal(result.messages[0].providerMessageId, "<expired-request@example.test>");
+  assert.match(result.messages[0].body, /didn't receive payment from Somila/i);
+});
 
 test("canonical collector accepts only Tristan's express stream and closes IMAP", async () => {
   let released = false;
