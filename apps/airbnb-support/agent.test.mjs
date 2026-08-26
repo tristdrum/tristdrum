@@ -36,7 +36,7 @@ function modelDecisionSequence(values, inspect = () => {}) {
   };
 }
 
-test("adaptive support uses GPT-5.6 Sol at medium reasoning with a minimal decision contract", async () => {
+test("adaptive support uses GPT-5.6 Sol at xhigh reasoning with a minimal decision contract", async () => {
   let request;
   const result = await decideGuestResponse({
     guestMessage: "We found something unusual beside the parking bay. What should we do?",
@@ -57,7 +57,7 @@ test("adaptive support uses GPT-5.6 Sol at medium reasoning with a minimal decis
   });
 
   assert.equal(request.model, "gpt-5.6-sol");
-  assert.equal(request.reasoning.effort, "medium");
+  assert.equal(request.reasoning.effort, "xhigh");
   assert.equal(request.store, false);
   assert.equal(request.text.format.strict, true);
   assert.deepEqual(request.text.format.schema, SUPPORT_DECISION_SCHEMA);

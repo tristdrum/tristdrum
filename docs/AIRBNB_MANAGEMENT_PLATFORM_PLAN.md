@@ -95,7 +95,7 @@ verification, duplicate checks, independent monitoring, and a rollback window.
 - Let the agent decide whether a reply is needed, whether it can be sent now,
   whether Management also needs an alert, and what a brief natural reply should
   say. It may acknowledge a guest and alert Management at the same time.
-- Use the OpenAI Responses API with `gpt-5.6-sol`, `store: false`, medium
+- Use the OpenAI Responses API with `gpt-5.6-sol`, `store: false`, xhigh
   reasoning, no external tools, and a minimal strict JSON decision contract.
 - Current verified property facts and explicit timing policy remain authoritative;
   the model must not invent availability, prices, refunds, booking changes,

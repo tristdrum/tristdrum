@@ -3,7 +3,7 @@
 Private Fly worker for Tristan's canonical `express@airbnb.com` conversation stream.
 
 - Every Airbnb `Host` event is treated as a human reply; the worker never tries to infer whether Tristan or Jane typed it.
-- OpenAI Responses calls use `gpt-5.6-sol`, medium reasoning, strict JSON schema, `store: false`, and no tools.
+- OpenAI Responses calls use `gpt-5.6-sol`, xhigh reasoning, strict JSON schema, `store: false`, and no tools.
 - One adaptive model decision receives the complete recent conversation, stay phase, guest and listing identity, current property facts, hosting knowledge, and any active timing request. It decides whether a reply is needed, whether it can be sent now, whether Management should be alerted, and what the natural reply should say. There is no topic classifier or reply allowlist.
 - Post-stay replies are checked for contradictory future tense and clear name/emoji tone misses. The same model gets one natural revision attempt; a still-inconsistent draft is held and alerted instead of being sent.
 - The small canonical knowledge module holds stable hosting policy and anonymized precedents. Current property facts remain the source for Wi-Fi, access, directions, parking, and other details that can change.

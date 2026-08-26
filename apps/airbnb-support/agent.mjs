@@ -36,7 +36,7 @@ function positiveInteger(value, fallback) {
 }
 
 function reasoningEffort(env) {
-  const value = String(env.AIRBNB_SUPPORT_OPENAI_REASONING_EFFORT ?? "medium").trim().toLowerCase();
+  const value = String(env.AIRBNB_SUPPORT_OPENAI_REASONING_EFFORT ?? "xhigh").trim().toLowerCase();
   if (!REASONING_EFFORTS.has(value)) throw new Error("AIRBNB_SUPPORT_OPENAI_REASONING_EFFORT is invalid.");
   return value;
 }
