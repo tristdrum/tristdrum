@@ -5,19 +5,21 @@ import { cleanerLedgerRecords, loadCleanerLedgerRecords } from "./database.mjs";
 import { redactSensitiveText, sanitizeFailure } from "./storage.mjs";
 
 test("cleaner ledger rows become report-compatible Supabase records", () => {
-  assert.deepEqual(cleanerLedgerRecords([{
-    targetDate: "2026-08-24",
-    messageHash: "shared-ledger-hash",
-    contentOccurrence: 2,
-    sentAt: null,
-    completedAt: "2026-08-23T11:30:01.000Z",
-  }]), [{
-    targetDate: "2026-08-24",
-    messageHash: "shared-ledger-hash",
-    contentOccurrence: 2,
-    sentAt: "2026-08-23T11:30:01.000Z",
-    source: "supabase",
-  }]);
+  for (const targetDate of ["2026-08-24", new Date("2026-08-24T00:00:00.000Z")]) {
+    assert.deepEqual(cleanerLedgerRecords([{
+      targetDate,
+      messageHash: "shared-ledger-hash",
+      contentOccurrence: 2,
+      sentAt: null,
+      completedAt: "2026-08-23T11:30:01.000Z",
+    }]), [{
+      targetDate: "2026-08-24",
+      messageHash: "shared-ledger-hash",
+      contentOccurrence: 2,
+      sentAt: "2026-08-23T11:30:01.000Z",
+      source: "supabase",
+    }]);
+  }
 });
 
 test("cleaner failure text removes credential-shaped values", () => {
