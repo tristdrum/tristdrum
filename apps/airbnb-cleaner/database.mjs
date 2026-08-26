@@ -33,9 +33,18 @@ function databaseClient(url, postgresFactory, applicationName) {
   });
 }
 
+function databaseDateKey(value) {
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(String(value ?? "").trim());
+  if (!match) throw new Error("Cleaner ledger target date is invalid.");
+  return match[1];
+}
+
 export function cleanerLedgerRecords(rows) {
   return rows.map((row) => ({
-    targetDate: String(row.targetDate),
+    targetDate: databaseDateKey(row.targetDate),
     messageHash: row.messageHash,
     contentOccurrence: Number(row.contentOccurrence ?? 1),
     sentAt: row.sentAt ?? row.completedAt,
