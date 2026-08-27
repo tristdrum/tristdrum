@@ -350,6 +350,10 @@ export function extractConfirmationCode(body) {
   );
 }
 
+export function extractProviderThreadId(body) {
+  return /\/(?:hosting|messaging)\/thread\/(\d+)/i.exec(body)?.[1] ?? "";
+}
+
 export function reservationEvidenceKind(subject, body = "") {
   const normalSubject = normaliseText(subject);
 
@@ -420,6 +424,7 @@ export function parseReservation(envelope, body, referenceDate) {
     guestName: extractGuestName(subject, normalBody),
     guests,
     confirmationCode,
+    providerThreadId: extractProviderThreadId(normalBody),
     evidenceKind,
     evidenceSubtype,
     guestCountChangeAccepted: acceptedReservationChange(subject, normalBody),
@@ -496,7 +501,7 @@ export function mergeReservations(reservations) {
   const guestCountChangeWindowMs = 15 * 60 * 1000;
   const guestCountDiscussionWindowMs = 60 * 60 * 1000;
   for (const accepted of explicitUpdates.filter((update) => update.guestCountChangeAccepted && !update.guests)) {
-    if (!accepted.confirmationCode) continue;
+    if (!accepted.confirmationCode || !accepted.providerThreadId) continue;
     const existing = activeByConfirmationCode.get(accepted.confirmationCode);
     const acceptedAt = accepted.sourceTimestamp || 0;
     if (!existing || acceptedAt < (existing.sourceTimestamp || 0)) continue;
@@ -505,7 +510,7 @@ export function mergeReservations(reservations) {
       if (!reply.guestCountChangeDiscussed || replyAt > acceptedAt || acceptedAt - replyAt > guestCountDiscussionWindowMs) {
         return false;
       }
-      return reply.confirmationCode
+      return reply.providerThreadId === accepted.providerThreadId && (reply.confirmationCode
         ? reply.confirmationCode === accepted.confirmationCode
         : Boolean(
           reply.unitId && reply.checkIn && reply.checkOut
@@ -513,14 +518,14 @@ export function mergeReservations(reservations) {
           && reply.checkIn === existing.checkIn
           && reply.checkOut === existing.checkOut
           && sameGuestIdentity(reply.guestName, existing.guestName)
-        );
+        ));
     });
     if (!countDiscussion) continue;
     const countReply = replies.find((reply) => {
       const replyAt = reply.sourceTimestamp || 0;
       if (!reply.guestCountChangeClaimed || !reply.guests || reply.guests === existing.guests) return false;
       if (replyAt < acceptedAt || replyAt - acceptedAt > guestCountChangeWindowMs) return false;
-      const matchesReservation = reply.confirmationCode
+      const matchesReservation = reply.providerThreadId === accepted.providerThreadId && (reply.confirmationCode
         ? reply.confirmationCode === accepted.confirmationCode
         : Boolean(
           reply.unitId && reply.checkIn && reply.checkOut
@@ -528,7 +533,7 @@ export function mergeReservations(reservations) {
           && reply.checkIn === existing.checkIn
           && reply.checkOut === existing.checkOut
           && sameGuestIdentity(reply.guestName, existing.guestName)
-        );
+        ));
       if (!matchesReservation) return false;
       return !explicitUpdates.some((other) => (
         other.sourceEnvelopeId !== accepted.sourceEnvelopeId
@@ -1464,10 +1469,13 @@ export async function collectReservations(
     subjectMayTouchTarget: (subject) => horizonDates.some((date) => subjectMayTouchTarget(subject, date)),
     describeEvidence: ({ envelope, body }) => {
       const evidenceKind = reservationEvidenceKind(envelope.subject, body);
+      const parsed = body ? parseReservation(envelope, body, targetDate) : null;
       return {
         evidenceKind,
         evidenceSubtype: reservationEvidenceSubtype(envelope.subject, body, evidenceKind),
         confirmationCode: extractConfirmationCode(body),
+        providerThreadId: parsed?.providerThreadId ?? "",
+        guestCountChangeAccepted: parsed?.guestCountChangeAccepted === true,
       };
     },
   });

@@ -153,17 +153,17 @@ test("an accepted guest-count change unlocks one newer matching Airbnb thread co
   );
   const accepted = parseReservation(
     { id: "accepted", date: "2026-08-27T07:09:00Z", subject: "Your reservation change was accepted" },
-    "ALPHA GUEST AGREED TO CHANGE THEIR RESERVATION\nBougainvillea Courtyard Studio\nhttps://airbnb.example/hosting/reservations/details/HMCHANGE01",
+    "ALPHA GUEST AGREED TO CHANGE THEIR RESERVATION\nBougainvillea Courtyard Studio\nhttps://airbnb.example/hosting/reservations/details/HMCHANGE01\nhttps://airbnb.example/messaging/thread/2647000000",
     parseISODate("2026-08-28"),
   );
   const discussion = parseReservation(
     { id: "discussion", date: "2026-08-27T06:31:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29" },
-    "ALPHA GUEST\nBooker\nI am alone but someone may join me. Is that okay?\nReply\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n1 adult",
+    "ALPHA GUEST\nBooker\nI am alone but someone may join me. Is that okay?\nReply\nhttps://airbnb.example/hosting/thread/2647000000\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n1 adult",
     parseISODate("2026-08-28"),
   );
   const changedThread = parseReservation(
     { id: "thread", date: "2026-08-27T07:11:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29" },
-    "ALPHA GUEST\nBooker\nI will update the booking now.\nReply\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n2 adults",
+    "ALPHA GUEST\nBooker\nI will update the booking now.\nReply\nhttps://airbnb.example/hosting/thread/2647000000\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n2 adults",
     parseISODate("2026-08-28"),
   );
 
@@ -198,6 +198,7 @@ test("an accepted change cannot turn a generic update-you reply into guest-count
     evidenceKind: "supplemental",
     evidenceSubtype: "update",
     guestCountChangeAccepted: true,
+    providerThreadId: "2647000000",
     guests: "",
   };
   const discussion = {
@@ -207,6 +208,7 @@ test("an accepted change cannot turn a generic update-you reply into guest-count
     evidenceKind: "supplemental",
     evidenceSubtype: "reply",
     guestCountChangeDiscussed: true,
+    providerThreadId: "2647000000",
   };
   const wifiReply = parseReservation(
     { id: "wifi", date: "2026-08-27T07:11:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29" },
@@ -225,7 +227,7 @@ test("date, arrival-time, and update-you replies cannot claim a guest-count chan
   ]) {
     const parsed = parseReservation(
       { id, date: "2026-08-27T07:11:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29" },
-      `ALPHA GUEST\nBooker\n${message}\nReply\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n2 adults`,
+    `ALPHA GUEST\nBooker\n${message}\nReply\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n2 adults`,
       parseISODate("2026-08-28"),
     );
     assert.equal(parsed.guestCountChangeClaimed, false, id);
@@ -247,6 +249,7 @@ test("a later explicit update preserves a previously paired accepted guest-count
     evidenceKind: "supplemental",
     evidenceSubtype: "update",
     guestCountChangeAccepted: true,
+    providerThreadId: "2647000000",
     guests: "",
   };
   const discussion = {
@@ -256,6 +259,7 @@ test("a later explicit update preserves a previously paired accepted guest-count
     evidenceKind: "supplemental",
     evidenceSubtype: "reply",
     guestCountChangeDiscussed: true,
+    providerThreadId: "2647000000",
   };
   const countReply = {
     ...reservation({ unitId: 1, guestName: "Alpha Guest", guests: "2 adults", checkIn: "2026-08-28", checkOut: "2026-08-29" }),
@@ -264,6 +268,7 @@ test("a later explicit update preserves a previously paired accepted guest-count
     evidenceKind: "supplemental",
     evidenceSubtype: "reply",
     guestCountChangeClaimed: true,
+    providerThreadId: "2647000000",
   };
   const laterDateUpdate = {
     sourceEnvelopeId: "later",
@@ -295,6 +300,7 @@ test("accepted guest-count evidence cannot cross into a same-date replacement gu
     evidenceKind: "supplemental",
     evidenceSubtype: "update",
     guestCountChangeAccepted: true,
+    providerThreadId: "new-thread",
     guests: "",
   };
   const oldGuestDiscussion = {
@@ -304,6 +310,7 @@ test("accepted guest-count evidence cannot cross into a same-date replacement gu
     evidenceKind: "supplemental",
     evidenceSubtype: "reply",
     guestCountChangeDiscussed: true,
+    providerThreadId: "old-thread",
   };
   const oldGuestCount = {
     ...reservation({ unitId: 1, guestName: "Old Guest", guests: "2 adults", checkIn: "2026-08-28", checkOut: "2026-08-29" }),
@@ -312,6 +319,7 @@ test("accepted guest-count evidence cannot cross into a same-date replacement gu
     evidenceKind: "supplemental",
     evidenceSubtype: "reply",
     guestCountChangeClaimed: true,
+    providerThreadId: "old-thread",
   };
   const merged = mergeReservations([replacement, oldGuestDiscussion, accepted, oldGuestCount]);
   assert.equal(merged[0].guestName, "New Guest");
