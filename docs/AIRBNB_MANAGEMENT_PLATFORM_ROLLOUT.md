@@ -1,6 +1,6 @@
 # Airbnb Management Platform Rollout
 
-Last updated: 2026-08-24 SAST.
+Last updated: 2026-08-27 SAST.
 
 ## Current production state
 
@@ -250,6 +250,41 @@ in PR #26. Production source is merge commit
   including 100 support tests against the real local RLS role, plus web lint and
   production build. Independent review ended with no unresolved findings.
 
+### Accepted guest-count reconciliation
+
+The 27 August noon cleaner reconciliation found Alice Moyo's original Unit 1
+confirmation for one adult but missed her later accepted change to two adults.
+The accepted-change notice did not include the changed count, while the explicit
+two-adult metadata appeared in a later message in the same Airbnb thread outside
+the ordinary 80-envelope read window.
+
+- PRs #28-#30 and follow-up commit `ce48f69` add bounded, fail-closed context
+  recovery for accepted guest-count changes. A count is promoted only when the
+  confirmation, discussion, accepted-change notice, and follow-up all match the
+  exact Airbnb thread, guest, unit, and stay within narrow time bounds.
+- Gmail-compatible listing search recovers the thread without relying on encoded
+  thread ids in a `BODY` query. Recovery is limited to current-horizon
+  confirmations, four accepted notices, and 24 fetched context messages.
+- The historical replay corpus now includes the accepted guest-count incident,
+  with negative coverage for wrong threads, lookalike senders, same-date
+  replacements, generic update wording, and budget exhaustion.
+- The release gate passed 74 pgTAP assertions and 280 application tests, plus web
+  lint, production build, and independent review with no remaining findings.
+- Deployed cleaner image: `deployment-01M11FVYJKZ40HAJQC6TWGAK4G`.
+- Preview `2773a761-b547-4ad9-ba64-75a190a93cdf` and dry-run
+  `58178808-1695-43c6-98a8-473d740f1b31` both produced clean confidence with
+  Unit 1 Alice Moyo at two guests, Unit 2 Xolisa Jezile at one guest, and Unit 3
+  Stephanie Tilley as a stayover. Dry-run remained non-mutating and appended no
+  ledger row.
+- Controlled live run `b5bb5ab2-03bc-4297-b070-4c5bac98b67b` sent and read back
+  the reviewed plan once. The restored 13:50 final retry
+  `10e810a9-9b81-490d-a85f-a4f84e27319e` then sent one legitimate update because
+  the weather forecast changed from 8% at 3 p.m.-midnight to 17% at noon-midnight;
+  all booking lines remained identical.
+- Supabase stores Alice as a confirmed two-adult revision with the accepted
+  change provenance, both cleaner rows have clean confidence and verified Min
+  API readback, and all eight cleaner jobs are active again.
+
 ## Production verification
 
 Use this order so no scheduled request can cross a mixed schema/app version:
@@ -299,13 +334,13 @@ After that guarded cutover:
 - Heartbeat `airbnb-cleaner-midday-cutover-check` performs hourly daytime personal
   platform and exact outbound-message audits at 25 minutes past each hour from
   07:25 through 21:25 SAST.
-- The latest support repair reset the clean-run clock at the second ordinary
-  scheduled acceptance on 2026-08-27 08:01:29 SAST. Require 72 clean hours before
+- The latest cleaner repair reset the clean-run clock at the final ordinary
+  scheduled acceptance on 2026-08-27 13:53:29 SAST. Require 72 clean hours before
   treating the replacement as stable; the new stability checkpoint is
-  2026-08-30 08:01:29 SAST.
+  2026-08-30 13:53:29 SAST.
 - Do not delete the stopped Min app or rollback data before the seven-day gate.
-  The earliest retirement checkpoint is 2026-09-03 08:01:29 SAST, after seven full
-  clean days from the latest repairs. Extend the heartbeat if verification
+  The earliest retirement checkpoint is 2026-09-03 13:53:29 SAST, after seven
+  full clean days from the latest repairs. Extend the heartbeat if verification
   delays retirement.
 - Delete old infrastructure only after schedules, receipts, WhatsApp readback,
   current Gmail reservation evidence, stock observations, and dashboard state
