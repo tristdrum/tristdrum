@@ -105,6 +105,15 @@ export function applyReplyRouteGuard(decision, candidate) {
   };
 }
 
+export function summarizeDeliveryOutcomes(deliveries) {
+  return {
+    deliveredReplyCount: deliveries.filter((delivery) => delivery.action === "sent").length,
+    reconciledReplyCount: deliveries.filter((delivery) => delivery.action === "mark_sent").length,
+    deliveryAmbiguousCount: deliveries.filter((delivery) => delivery.action === "ambiguous").length,
+    deliveryGuardErrorCount: deliveries.filter((delivery) => delivery.action === "guard_error").length,
+  };
+}
+
 export async function runSupport({
   mode = "shadow",
   now = () => new Date(),
@@ -373,6 +382,7 @@ export async function runSupport({
       })
       : [];
 
+    const deliveryOutcomeCounts = summarizeDeliveryOutcomes(deliveries);
     const receipt = {
       schemaVersion: 1,
       runId,
@@ -404,9 +414,7 @@ export async function runSupport({
       reminderCount: drafts.filter((draft) => draft.alertStages.includes("reminder")).length,
       overdueCount: drafts.filter((draft) => draft.alertStages.includes("overdue")).length,
       deliveryCandidateCount: deliveries.length,
-      deliveredReplyCount: deliveries.filter((delivery) => delivery.action === "sent").length,
-      reconciledReplyCount: deliveries.filter((delivery) => delivery.action === "mark_sent").length,
-      deliveryAmbiguousCount: deliveries.filter((delivery) => ["ambiguous", "guard_error"].includes(delivery.action)).length,
+      ...deliveryOutcomeCounts,
       managementNotificationCount: managementNotifications.length,
       managementNotificationVerifiedCount: managementNotifications.filter((item) => item.verified).length,
       timeRequestCount: timeRequests.length,

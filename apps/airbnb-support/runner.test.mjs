@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   applyReplyRouteGuard,
   canReuseStoredDecision,
+  summarizeDeliveryOutcomes,
 } from "./runner.mjs";
 
 const liveDecision = {
@@ -42,4 +43,19 @@ test("initial inquiries without an SMTP reply route are held and escalated", () 
   assert.equal(guarded.alertManagement, true);
   assert.equal(guarded.deterministicGuard, "initial_inquiry_requires_airbnb_ui");
   assert.equal(guarded.draft, "A useful monthly-rate acknowledgement.");
+});
+
+test("retry-safe guard failures are not reported as delivery ambiguity", () => {
+  assert.deepEqual(summarizeDeliveryOutcomes([
+    { action: "sent" },
+    { action: "mark_sent" },
+    { action: "ambiguous" },
+    { action: "guard_error" },
+    { action: "not_claimed" },
+  ]), {
+    deliveredReplyCount: 1,
+    reconciledReplyCount: 1,
+    deliveryAmbiguousCount: 1,
+    deliveryGuardErrorCount: 1,
+  });
 });
