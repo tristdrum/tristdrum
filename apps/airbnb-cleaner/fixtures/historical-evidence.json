@@ -274,6 +274,43 @@
     }
   },
   {
+    "id": "accepted-guest-count-change",
+    "targetDate": "2026-08-28",
+    "cutoff": "2026-08-27T07:12:00Z",
+    "evidence": [
+      {
+        "id": "change-confirmation",
+        "date": "2026-08-27T06:29:00Z",
+        "subject": "Reservation confirmed - Alpha Guest arrives Aug 28",
+        "body": "NEW BOOKING CONFIRMED! ALPHA GUEST ARRIVES AUG 28.\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMCHANGE01"
+      },
+      {
+        "id": "guest-count-discussion",
+        "date": "2026-08-27T06:31:00Z",
+        "subject": "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29",
+        "body": "ALPHA GUEST\nBooker\nI am alone but someone may join me. Is that okay?\nReply\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n1 adult"
+      },
+      {
+        "id": "change-accepted",
+        "date": "2026-08-27T07:09:00Z",
+        "subject": "Your reservation change was accepted",
+        "body": "ALPHA GUEST AGREED TO CHANGE THEIR RESERVATION\nBougainvillea Courtyard Studio\nhttps://airbnb.example/hosting/reservations/details/HMCHANGE01"
+      },
+      {
+        "id": "changed-thread-count",
+        "date": "2026-08-27T07:11:00Z",
+        "subject": "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29",
+        "body": "ALPHA GUEST\nBooker\nI will update the booking now.\nReply\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n2 adults"
+      }
+    ],
+    "expected": {
+      "evidenceKinds": ["confirmed", "supplemental", "supplemental", "supplemental"],
+      "active": [{ "confirmationCode": "HMCHANGE01", "unitId": 1, "checkIn": "2026-08-28", "checkOut": "2026-08-29", "guestName": "Alpha Guest", "guests": "2 adults" }],
+      "actions": ["arrival", "empty", "empty"],
+      "messageIncludes": ["2 guests; Alpha Guest"]
+    }
+  },
+  {
     "id": "august-unit-3-incident",
     "targetDate": "2026-08-14",
     "cutoff": "2026-08-14T10:00:00Z",

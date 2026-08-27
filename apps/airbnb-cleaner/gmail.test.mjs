@@ -112,6 +112,51 @@ test("the MIME read cap preserves an older confirmation ahead of supplemental re
   assert.deepEqual(result.messages.map(({ envelope }) => envelope.id), ["33", "31"]);
 });
 
+test("collection includes a date-less accepted reservation change notice", async () => {
+  const fetched = [];
+  const client = {
+    usable: true,
+    async connect() {},
+    async getMailboxLock() { return { release() {} }; },
+    async search() { return [51]; },
+    async *fetch() {
+      yield {
+        uid: 51,
+        internalDate: new Date("2026-08-27T07:09:00Z"),
+        envelope: {
+          subject: "Your reservation change was accepted",
+          from: [{ address: "automated@airbnb.com" }],
+        },
+      };
+    },
+    async fetchOne(uid) {
+      fetched.push(uid);
+      return { source: Buffer.from(
+        "From: Airbnb <automated@airbnb.com>\r\nSubject: Your reservation change was accepted\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nhttps://airbnb.example/hosting/reservations/details/HMCHANGE01\r\n",
+      ) };
+    },
+    async logout() {},
+    close() {},
+  };
+  const result = await collectAirbnbMessages({
+    afterDate: "2026-05-30",
+    maxRead: 10,
+    env: { AIRBNB_GMAIL_USER: "test@example.com", AIRBNB_GMAIL_APP_PASSWORD: "not-a-real-secret" },
+    createClient: () => client,
+    candidateEnvelope: () => true,
+    subjectMayTouchTarget: (subject) => /reservation change was accepted/i.test(subject),
+    describeEvidence: ({ envelope, body }) => ({
+      evidenceKind: /accepted/i.test(envelope.subject) ? "supplemental" : "ignored",
+      evidenceSubtype: /accepted/i.test(envelope.subject) ? "update" : "ignored",
+      confirmationCode: /details\/([A-Z0-9]+)/i.exec(body)?.[1] ?? "",
+    }),
+  });
+
+  assert.equal(result.envelopesFound, 1);
+  assert.deepEqual(fetched, [51]);
+  assert.equal(result.messages[0].envelope.subject, "Your reservation change was accepted");
+});
+
 test("fetches the original confirmation when a target-date update changes the booking dates", async () => {
   const calls = [];
   const envelopes = [
