@@ -340,6 +340,23 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
       { status: "notified", count: 1 },
       { status: "resolved", count: 2 },
     ]);
+    const retiredSiblingAlerts = await admin`
+      select details->>'shadowMode' as shadow_mode
+      from airbnb.alerts
+      where household_id = ${householdId}
+        and status = 'resolved'
+      order by details->>'stage'
+    `;
+    assert.deepEqual(retiredSiblingAlerts.map((row) => row.shadow_mode), ["false", "false"]);
+
+    await storeSupportDraft(database.sql, {
+      householdId,
+      candidate: candidates[0],
+      classification,
+      now: new Date("2026-08-21T13:02:00.000Z"),
+      shadowMode: false,
+    });
+    assert.equal((await loadSuppressedSupportAlerts(database.sql, { householdId })).length, 0);
 
     await admin`
       update airbnb.reply_deliveries

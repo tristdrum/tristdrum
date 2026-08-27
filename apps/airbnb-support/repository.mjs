@@ -1059,7 +1059,9 @@ export async function markSupportAlertNotified(sql, { householdId, alertId, now 
     if (threadId) {
       await transaction`
         update airbnb.alerts
-        set status = 'resolved', resolved_at = ${now}
+        set status = 'resolved',
+            resolved_at = ${now},
+            details = jsonb_set(details, '{shadowMode}', 'false'::jsonb, true)
         where household_id = ${householdId}
           and id <> ${alertId}
           and status = 'suppressed'
