@@ -20,3 +20,7 @@ test("support live scheduler retires shadow polling and uses the guarded live en
 test("the five-minute support watcher keeps one Fly machine warm", () => {
   assert.match(flyConfig, /min_machines_running\s*=\s*1/);
 });
+
+test("the production Gmail import allows bounded transient latency", () => {
+  assert.match(flyConfig, /AIRBNB_SUPPORT_GMAIL_IMPORT_DEADLINE_MS\s*=\s*"45000"/);
+});
