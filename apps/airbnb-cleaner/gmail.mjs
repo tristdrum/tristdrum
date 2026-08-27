@@ -205,9 +205,9 @@ export async function collectAirbnbMessages({
               code: "ACCEPTED_CHANGE_CONTEXT_LIMIT",
             });
           }
+          recoveredContextReadCount += 1;
           const contextMessage = await readMessage(envelope);
           if (!contextMessage) continue;
-          recoveredContextReadCount += 1;
           const contextEvidence = describeEvidence(contextMessage);
           if (
             contextEvidence?.evidenceKind !== "supplemental"

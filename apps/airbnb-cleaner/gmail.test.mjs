@@ -2,7 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { collectAirbnbMessages } from "./gmail.mjs";
-import { parseISODate, parseReservation, reservationEvidenceKind } from "./report.mjs";
+import {
+  candidateEnvelope,
+  parseISODate,
+  parseReservation,
+  reservationEvidenceKind,
+} from "./report.mjs";
 
 test("filters envelopes before fetching MIME bodies and always closes IMAP", async () => {
   const calls = [];
@@ -165,6 +170,7 @@ test("an accepted change recovers its bounded matching Airbnb thread context bey
     [52, { uid: 52, date: "2026-08-27T06:31:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29", from: "express@airbnb.com" }],
     [53, { uid: 53, date: "2026-08-27T07:11:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29", from: "express@airbnb.com" }],
     [54, { uid: 54, date: "2026-08-27T07:10:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29", from: "express@airbnb.com" }],
+    [55, { uid: 55, date: "2026-08-27T07:10:30Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29", from: "airbnb.com.example.test" }],
   ]);
   const bodies = {
     50: "NEW BOOKING CONFIRMED! ALPHA GUEST ARRIVES AUG 28.\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMCHANGE01",
@@ -172,7 +178,9 @@ test("an accepted change recovers its bounded matching Airbnb thread context bey
     52: "ALPHA GUEST\nBooker\nI am alone but someone may join me. Is that okay?\nReply\nhttps://airbnb.example/hosting/thread/2647000000\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n1 adult",
     53: "ALPHA GUEST\nBooker\nI will update the booking now.\nReply\nhttps://airbnb.example/hosting/thread/2647000000\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n2 adults",
     54: "DECOY GUEST\nBooker\nLet me update the booking.\nReply\nhttps://airbnb.example/hosting/thread/9999999999\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n4 adults",
+    55: "LOOKALIKE GUEST\nBooker\nLet me update the booking.\nReply\nhttps://airbnb.example/hosting/thread/2647000000\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n6 adults",
   };
+  const fetched = [];
   const client = {
     usable: true,
     async connect() {},
@@ -180,7 +188,8 @@ test("an accepted change recovers its bounded matching Airbnb thread context bey
     async search(query) {
       if (query.subject) {
         assert.equal(query.subject, "RE: Reservation for Bougainvillea Courtyard Studio");
-        assert.ok(query.before instanceof Date);
+        assert.equal(query.since.toISOString(), "2026-08-27T05:09:00.000Z");
+        assert.equal(query.before.toISOString(), "2026-08-28T07:09:00.000Z");
         return [...envelopes.keys()];
       }
       return [...envelopes.keys()];
@@ -196,6 +205,7 @@ test("an accepted change recovers its bounded matching Airbnb thread context bey
       }
     },
     async fetchOne(uid) {
+      fetched.push(uid);
       const envelope = envelopes.get(uid);
       return { source: Buffer.from(
         `From: Airbnb <${envelope.from}>\r\nSubject: ${envelope.subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${bodies[uid]}\r\n`,
@@ -223,7 +233,7 @@ test("an accepted change recovers its bounded matching Airbnb thread context bey
     maxRead: 2,
     env: { AIRBNB_GMAIL_USER: "test@example.com", AIRBNB_GMAIL_APP_PASSWORD: "not-a-real-secret" },
     createClient: () => client,
-    candidateEnvelope: () => true,
+    candidateEnvelope,
     subjectMayTouchTarget: () => true,
     describeEvidence,
   });
@@ -231,6 +241,69 @@ test("an accepted change recovers its bounded matching Airbnb thread context bey
   assert.equal(result.envelopesFound, 2);
   assert.deepEqual(new Set(result.messages.map(({ envelope }) => envelope.id)), new Set(["50", "51", "52", "53"]));
   assert.equal(result.messages.some(({ envelope }) => envelope.id === "54"), false);
+  assert.equal(fetched.includes(55), false);
+});
+
+test("accepted-change context fails closed before a twenty-fifth MIME read", async () => {
+  const confirmation = { uid: 60, date: "2026-08-27T06:29:00Z", subject: "Reservation confirmed - Alpha Guest arrives Aug 28", from: "automated@airbnb.com" };
+  const accepted = { uid: 61, date: "2026-08-27T07:09:00Z", subject: "Your reservation change was accepted", from: "automated@airbnb.com" };
+  const context = Array.from({ length: 25 }, (_, index) => ({
+    uid: 100 + index,
+    date: new Date(Date.parse("2026-08-27T06:35:00Z") + index * 60_000).toISOString(),
+    subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29",
+    from: "express@airbnb.com",
+  }));
+  const envelopes = new Map([confirmation, accepted, ...context].map((envelope) => [envelope.uid, envelope]));
+  let contextFetchAttempts = 0;
+  const client = {
+    usable: true,
+    async connect() {},
+    async getMailboxLock() { return { release() {} }; },
+    async search(query) { return query.subject ? context.map(({ uid }) => uid) : [60, 61]; },
+    async *fetch(uids) {
+      for (const uid of uids) {
+        const envelope = envelopes.get(uid);
+        yield { uid, internalDate: new Date(envelope.date), envelope: { subject: envelope.subject, from: [{ address: envelope.from }] } };
+      }
+    },
+    async fetchOne(uid) {
+      const envelope = envelopes.get(uid);
+      if (uid >= 100) contextFetchAttempts += 1;
+      const body = uid === 60
+        ? "NEW BOOKING CONFIRMED! ALPHA GUEST ARRIVES AUG 28.\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMCHANGE01"
+        : uid === 61
+          ? "ALPHA GUEST AGREED TO CHANGE THEIR RESERVATION\nBougainvillea Courtyard Studio\nhttps://airbnb.example/hosting/reservations/details/HMCHANGE01\nhttps://airbnb.example/messaging/thread/2647000000"
+          : `DECOY ${uid}\nBooker\nA message.\nReply\nhttps://airbnb.example/hosting/thread/9999999999\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n1 adult`;
+      return { source: Buffer.from(`From: Airbnb <${envelope.from}>\r\nSubject: ${envelope.subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}\r\n`) };
+    },
+    async logout() {},
+    close() {},
+  };
+  const targetDate = parseISODate("2026-08-28");
+  const describeEvidence = ({ envelope, body }) => {
+    const evidenceKind = reservationEvidenceKind(envelope.subject, body);
+    const parsed = body ? parseReservation(envelope, body, targetDate) : null;
+    return {
+      evidenceKind,
+      evidenceSubtype: evidenceKind === "confirmed" ? "confirmed"
+        : /accepted/i.test(envelope.subject) ? "update" : "reply",
+      confirmationCode: parsed?.confirmationCode ?? "",
+      providerThreadId: parsed?.providerThreadId ?? "",
+      guestCountChangeAccepted: parsed?.guestCountChangeAccepted === true,
+      listingName: parsed?.listingName ?? "",
+    };
+  };
+
+  await assert.rejects(collectAirbnbMessages({
+    afterDate: "2026-05-30",
+    maxRead: 2,
+    env: { AIRBNB_GMAIL_USER: "test@example.com", AIRBNB_GMAIL_APP_PASSWORD: "not-a-real-secret" },
+    createClient: () => client,
+    candidateEnvelope,
+    subjectMayTouchTarget: () => true,
+    describeEvidence,
+  }), { code: "ACCEPTED_CHANGE_CONTEXT_LIMIT" });
+  assert.equal(contextFetchAttempts, 24);
 });
 
 test("fetches the original confirmation when a target-date update changes the booking dates", async () => {
