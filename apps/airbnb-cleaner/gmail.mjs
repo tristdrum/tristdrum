@@ -153,18 +153,31 @@ export async function collectAirbnbMessages({
       }
       missingConfirmationAnchorCount = missingCodes.size;
 
-      const acceptedChanges = messages
+      const describedMessages = messages
         .map((message) => ({ message, evidence: describeEvidence(message) }))
-        .filter(({ evidence }) => evidence?.guestCountChangeAccepted && evidence.providerThreadId)
-        .slice(0, 4);
+      const acceptedChanges = describedMessages
+        .filter(({ evidence }) => evidence?.guestCountChangeAccepted && evidence.providerThreadId);
+      if (acceptedChanges.length > 4) {
+        throw Object.assign(new Error("Accepted reservation-change context exceeded the safe notice bound."), {
+          code: "ACCEPTED_CHANGE_NOTICE_LIMIT",
+        });
+      }
+      let recoveredContextReadCount = 0;
       for (const { message: acceptedMessage, evidence: acceptedEvidence } of acceptedChanges) {
         const acceptedAt = Date.parse(acceptedMessage.envelope.date);
         if (!Number.isFinite(acceptedAt)) continue;
+        const confirmationEvidence = describedMessages.find(({ evidence }) => (
+          evidence?.evidenceKind === "confirmed"
+          && evidence.confirmationCode === acceptedEvidence.confirmationCode
+        ))?.evidence;
+        if (!confirmationEvidence?.listingName) continue;
         const contextSince = new Date(acceptedAt - 2 * 60 * 60 * 1000);
+        const contextBefore = new Date(acceptedAt + 24 * 60 * 60 * 1000);
         const contextUids = await client.search({
           since: contextSince,
+          before: contextBefore,
           from: "airbnb.com",
-          body: acceptedEvidence.providerThreadId,
+          subject: `RE: Reservation for ${confirmationEvidence.listingName}`,
         }, { uid: true });
         if (!contextUids.length) continue;
         const contextEnvelopes = [];
@@ -185,15 +198,14 @@ export async function collectAirbnbMessages({
           ) continue;
           contextEnvelopes.push(envelope);
         }
-        const before = contextEnvelopes
-          .filter((envelope) => Date.parse(envelope.date) <= acceptedAt)
-          .sort((left, right) => Date.parse(right.date) - Date.parse(left.date))
-          .slice(0, 4);
-        const after = contextEnvelopes
-          .filter((envelope) => Date.parse(envelope.date) > acceptedAt)
-          .sort((left, right) => Date.parse(left.date) - Date.parse(right.date))
-          .slice(0, 4);
-        for (const envelope of [...before, ...after].sort((left, right) => Date.parse(left.date) - Date.parse(right.date))) {
+        contextEnvelopes.sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
+        for (const envelope of contextEnvelopes) {
+          if (recoveredContextReadCount >= 24) {
+            throw Object.assign(new Error("Accepted reservation-change context exceeded the safe MIME-read bound."), {
+              code: "ACCEPTED_CHANGE_CONTEXT_LIMIT",
+            });
+          }
+          recoveredContextReadCount += 1;
           const contextMessage = await readMessage(envelope);
           if (!contextMessage) continue;
           const contextEvidence = describeEvidence(contextMessage);
