@@ -575,7 +575,12 @@ export async function storeSupportDraft(sql, {
                       else airbnb.alerts.status
                     end,
                     summary = excluded.summary,
-                    details = excluded.details,
+                    details = case
+                      when airbnb.alerts.status = 'resolved'
+                        and coalesce(airbnb.alerts.details->>'shadowMode', 'true') = 'false'
+                      then jsonb_set(excluded.details, '{shadowMode}', 'false'::jsonb, true)
+                      else excluded.details
+                    end,
                     notified_at = case
                       when excluded.details @> '{"requiresManagementAction": true, "shadowMode": false}'::jsonb
                         and airbnb.alerts.status = 'resolved'
