@@ -340,6 +340,12 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
       { status: "notified", count: 1 },
       { status: "resolved", count: 2 },
     ]);
+    await storeShadowDraft(database.sql, {
+      householdId,
+      candidate: candidates[0],
+      classification,
+      now: new Date("2026-08-21T13:01:45.000Z"),
+    });
     const retiredSiblingAlerts = await admin`
       select details->>'shadowMode' as shadow_mode
       from airbnb.alerts
