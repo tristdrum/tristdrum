@@ -161,6 +161,28 @@ function deliveryStatus(result) {
   return "error";
 }
 
+export function cleanerEvidenceSenderAddress(evidence) {
+  return evidence.senderAddress
+    || (evidence.evidenceSubtype === "reply" ? "express@airbnb.com" : "automated@airbnb.com");
+}
+
+export function cleanerEvidencePayload(evidence, guestCountChangeEvidence = null) {
+  return {
+    unitId: evidence.unitId,
+    checkIn: evidence.checkIn,
+    checkOut: evidence.checkOut,
+    confirmationCode: evidence.confirmationCode || null,
+    guestName: evidence.guestName || null,
+    guests: evidence.guests || null,
+    evidenceKind: evidence.evidenceKind,
+    evidenceSubtype: evidence.evidenceSubtype,
+    guestCountChangeAccepted: evidence.guestCountChangeAccepted === true,
+    guestCountChangeClaimed: evidence.guestCountChangeClaimed === true,
+    guestCountChangeDiscussed: evidence.guestCountChangeDiscussed === true,
+    guestCountChangeEvidence,
+  };
+}
+
 export async function syncCleanerDatabase({ result, receipt, env = process.env, postgresFactory = postgres }) {
   if (result.mode !== "live") return { status: "disabled" };
   const configuration = databaseConfiguration(env);
@@ -176,32 +198,36 @@ export async function syncCleanerDatabase({ result, receipt, env = process.env, 
         where household_id = ${householdId}
       `;
       const propertyByUnit = new Map(properties.map((property) => [Number(property.unitNumber), property.id]));
+      const guestCountCompositeByEnvelope = new Map(
+        (result.reservations ?? [])
+          .filter((reservation) => reservation.guestCountChangeEvidence?.countEnvelopeId)
+          .map((reservation) => [
+            String(reservation.guestCountChangeEvidence.countEnvelopeId),
+            reservation.guestCountChangeEvidence,
+          ]),
+      );
       const evidenceByEnvelope = new Map();
       for (const evidence of result.reservationEvidence ?? []) {
         const occurredAt = sourceTime(evidence, receipt.startedAt);
-        const normalized = {
-          unitId: evidence.unitId,
-          checkIn: evidence.checkIn,
-          checkOut: evidence.checkOut,
-          confirmationCode: evidence.confirmationCode || null,
-          guestName: evidence.guestName || null,
-          guests: evidence.guests || null,
-          evidenceKind: evidence.evidenceKind,
-          evidenceSubtype: evidence.evidenceSubtype,
-        };
+        const normalized = cleanerEvidencePayload(
+          evidence,
+          guestCountCompositeByEnvelope.get(String(evidence.sourceEnvelopeId)) ?? null,
+        );
         const rows = await transaction`
           insert into airbnb.evidence (
             household_id, mailbox_scope, provider, provider_message_id, sender_address,
             subject, evidence_kind, evidence_subtype, occurred_at, content_hash, normalized_payload
           ) values (
             ${householdId}, 'tristan', 'gmail', ${`imap:${evidence.sourceEnvelopeId}`},
-            'automated@airbnb.com', ${evidence.subject}, ${evidence.evidenceKind},
+            ${cleanerEvidenceSenderAddress(evidence)},
+            ${evidence.subject}, ${evidence.evidenceKind},
             ${evidence.evidenceSubtype}, ${occurredAt}, ${hash(JSON.stringify(normalized))},
             ${transaction.json(normalized)}
           )
           on conflict (household_id, mailbox_scope, provider, provider_message_id)
           do update set content_hash = excluded.content_hash,
                         normalized_payload = excluded.normalized_payload,
+                        sender_address = excluded.sender_address,
                         occurred_at = excluded.occurred_at
           returning id
         `;

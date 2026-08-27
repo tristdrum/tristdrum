@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { cleanerLedgerRecords, loadCleanerLedgerRecords } from "./database.mjs";
+import {
+  cleanerEvidencePayload,
+  cleanerEvidenceSenderAddress,
+  cleanerLedgerRecords,
+  loadCleanerLedgerRecords,
+} from "./database.mjs";
 import { redactSensitiveText, sanitizeFailure } from "./storage.mjs";
 
 test("cleaner ledger rows become report-compatible Supabase records", () => {
@@ -55,4 +60,40 @@ test("cleaner ledger is disabled only when the database pair is absent", async (
     targetDate: "2026-08-24",
     env: { AIRBNB_DATABASE_URL: "postgresql://example.invalid/database" },
   }), /configured together/);
+});
+
+test("accepted guest-count evidence records its composite provenance and real sender", () => {
+  const reply = {
+    sourceEnvelopeId: "thread",
+    senderAddress: "express@airbnb.com",
+    unitId: 1,
+    checkIn: "2026-08-28",
+    checkOut: "2026-08-29",
+    confirmationCode: "",
+    guestName: "Alpha Guest",
+    guests: "2 adults",
+    evidenceKind: "supplemental",
+    evidenceSubtype: "reply",
+    guestCountChangeClaimed: true,
+  };
+  const composite = {
+    discussionEnvelopeId: "discussion",
+    acceptedEnvelopeId: "accepted",
+    countEnvelopeId: "thread",
+  };
+  assert.equal(cleanerEvidenceSenderAddress(reply), "express@airbnb.com");
+  assert.deepEqual(cleanerEvidencePayload(reply, composite), {
+    unitId: 1,
+    checkIn: "2026-08-28",
+    checkOut: "2026-08-29",
+    confirmationCode: null,
+    guestName: "Alpha Guest",
+    guests: "2 adults",
+    evidenceKind: "supplemental",
+    evidenceSubtype: "reply",
+    guestCountChangeAccepted: false,
+    guestCountChangeClaimed: true,
+    guestCountChangeDiscussed: false,
+    guestCountChangeEvidence: composite,
+  });
 });

@@ -222,7 +222,7 @@ export function candidateEnvelope(envelope) {
 
 export function subjectMayTouchTarget(subject, targetDate) {
   const normalSubject = normaliseText(subject);
-  if (/\b(cancelled|canceled|reservation updated|updated reservation)\b/i.test(normalSubject)) {
+  if (/\b(cancelled|canceled|reservation updated|updated reservation|reservation change was accepted)\b/i.test(normalSubject)) {
     return true;
   }
   const subjectRange = extractDateRange(normalSubject, "", targetDate);
@@ -310,6 +310,15 @@ function cleanName(value) {
   return cleaned.replace(/\b\p{L}/gu, (letter) => letter.toUpperCase());
 }
 
+function sameGuestIdentity(left, right) {
+  const leftName = cleanName(left).toLowerCase();
+  const rightName = cleanName(right).toLowerCase();
+  if (!leftName || !rightName) return false;
+  return leftName === rightName
+    || leftName.startsWith(`${rightName} `)
+    || rightName.startsWith(`${leftName} `);
+}
+
 function extractGuestName(subject, body) {
   const subjectConfirmed = /Reservation confirmed\s*-\s*(.+?)\s+arrives\b/i.exec(subject);
   if (subjectConfirmed) return cleanName(subjectConfirmed[1]);
@@ -347,7 +356,7 @@ export function reservationEvidenceKind(subject, body = "") {
   if (/\b(cancelled|canceled|cancelled reservation|canceled reservation|reservation cancelled|reservation canceled)\b/i.test(normalSubject)) {
     return "cancelled";
   }
-  if (/\b(reservation updated|updated reservation|reservation has been updated|booking has been updated)\b/i.test(normalSubject)) {
+  if (/\b(reservation updated|updated reservation|reservation has been updated|booking has been updated|reservation change was accepted)\b/i.test(normalSubject)) {
     return "supplemental";
   }
   if (/^\s*RE:\s*Reservation\b/i.test(normalSubject)) return "supplemental";
@@ -358,9 +367,29 @@ export function reservationEvidenceKind(subject, body = "") {
 
 function reservationEvidenceSubtype(subject, body, evidenceKind) {
   if (evidenceKind !== "supplemental") return evidenceKind;
-  return /\b(reservation updated|updated reservation|reservation has been updated|booking has been updated)\b/i.test(normaliseText(subject))
+  return /\b(reservation updated|updated reservation|reservation has been updated|booking has been updated|reservation change was accepted)\b/i.test(normaliseText(subject))
     ? "update"
     : "reply";
+}
+
+function acceptedReservationChange(subject, body) {
+  return /\b(?:reservation change was accepted|agreed to change (?:their|the) reservation)\b/i
+    .test(normaliseText(`${subject}\n${body}`));
+}
+
+function conversationClaimsGuestCountChange(body) {
+  const conversationBlock = normaliseText(body).split(/\n\s*Reply\b/i)[0] ?? "";
+  const claimsChange = /\b(?:i(?:'ll| will)\s+(?:update|change)(?!\s+you\b)|let me\s+(?:do so|(?:update|change)(?!\s+you\b))|i(?:'ve| have)\s+(?:updated|changed))\b/i
+    .test(conversationBlock);
+  const describesAnotherChange = /\b(?:updated? you|arrival time|departure time|check-?in|check-?out|dates?|wi-?fi)\b/i
+    .test(conversationBlock);
+  return claimsChange && !describesAnotherChange;
+}
+
+function conversationDiscussesGuestCount(body) {
+  const conversationBlock = normaliseText(body).split(/\n\s*Reply\b/i)[0] ?? "";
+  return /\b(?:guests?|persons?|people|someone|partner|adults?|children|join (?:me|us)|staying overnight)\b/i
+    .test(conversationBlock);
 }
 
 export function parseReservation(envelope, body, referenceDate) {
@@ -371,6 +400,7 @@ export function parseReservation(envelope, body, referenceDate) {
   const confirmationCode = extractConfirmationCode(normalBody);
   const evidenceKind = reservationEvidenceKind(subject, normalBody);
   const evidenceSubtype = reservationEvidenceSubtype(subject, normalBody, evidenceKind);
+  const guests = extractGuestText(normalBody);
   const allowsCodeOnlyEvidence = ["cancelled", "supplemental"].includes(evidenceKind) && confirmationCode;
   if ((!unit || !range) && !allowsCodeOnlyEvidence) return null;
 
@@ -378,6 +408,7 @@ export function parseReservation(envelope, body, referenceDate) {
     sourceEnvelopeId: String(envelope.id),
     sourceDate: envelope.date ?? "",
     sourceTimestamp: envelopeDate(envelope),
+    senderAddress: String(envelope.from?.addr ?? "").trim().toLowerCase(),
     subject,
     unitId: unit?.id ?? null,
     unitLabel: unit?.label ?? "",
@@ -387,10 +418,16 @@ export function parseReservation(envelope, body, referenceDate) {
     checkOut: range ? formatISODate(range.checkOut) : null,
     dateSource: range?.source ?? "confirmation-code-only",
     guestName: extractGuestName(subject, normalBody),
-    guests: extractGuestText(normalBody),
+    guests,
     confirmationCode,
     evidenceKind,
     evidenceSubtype,
+    guestCountChangeAccepted: acceptedReservationChange(subject, normalBody),
+    guestCountChangeClaimed: evidenceSubtype === "reply"
+      && Boolean(guests)
+      && conversationClaimsGuestCountChange(normalBody),
+    guestCountChangeDiscussed: evidenceSubtype === "reply"
+      && conversationDiscussesGuestCount(normalBody),
     cancelled: evidenceKind === "cancelled",
   };
 }
@@ -453,6 +490,74 @@ export function mergeReservations(reservations) {
   const explicitUpdates = reservations
     .filter((reservation) => evidenceKind(reservation) === "supplemental" && reservation.evidenceSubtype === "update")
     .sort((a, b) => (a.sourceTimestamp || 0) - (b.sourceTimestamp || 0));
+  const replies = reservations
+    .filter((reservation) => evidenceKind(reservation) === "supplemental" && reservation.evidenceSubtype !== "update")
+    .sort((a, b) => (a.sourceTimestamp || 0) - (b.sourceTimestamp || 0));
+  const guestCountChangeWindowMs = 15 * 60 * 1000;
+  const guestCountDiscussionWindowMs = 60 * 60 * 1000;
+  for (const accepted of explicitUpdates.filter((update) => update.guestCountChangeAccepted && !update.guests)) {
+    if (!accepted.confirmationCode) continue;
+    const existing = activeByConfirmationCode.get(accepted.confirmationCode);
+    const acceptedAt = accepted.sourceTimestamp || 0;
+    if (!existing || acceptedAt < (existing.sourceTimestamp || 0)) continue;
+    const countDiscussion = [...replies].reverse().find((reply) => {
+      const replyAt = reply.sourceTimestamp || 0;
+      if (!reply.guestCountChangeDiscussed || replyAt > acceptedAt || acceptedAt - replyAt > guestCountDiscussionWindowMs) {
+        return false;
+      }
+      return reply.confirmationCode
+        ? reply.confirmationCode === accepted.confirmationCode
+        : Boolean(
+          reply.unitId && reply.checkIn && reply.checkOut
+          && reply.unitId === existing.unitId
+          && reply.checkIn === existing.checkIn
+          && reply.checkOut === existing.checkOut
+          && sameGuestIdentity(reply.guestName, existing.guestName)
+        );
+    });
+    if (!countDiscussion) continue;
+    const countReply = replies.find((reply) => {
+      const replyAt = reply.sourceTimestamp || 0;
+      if (!reply.guestCountChangeClaimed || !reply.guests || reply.guests === existing.guests) return false;
+      if (replyAt < acceptedAt || replyAt - acceptedAt > guestCountChangeWindowMs) return false;
+      const matchesReservation = reply.confirmationCode
+        ? reply.confirmationCode === accepted.confirmationCode
+        : Boolean(
+          reply.unitId && reply.checkIn && reply.checkOut
+          && reply.unitId === existing.unitId
+          && reply.checkIn === existing.checkIn
+          && reply.checkOut === existing.checkOut
+          && sameGuestIdentity(reply.guestName, existing.guestName)
+        );
+      if (!matchesReservation) return false;
+      return !explicitUpdates.some((other) => (
+        other.sourceEnvelopeId !== accepted.sourceEnvelopeId
+        && other.confirmationCode === accepted.confirmationCode
+        && (other.sourceTimestamp || 0) > acceptedAt
+        && (other.sourceTimestamp || 0) <= replyAt
+      ));
+    });
+    if (!countReply) continue;
+    activeByConfirmationCode.set(accepted.confirmationCode, {
+      ...existing,
+      guests: countReply.guests,
+      sourceEnvelopeId: countReply.sourceEnvelopeId,
+      sourceDate: countReply.sourceDate,
+      sourceTimestamp: countReply.sourceTimestamp,
+      subject: countReply.subject,
+      guestCountChangeEvidence: {
+        discussionEnvelopeId: countDiscussion.sourceEnvelopeId,
+        acceptedEnvelopeId: accepted.sourceEnvelopeId,
+        countEnvelopeId: countReply.sourceEnvelopeId,
+      },
+      sources: [...new Set([
+        ...(existing.sources ?? [existing.sourceEnvelopeId]),
+        countDiscussion.sourceEnvelopeId,
+        accepted.sourceEnvelopeId,
+        countReply.sourceEnvelopeId,
+      ])],
+    });
+  }
   for (const update of explicitUpdates) {
     if (!update.confirmationCode) continue;
     const existing = activeByConfirmationCode.get(update.confirmationCode);
@@ -477,9 +582,6 @@ export function mergeReservations(reservations) {
   }
 
   const activeReservations = [...uncodedConfirmations, ...activeByConfirmationCode.values()];
-  const replies = reservations
-    .filter((reservation) => evidenceKind(reservation) === "supplemental" && reservation.evidenceSubtype !== "update")
-    .sort((a, b) => (a.sourceTimestamp || 0) - (b.sourceTimestamp || 0));
   for (const reply of replies) {
     const matches = activeReservations.filter((reservation) => {
       if ((reply.sourceTimestamp || 0) < (reservation.sourceTimestamp || 0)) return false;

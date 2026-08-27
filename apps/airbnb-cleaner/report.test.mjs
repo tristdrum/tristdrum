@@ -133,6 +133,7 @@ test("defaults an unknown incoming count to two", () => {
 test("fetches date-less cancellations and updates for body-level reconciliation", () => {
   assert.equal(subjectMayTouchTarget("Canceled: Reservation HM123456", targetDate), true);
   assert.equal(subjectMayTouchTarget("Reservation updated for HM123456", targetDate), true);
+  assert.equal(subjectMayTouchTarget("Your reservation change was accepted", targetDate), true);
 
   const cancellation = parseReservation(
     { id: "cancel", date: "2026-07-27T12:00:00Z", subject: "Canceled: Reservation HM123456" },
@@ -142,6 +143,179 @@ test("fetches date-less cancellations and updates for body-level reconciliation"
   assert.equal(cancellation.cancelled, true);
   assert.equal(cancellation.confirmationCode, "HM123456");
   assert.equal(cancellation.unitId, null);
+});
+
+test("an accepted guest-count change unlocks one newer matching Airbnb thread count", () => {
+  const confirmation = parseReservation(
+    { id: "confirmed", date: "2026-08-27T06:29:00Z", subject: "Reservation confirmed - Alpha Guest arrives Aug 28" },
+    "NEW BOOKING CONFIRMED! ALPHA GUEST ARRIVES AUG 28.\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMCHANGE01",
+    parseISODate("2026-08-28"),
+  );
+  const accepted = parseReservation(
+    { id: "accepted", date: "2026-08-27T07:09:00Z", subject: "Your reservation change was accepted" },
+    "ALPHA GUEST AGREED TO CHANGE THEIR RESERVATION\nBougainvillea Courtyard Studio\nhttps://airbnb.example/hosting/reservations/details/HMCHANGE01",
+    parseISODate("2026-08-28"),
+  );
+  const discussion = parseReservation(
+    { id: "discussion", date: "2026-08-27T06:31:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29" },
+    "ALPHA GUEST\nBooker\nI am alone but someone may join me. Is that okay?\nReply\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n1 adult",
+    parseISODate("2026-08-28"),
+  );
+  const changedThread = parseReservation(
+    { id: "thread", date: "2026-08-27T07:11:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29" },
+    "ALPHA GUEST\nBooker\nI will update the booking now.\nReply\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n2 adults",
+    parseISODate("2026-08-28"),
+  );
+
+  assert.equal(accepted.evidenceSubtype, "update");
+  assert.equal(accepted.guestCountChangeAccepted, true);
+  assert.equal(discussion.guestCountChangeDiscussed, true);
+  assert.equal(changedThread.guestCountChangeClaimed, true);
+  const merged = mergeReservations([confirmation, discussion, accepted, changedThread]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].guests, "2 adults");
+  assert.equal(merged[0].sourceEnvelopeId, "thread");
+  assert.deepEqual(merged[0].sources, ["confirmed", "discussion", "accepted", "thread"]);
+  assert.deepEqual(merged[0].guestCountChangeEvidence, {
+    discussionEnvelopeId: "discussion",
+    acceptedEnvelopeId: "accepted",
+    countEnvelopeId: "thread",
+  });
+});
+
+test("an accepted change cannot turn a generic update-you reply into guest-count authority", () => {
+  const confirmation = {
+    ...reservation({ unitId: 1, guestName: "Alpha Guest", guests: "1 adult", checkIn: "2026-08-28", checkOut: "2026-08-29" }),
+    sourceEnvelopeId: "confirmed",
+    sourceTimestamp: 100,
+    confirmationCode: "HMCHANGE02",
+    evidenceKind: "confirmed",
+  };
+  const accepted = {
+    sourceEnvelopeId: "accepted",
+    sourceTimestamp: 200,
+    confirmationCode: "HMCHANGE02",
+    evidenceKind: "supplemental",
+    evidenceSubtype: "update",
+    guestCountChangeAccepted: true,
+    guests: "",
+  };
+  const discussion = {
+    ...reservation({ unitId: 1, guestName: "Alpha Guest", guests: "1 adult", checkIn: "2026-08-28", checkOut: "2026-08-29" }),
+    sourceEnvelopeId: "discussion",
+    sourceTimestamp: 150,
+    evidenceKind: "supplemental",
+    evidenceSubtype: "reply",
+    guestCountChangeDiscussed: true,
+  };
+  const wifiReply = parseReservation(
+    { id: "wifi", date: "2026-08-27T07:11:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29" },
+    "ALPHA GUEST\nBooker\nLet me update you about the Wi-Fi later.\nReply\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n2 adults",
+    parseISODate("2026-08-28"),
+  );
+  assert.equal(wifiReply.guestCountChangeClaimed, false);
+  assert.equal(mergeReservations([confirmation, discussion, accepted, wifiReply])[0].guests, "1 adult");
+});
+
+test("date, arrival-time, and update-you replies cannot claim a guest-count change", () => {
+  for (const [id, message] of [
+    ["updated-you", "I’ve updated you about the plans."],
+    ["arrival-time", "I will change the arrival time."],
+    ["dates", "Let me change the dates."],
+  ]) {
+    const parsed = parseReservation(
+      { id, date: "2026-08-27T07:11:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29" },
+      `ALPHA GUEST\nBooker\n${message}\nReply\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n2 adults`,
+      parseISODate("2026-08-28"),
+    );
+    assert.equal(parsed.guestCountChangeClaimed, false, id);
+  }
+});
+
+test("a later explicit update preserves a previously paired accepted guest-count change", () => {
+  const confirmation = {
+    ...reservation({ unitId: 1, guestName: "Alpha Guest", guests: "1 adult", checkIn: "2026-08-28", checkOut: "2026-08-29" }),
+    sourceEnvelopeId: "confirmed",
+    sourceTimestamp: 100,
+    confirmationCode: "HMCHANGE03",
+    evidenceKind: "confirmed",
+  };
+  const accepted = {
+    sourceEnvelopeId: "accepted",
+    sourceTimestamp: 200,
+    confirmationCode: "HMCHANGE03",
+    evidenceKind: "supplemental",
+    evidenceSubtype: "update",
+    guestCountChangeAccepted: true,
+    guests: "",
+  };
+  const discussion = {
+    ...reservation({ unitId: 1, guestName: "Alpha Guest", guests: "1 adult", checkIn: "2026-08-28", checkOut: "2026-08-29" }),
+    sourceEnvelopeId: "discussion",
+    sourceTimestamp: 150,
+    evidenceKind: "supplemental",
+    evidenceSubtype: "reply",
+    guestCountChangeDiscussed: true,
+  };
+  const countReply = {
+    ...reservation({ unitId: 1, guestName: "Alpha Guest", guests: "2 adults", checkIn: "2026-08-28", checkOut: "2026-08-29" }),
+    sourceEnvelopeId: "count",
+    sourceTimestamp: 250,
+    evidenceKind: "supplemental",
+    evidenceSubtype: "reply",
+    guestCountChangeClaimed: true,
+  };
+  const laterDateUpdate = {
+    sourceEnvelopeId: "later",
+    sourceTimestamp: 300,
+    confirmationCode: "HMCHANGE03",
+    evidenceKind: "supplemental",
+    evidenceSubtype: "update",
+    checkIn: "2026-08-28",
+    checkOut: "2026-08-30",
+    guests: "",
+  };
+  const merged = mergeReservations([confirmation, discussion, accepted, countReply, laterDateUpdate]);
+  assert.equal(merged[0].guests, "2 adults");
+  assert.equal(merged[0].checkOut, "2026-08-30");
+});
+
+test("accepted guest-count evidence cannot cross into a same-date replacement guest", () => {
+  const replacement = {
+    ...reservation({ unitId: 1, guestName: "New Guest", guests: "1 adult", checkIn: "2026-08-28", checkOut: "2026-08-29" }),
+    sourceEnvelopeId: "replacement",
+    sourceTimestamp: 100,
+    confirmationCode: "HMREPLACE01",
+    evidenceKind: "confirmed",
+  };
+  const accepted = {
+    sourceEnvelopeId: "accepted",
+    sourceTimestamp: 200,
+    confirmationCode: "HMREPLACE01",
+    evidenceKind: "supplemental",
+    evidenceSubtype: "update",
+    guestCountChangeAccepted: true,
+    guests: "",
+  };
+  const oldGuestDiscussion = {
+    ...reservation({ unitId: 1, guestName: "Old Guest", guests: "1 adult", checkIn: "2026-08-28", checkOut: "2026-08-29" }),
+    sourceEnvelopeId: "old-discussion",
+    sourceTimestamp: 150,
+    evidenceKind: "supplemental",
+    evidenceSubtype: "reply",
+    guestCountChangeDiscussed: true,
+  };
+  const oldGuestCount = {
+    ...reservation({ unitId: 1, guestName: "Old Guest", guests: "2 adults", checkIn: "2026-08-28", checkOut: "2026-08-29" }),
+    sourceEnvelopeId: "old-count",
+    sourceTimestamp: 250,
+    evidenceKind: "supplemental",
+    evidenceSubtype: "reply",
+    guestCountChangeClaimed: true,
+  };
+  const merged = mergeReservations([replacement, oldGuestDiscussion, accepted, oldGuestCount]);
+  assert.equal(merged[0].guestName, "New Guest");
+  assert.equal(merged[0].guests, "1 adult");
 });
 
 test("the newest active confirmation revision replaces old dates and guest counts", () => {
