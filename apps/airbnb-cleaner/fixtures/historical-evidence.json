@@ -288,19 +288,19 @@
         "id": "guest-count-discussion",
         "date": "2026-08-27T06:31:00Z",
         "subject": "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29",
-        "body": "ALPHA GUEST\nBooker\nI am alone but someone may join me. Is that okay?\nReply\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n1 adult"
+        "body": "ALPHA GUEST\nBooker\nI am alone but someone may join me. Is that okay?\nReply\nhttps://airbnb.example/hosting/thread/2647000000\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n1 adult"
       },
       {
         "id": "change-accepted",
         "date": "2026-08-27T07:09:00Z",
         "subject": "Your reservation change was accepted",
-        "body": "ALPHA GUEST AGREED TO CHANGE THEIR RESERVATION\nBougainvillea Courtyard Studio\nhttps://airbnb.example/hosting/reservations/details/HMCHANGE01"
+        "body": "ALPHA GUEST AGREED TO CHANGE THEIR RESERVATION\nBougainvillea Courtyard Studio\nhttps://airbnb.example/hosting/reservations/details/HMCHANGE01\nhttps://airbnb.example/messaging/thread/2647000000"
       },
       {
         "id": "changed-thread-count",
         "date": "2026-08-27T07:11:00Z",
         "subject": "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29",
-        "body": "ALPHA GUEST\nBooker\nI will update the booking now.\nReply\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n2 adults"
+        "body": "ALPHA GUEST\nBooker\nI will update the booking now.\nReply\nhttps://airbnb.example/hosting/thread/2647000000\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n2 adults"
       }
     ],
     "expected": {

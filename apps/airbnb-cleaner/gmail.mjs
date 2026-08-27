@@ -152,6 +152,59 @@ export async function collectAirbnbMessages({
         }
       }
       missingConfirmationAnchorCount = missingCodes.size;
+
+      const acceptedChanges = messages
+        .map((message) => ({ message, evidence: describeEvidence(message) }))
+        .filter(({ evidence }) => evidence?.guestCountChangeAccepted && evidence.providerThreadId)
+        .slice(0, 4);
+      for (const { message: acceptedMessage, evidence: acceptedEvidence } of acceptedChanges) {
+        const acceptedAt = Date.parse(acceptedMessage.envelope.date);
+        if (!Number.isFinite(acceptedAt)) continue;
+        const contextSince = new Date(acceptedAt - 2 * 60 * 60 * 1000);
+        const contextUids = await client.search({
+          since: contextSince,
+          from: "airbnb.com",
+          body: acceptedEvidence.providerThreadId,
+        }, { uid: true });
+        if (!contextUids.length) continue;
+        const contextEnvelopes = [];
+        for await (const contextMessage of client.fetch(
+          contextUids,
+          { envelope: true, internalDate: true, uid: true },
+          { uid: true },
+        )) {
+          const envelope = envelopeFromMessage(contextMessage);
+          const occurredAt = Date.parse(envelope.date);
+          if (
+            !candidateEnvelope(envelope)
+            || !/^\s*RE:\s*Reservation\b/i.test(envelope.subject)
+            || messages.some((existing) => existing.envelope.id === envelope.id)
+            || !Number.isFinite(occurredAt)
+            || occurredAt < acceptedAt - 60 * 60 * 1000
+            || occurredAt > acceptedAt + 15 * 60 * 1000
+          ) continue;
+          contextEnvelopes.push(envelope);
+        }
+        const before = contextEnvelopes
+          .filter((envelope) => Date.parse(envelope.date) <= acceptedAt)
+          .sort((left, right) => Date.parse(right.date) - Date.parse(left.date))
+          .slice(0, 4);
+        const after = contextEnvelopes
+          .filter((envelope) => Date.parse(envelope.date) > acceptedAt)
+          .sort((left, right) => Date.parse(left.date) - Date.parse(right.date))
+          .slice(0, 4);
+        for (const envelope of [...before, ...after].sort((left, right) => Date.parse(left.date) - Date.parse(right.date))) {
+          const contextMessage = await readMessage(envelope);
+          if (!contextMessage) continue;
+          const contextEvidence = describeEvidence(contextMessage);
+          if (
+            contextEvidence?.evidenceKind !== "supplemental"
+            || contextEvidence.evidenceSubtype === "update"
+            || contextEvidence.providerThreadId !== acceptedEvidence.providerThreadId
+          ) continue;
+          messages.push(contextMessage);
+        }
+      }
     }
 
     return { messages, envelopesFound: selected.length, missingConfirmationAnchorCount };

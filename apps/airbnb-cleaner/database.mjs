@@ -172,6 +172,7 @@ export function cleanerEvidencePayload(evidence, guestCountChangeEvidence = null
     checkIn: evidence.checkIn,
     checkOut: evidence.checkOut,
     confirmationCode: evidence.confirmationCode || null,
+    providerThreadId: evidence.providerThreadId || null,
     guestName: evidence.guestName || null,
     guests: evidence.guests || null,
     evidenceKind: evidence.evidenceKind,

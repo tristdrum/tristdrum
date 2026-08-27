@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { collectAirbnbMessages } from "./gmail.mjs";
+import { parseISODate, parseReservation, reservationEvidenceKind } from "./report.mjs";
 
 test("filters envelopes before fetching MIME bodies and always closes IMAP", async () => {
   const calls = [];
@@ -155,6 +156,73 @@ test("collection includes a date-less accepted reservation change notice", async
   assert.equal(result.envelopesFound, 1);
   assert.deepEqual(fetched, [51]);
   assert.equal(result.messages[0].envelope.subject, "Your reservation change was accepted");
+});
+
+test("an accepted change recovers its bounded matching Airbnb thread context beyond the read cap", async () => {
+  const envelopes = new Map([
+    [50, { uid: 50, date: "2026-08-27T06:29:00Z", subject: "Reservation confirmed - Alpha Guest arrives Aug 28", from: "automated@airbnb.com" }],
+    [51, { uid: 51, date: "2026-08-27T07:09:00Z", subject: "Your reservation change was accepted", from: "automated@airbnb.com" }],
+    [52, { uid: 52, date: "2026-08-27T06:31:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29", from: "express@airbnb.com" }],
+    [53, { uid: 53, date: "2026-08-27T07:11:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29", from: "express@airbnb.com" }],
+  ]);
+  const bodies = {
+    50: "NEW BOOKING CONFIRMED! ALPHA GUEST ARRIVES AUG 28.\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMCHANGE01",
+    51: "ALPHA GUEST AGREED TO CHANGE THEIR RESERVATION\nBougainvillea Courtyard Studio\nhttps://airbnb.example/hosting/reservations/details/HMCHANGE01\nhttps://airbnb.example/messaging/thread/2647000000",
+    52: "ALPHA GUEST\nBooker\nI am alone but someone may join me. Is that okay?\nReply\nhttps://airbnb.example/hosting/thread/2647000000\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n1 adult",
+    53: "ALPHA GUEST\nBooker\nI will update the booking now.\nReply\nhttps://airbnb.example/hosting/thread/2647000000\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n2 adults",
+  };
+  const client = {
+    usable: true,
+    async connect() {},
+    async getMailboxLock() { return { release() {} }; },
+    async search(query) {
+      if (query.body === "2647000000") return [...envelopes.keys()];
+      return [...envelopes.keys()];
+    },
+    async *fetch(uids) {
+      for (const uid of uids) {
+        const envelope = envelopes.get(uid);
+        yield {
+          uid,
+          internalDate: new Date(envelope.date),
+          envelope: { subject: envelope.subject, from: [{ address: envelope.from }] },
+        };
+      }
+    },
+    async fetchOne(uid) {
+      const envelope = envelopes.get(uid);
+      return { source: Buffer.from(
+        `From: Airbnb <${envelope.from}>\r\nSubject: ${envelope.subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${bodies[uid]}\r\n`,
+      ) };
+    },
+    async logout() {},
+    close() {},
+  };
+  const targetDate = parseISODate("2026-08-28");
+  const describeEvidence = ({ envelope, body }) => {
+    const evidenceKind = reservationEvidenceKind(envelope.subject, body);
+    const parsed = body ? parseReservation(envelope, body, targetDate) : null;
+    return {
+      evidenceKind,
+      evidenceSubtype: evidenceKind === "confirmed" ? "confirmed"
+        : /accepted/i.test(envelope.subject) ? "update" : "reply",
+      confirmationCode: parsed?.confirmationCode ?? "",
+      providerThreadId: parsed?.providerThreadId ?? "",
+      guestCountChangeAccepted: parsed?.guestCountChangeAccepted === true,
+    };
+  };
+  const result = await collectAirbnbMessages({
+    afterDate: "2026-05-30",
+    maxRead: 2,
+    env: { AIRBNB_GMAIL_USER: "test@example.com", AIRBNB_GMAIL_APP_PASSWORD: "not-a-real-secret" },
+    createClient: () => client,
+    candidateEnvelope: () => true,
+    subjectMayTouchTarget: () => true,
+    describeEvidence,
+  });
+
+  assert.equal(result.envelopesFound, 2);
+  assert.deepEqual(new Set(result.messages.map(({ envelope }) => envelope.id)), new Set(["50", "51", "52", "53"]));
 });
 
 test("fetches the original confirmation when a target-date update changes the booking dates", async () => {
