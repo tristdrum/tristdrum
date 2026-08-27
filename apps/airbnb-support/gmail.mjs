@@ -43,6 +43,19 @@ function positiveInteger(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function observeClientErrors(client) {
+  if (typeof client.on !== "function") {
+    return new Promise(() => {});
+  }
+  let rejectError;
+  const error = new Promise((_, reject) => { rejectError = reject; });
+  const listener = (value) => {
+    rejectError(value instanceof Error ? value : new Error("Airbnb support IMAP client failed."));
+  };
+  client.on("error", listener);
+  return error;
+}
+
 function closeClientNoThrow(client) {
   try {
     const closing = client.close();
@@ -71,7 +84,7 @@ async function finishClient(client, timeoutMs = DEFAULT_CLEANUP_TIMEOUT_MS) {
   clearTimeout(timer);
 }
 
-async function withClientDeadline(client, work, timeoutMs, errorFactory) {
+async function withClientDeadline(client, work, timeoutMs, errorFactory, clientError) {
   let timer;
   const deadline = new Promise((_, reject) => {
     timer = setTimeout(() => {
@@ -80,7 +93,7 @@ async function withClientDeadline(client, work, timeoutMs, errorFactory) {
     }, timeoutMs);
   });
   try {
-    return await Promise.race([work, deadline]);
+    return await Promise.race([work, deadline, clientError]);
   } finally {
     clearTimeout(timer);
   }
@@ -149,6 +162,7 @@ export async function collectConversationMessages({
   createClient = (options) => new ImapFlow(options),
 }) {
   const client = createClient(imapOptions(mailboxScope, env));
+  const clientError = observeClientErrors(client);
   let lock;
   try {
     const deadlineMs = positiveInteger(
@@ -220,7 +234,7 @@ export async function collectConversationMessages({
         lastUid: selected.at(-1)?.uid ?? Number(afterUid),
       };
     })();
-    return await withClientDeadline(client, importWork, deadlineMs, importDeadlineError);
+    return await withClientDeadline(client, importWork, deadlineMs, importDeadlineError, clientError);
   } finally {
     lock?.release();
     await finishClient(
@@ -237,6 +251,7 @@ export async function collectBookingLifecycleMessages({
   createClient = (options) => new ImapFlow(options),
 }) {
   const client = createClient(imapOptions("tristan", env));
+  const clientError = observeClientErrors(client);
   let lock;
   try {
     const deadlineMs = positiveInteger(env.AIRBNB_SUPPORT_GMAIL_IMPORT_DEADLINE_MS, DEFAULT_IMPORT_DEADLINE_MS);
@@ -290,7 +305,7 @@ export async function collectBookingLifecycleMessages({
         envelopesFound: selected.length,
       };
     })();
-    return await withClientDeadline(client, importWork, deadlineMs, importDeadlineError);
+    return await withClientDeadline(client, importWork, deadlineMs, importDeadlineError, clientError);
   } finally {
     lock?.release();
     await finishClient(
@@ -308,6 +323,7 @@ export async function findSentMessageIds({
   const wanted = [...new Set((messageIds ?? []).map((value) => String(value ?? "").trim()).filter(Boolean))];
   if (!wanted.length) return [];
   const client = createClient(imapOptions("tristan", env));
+  const clientError = observeClientErrors(client);
   let lock;
   try {
     const guardWork = (async () => {
@@ -325,6 +341,7 @@ export async function findSentMessageIds({
       guardWork,
       positiveInteger(env.AIRBNB_SUPPORT_GMAIL_GUARD_DEADLINE_MS, DEFAULT_GUARD_DEADLINE_MS),
       guardDeadlineError,
+      clientError,
     );
   } finally {
     lock?.release();
@@ -349,6 +366,7 @@ export async function findSentThreadEvidence({
   const anchors = new Set(referenceIds.map(rfcMessageId).filter(Boolean));
   if (!anchors.size) throw new Error("Sent-thread reconciliation requires a message reference anchor.");
   const client = createClient(imapOptions(mailboxScope, env));
+  const clientError = observeClientErrors(client);
   let lock;
   try {
     const guardWork = (async () => {
@@ -400,6 +418,7 @@ export async function findSentThreadEvidence({
       guardWork,
       positiveInteger(env.AIRBNB_SUPPORT_GMAIL_GUARD_DEADLINE_MS, DEFAULT_GUARD_DEADLINE_MS),
       guardDeadlineError,
+      clientError,
     );
   } finally {
     lock?.release();

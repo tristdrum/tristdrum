@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 import {
   collectBookingLifecycleMessages,
@@ -243,6 +244,34 @@ test("collector closes a stalled IMAP import at the configured deadline", async 
     { code: "IMAP_IMPORT_DEADLINE" },
   );
   assert.equal(closed, true);
+});
+
+test("an emitted IMAP NoConnection error rejects the import without crashing the worker", async () => {
+  const client = new EventEmitter();
+  Object.assign(client, {
+    usable: false,
+    connect() {
+      queueMicrotask(() => {
+        const error = Object.assign(new Error("Connection not available"), { code: "NoConnection" });
+        client.emit("error", error);
+      });
+      return new Promise(() => {});
+    },
+    close() {},
+  });
+  await assert.rejects(
+    collectConversationMessages({
+      since: new Date("2026-08-01T00:00:00Z"),
+      env: {
+        AIRBNB_SUPPORT_GMAIL_USER: "tristan@example.test",
+        AIRBNB_SUPPORT_GMAIL_APP_PASSWORD: "not-a-secret",
+      },
+      createClient: () => client,
+    }),
+    { code: "NoConnection", message: "Connection not available" },
+  );
+  assert.equal(client.listenerCount("error"), 1);
+  assert.doesNotThrow(() => client.emit("error", new Error("Late socket error")));
 });
 
 test("deadline cleanup stays bounded when a usable client's logout never settles", async () => {
