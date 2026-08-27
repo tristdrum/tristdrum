@@ -262,7 +262,7 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
     const stockObservation = {
       providerMessageId: `integration-whatsapp-${randomUUID()}`,
       chatScope: "maids",
-      senderName: "Integration maid",
+      senderName: "Integration cleaner",
       occurredAt: "2026-08-21T20:01:00.000Z",
       contentHash: "f".repeat(64),
       matchedSkus: ["integration_chocolate"],

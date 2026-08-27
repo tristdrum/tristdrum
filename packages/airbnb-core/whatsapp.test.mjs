@@ -108,7 +108,7 @@ test("a provider message ID requires exact Management readback", async () => {
   );
 });
 
-test("Management alerts can never target the cleaners chat", async () => {
+test("Management alerts can never target the cleaning team chat", async () => {
   await assert.rejects(
     sendVerifiedManagementMessage({
       text: "Airbnb alert",
@@ -116,11 +116,11 @@ test("Management alerts can never target the cleaners chat", async () => {
       env: { ...env, AIRBNB_MANAGEMENT_WHATSAPP_CHAT_ID: "cleaners@g.us" },
       fetchFn: async () => { throw new Error("must not fetch"); },
     }),
-    /may not target the cleaners chat/,
+    /may not target the cleaning team chat/,
   );
 });
 
-test("the generic verified sender can safely target the cleaners group", async () => {
+test("the generic verified sender can safely target the cleaning team group", async () => {
   let liveSent = false;
   const result = await sendVerifiedWhatsAppGroupMessage({
     chatId: "cleaners@g.us",

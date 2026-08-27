@@ -293,7 +293,7 @@ export async function ingestStockWhatsAppObservation(sql, { householdId, observa
         subject, evidence_kind, evidence_subtype, occurred_at, content_hash, normalized_payload
       ) values (
         ${householdId}, 'whatsapp', 'whatsapp', ${observation.providerMessageId}, null,
-        ${observation.chatScope === "maids" ? "Airbnb Maids stock observation" : "Airbnb Management stock observation"},
+        ${observation.chatScope === "maids" ? "Airbnb Team stock observation" : "Airbnb Management stock observation"},
         'stock_observation', ${observation.chatScope}, ${observation.occurredAt},
         ${observation.contentHash},
         ${transaction.json({
