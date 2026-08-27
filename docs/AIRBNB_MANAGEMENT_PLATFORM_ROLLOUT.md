@@ -285,6 +285,36 @@ the ordinary 80-envelope read window.
   change provenance, both cleaner rows have clean confidence and verified Min
   API readback, and all eight cleaner jobs are active again.
 
+### Support alert and Fly lifecycle repair
+
+The 27 August heartbeat contained one transient Gmail import timeout, then found
+two independent support reliability issues while verifying the retry path.
+
+- Run `9ab0b776-1e2b-438a-9e14-038ee93b0631` failed closed with
+  `IMAP_IMPORT_DEADLINE`. Both Tristan and Jane IMAP/SMTP doctors passed, and
+  write-disabled shadow run `e2891547-352e-46e9-9140-4f0352ffc4ee` succeeded.
+- The controlled live retry exposed two old Prinsloo immediate-stage alerts that
+  could surface after their higher overdue/reminder stages had already been
+  delivered during the shadow-to-live transition. No guest email was sent.
+- PRs #32 and #33 permanently retire lower sibling stages after a verified
+  Management alert and preserve that retired marker through an intervening
+  shadow pass. The real support-role integration test reproduces the exact
+  shadow-between-live sequence.
+- One-time production reconciliation retired the only remaining stale sibling.
+  Final shadow run `704e54b5-22c5-40e5-aab1-895d4c79ed2d` and controlled live run
+  `7e877421-d04c-4739-8e0e-c8c40434a618` then completed with zero replies, alerts,
+  model failures, or ambiguous deliveries.
+- The first restored ordinary poll was interrupted when Fly autostopped the
+  support machine four seconds into its request. The stranded receipt was closed
+  explicitly as `PROCESS_INTERRUPTED_FLY_AUTOSTOP`.
+- PR #34 keeps one support machine warm for the five-minute watcher while leaving
+  cleaner and stock scaling unchanged. Final support image:
+  `deployment-01M11M6Y60TCCKQANTN7WB7BQS`.
+- Ordinary scheduled run `ac07fbab-10b2-4a1b-b1aa-2a0eab3f0a26` completed at
+  15:02:01 SAST with zero replies, alerts, classification/decision failures, or
+  ambiguity. The machine remained started and healthy, and all 102 support tests
+  passed against the local RLS integration database.
+
 ## Production verification
 
 Use this order so no scheduled request can cross a mixed schema/app version:
@@ -334,12 +364,12 @@ After that guarded cutover:
 - Heartbeat `airbnb-cleaner-midday-cutover-check` performs hourly daytime personal
   platform and exact outbound-message audits at 25 minutes past each hour from
   07:25 through 21:25 SAST.
-- The latest cleaner repair reset the clean-run clock at the final ordinary
-  scheduled acceptance on 2026-08-27 13:53:29 SAST. Require 72 clean hours before
+- The latest support repair reset the clean-run clock at the final ordinary
+  scheduled acceptance on 2026-08-27 15:02:01 SAST. Require 72 clean hours before
   treating the replacement as stable; the new stability checkpoint is
-  2026-08-30 13:53:29 SAST.
+  2026-08-30 15:02:01 SAST.
 - Do not delete the stopped Min app or rollback data before the seven-day gate.
-  The earliest retirement checkpoint is 2026-09-03 13:53:29 SAST, after seven
+  The earliest retirement checkpoint is 2026-09-03 15:02:01 SAST, after seven
   full clean days from the latest repairs. Extend the heartbeat if verification
   delays retirement.
 - Delete old infrastructure only after schedules, receipts, WhatsApp readback,
