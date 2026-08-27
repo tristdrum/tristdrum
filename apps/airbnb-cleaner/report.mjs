@@ -1476,6 +1476,7 @@ export async function collectReservations(
         confirmationCode: extractConfirmationCode(body),
         providerThreadId: parsed?.providerThreadId ?? "",
         guestCountChangeAccepted: parsed?.guestCountChangeAccepted === true,
+        listingName: parsed?.listingName ?? "",
       };
     },
   });

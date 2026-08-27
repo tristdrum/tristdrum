@@ -164,19 +164,25 @@ test("an accepted change recovers its bounded matching Airbnb thread context bey
     [51, { uid: 51, date: "2026-08-27T07:09:00Z", subject: "Your reservation change was accepted", from: "automated@airbnb.com" }],
     [52, { uid: 52, date: "2026-08-27T06:31:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29", from: "express@airbnb.com" }],
     [53, { uid: 53, date: "2026-08-27T07:11:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29", from: "express@airbnb.com" }],
+    [54, { uid: 54, date: "2026-08-27T07:10:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29", from: "express@airbnb.com" }],
   ]);
   const bodies = {
     50: "NEW BOOKING CONFIRMED! ALPHA GUEST ARRIVES AUG 28.\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMCHANGE01",
     51: "ALPHA GUEST AGREED TO CHANGE THEIR RESERVATION\nBougainvillea Courtyard Studio\nhttps://airbnb.example/hosting/reservations/details/HMCHANGE01\nhttps://airbnb.example/messaging/thread/2647000000",
     52: "ALPHA GUEST\nBooker\nI am alone but someone may join me. Is that okay?\nReply\nhttps://airbnb.example/hosting/thread/2647000000\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n1 adult",
     53: "ALPHA GUEST\nBooker\nI will update the booking now.\nReply\nhttps://airbnb.example/hosting/thread/2647000000\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n2 adults",
+    54: "DECOY GUEST\nBooker\nLet me update the booking.\nReply\nhttps://airbnb.example/hosting/thread/9999999999\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n4 adults",
   };
   const client = {
     usable: true,
     async connect() {},
     async getMailboxLock() { return { release() {} }; },
     async search(query) {
-      if (query.subject === "RE: Reservation") return [...envelopes.keys()];
+      if (query.subject) {
+        assert.equal(query.subject, "RE: Reservation for Bougainvillea Courtyard Studio");
+        assert.ok(query.before instanceof Date);
+        return [...envelopes.keys()];
+      }
       return [...envelopes.keys()];
     },
     async *fetch(uids) {
@@ -209,6 +215,7 @@ test("an accepted change recovers its bounded matching Airbnb thread context bey
       confirmationCode: parsed?.confirmationCode ?? "",
       providerThreadId: parsed?.providerThreadId ?? "",
       guestCountChangeAccepted: parsed?.guestCountChangeAccepted === true,
+      listingName: parsed?.listingName ?? "",
     };
   };
   const result = await collectAirbnbMessages({
@@ -223,6 +230,7 @@ test("an accepted change recovers its bounded matching Airbnb thread context bey
 
   assert.equal(result.envelopesFound, 2);
   assert.deepEqual(new Set(result.messages.map(({ envelope }) => envelope.id)), new Set(["50", "51", "52", "53"]));
+  assert.equal(result.messages.some(({ envelope }) => envelope.id === "54"), false);
 });
 
 test("fetches the original confirmation when a target-date update changes the booking dates", async () => {
