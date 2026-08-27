@@ -176,7 +176,7 @@ test("an accepted change recovers its bounded matching Airbnb thread context bey
     async connect() {},
     async getMailboxLock() { return { release() {} }; },
     async search(query) {
-      if (query.body === "2647000000") return [...envelopes.keys()];
+      if (query.subject === "RE: Reservation") return [...envelopes.keys()];
       return [...envelopes.keys()];
     },
     async *fetch(uids) {

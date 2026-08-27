@@ -164,7 +164,7 @@ export async function collectAirbnbMessages({
         const contextUids = await client.search({
           since: contextSince,
           from: "airbnb.com",
-          body: acceptedEvidence.providerThreadId,
+          subject: "RE: Reservation",
         }, { uid: true });
         if (!contextUids.length) continue;
         const contextEnvelopes = [];
