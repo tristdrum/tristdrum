@@ -152,7 +152,7 @@ completed on 26 August.
   runs every five minutes; the shadow job is inactive. Eight cleaner and four
   stock jobs remain active.
 - Current cleaner image: `deployment-01M0YT1D2KKCJNTGFSH2X26ZKW`.
-- Current support image: `deployment-01M0ZM70DTYK7JAHRBW9VTJ7E5`.
+- Current support image: `deployment-01M10VSGA74SNNKMWN4R62VVBP`.
 - The Anele late-arrival incident is a regression: an arrival before the booked
   date receives an immediate grounded acknowledgement and Management alert,
   while the final Tristan/Jane Sent-mail check can still veto delivery.
@@ -181,8 +181,9 @@ completed on 26 August.
 
 The classifier and topic allowlist were removed on 26 August in PR #19, with a
 focused lifecycle ownership hotfix in PR #20, bounded IMAP cleanup repair in
-PR #22, and initial-inquiry ingestion repair in PR #24. Production source is
-merge commit `a824b1833fb83ec53f701407fdd6674d351021ba`.
+PR #22, initial-inquiry ingestion repair in PR #24, and IMAP error-event guard
+in PR #26. Production source is merge commit
+`6e22ff4729e8e45a40d87a266c51365e164986c2`.
 
 - One `gpt-5.6-sol` Responses API decision at `xhigh` reasoning now receives the
   recent conversation, stay phase, listing and guest identity, verified property
@@ -230,6 +231,17 @@ merge commit `a824b1833fb83ec53f701407fdd6674d351021ba`.
   `bb1daaf1-bae7-41a4-afa6-c62ed3e6459a` then sent and read back exactly two
   Management alerts for the previously missed Prinsloo long-stay inquiries;
   no guest reply was attempted because Airbnb had not supplied a reply route.
+- A later ImapFlow `NoConnection` event escaped the promise/deadline path and
+  terminated the worker at 07:05 SAST on 27 August. PR #26 attaches an error
+  observer before every IMAP connection, routes the event through the existing
+  fail-closed rejection path, and retains the listener for late socket events.
+  The release gate passed 74 pgTAP assertions and 271 application tests,
+  including 101 support tests and the exact emitted-error regression.
+- Accepted shadow run `777f543b-a8a4-432e-907a-5eedc6f72496`, controlled live
+  run `3b5b5058-0c51-4a26-9d92-fca2f529a261`, and ordinary scheduled runs
+  `20a21651-c35e-42ac-b510-9127cd9c1655` and
+  `5581331a-df97-41f7-a439-cdf5931c5481` all completed without an IMAP crash,
+  model failure, ambiguous send, or missing readback.
 - One stock Management run observed a transient WhatsApp HTTP 404 and sent
   nothing. The writer was paused; both groups then returned HTTP 200 and two
   observation runs loaded 103 messages with no read error, after which the writer
@@ -287,12 +299,12 @@ After that guarded cutover:
 - Heartbeat `airbnb-cleaner-midday-cutover-check` performs hourly daytime personal
   platform and exact outbound-message audits at 25 minutes past each hour from
   07:25 through 21:25 SAST.
-- The latest support repair reset the clean-run clock at the second verified live
-  acceptance on 2026-08-26 20:24:45 SAST. Require 72 clean hours before treating
-  the replacement as stable; the new stability checkpoint is
-  2026-08-29 20:24:45 SAST.
+- The latest support repair reset the clean-run clock at the second ordinary
+  scheduled acceptance on 2026-08-27 08:01:29 SAST. Require 72 clean hours before
+  treating the replacement as stable; the new stability checkpoint is
+  2026-08-30 08:01:29 SAST.
 - Do not delete the stopped Min app or rollback data before the seven-day gate.
-  The earliest retirement checkpoint is 2026-09-02 20:24:45 SAST, after seven full
+  The earliest retirement checkpoint is 2026-09-03 08:01:29 SAST, after seven full
   clean days from the latest repairs. Extend the heartbeat if verification
   delays retirement.
 - Delete old infrastructure only after schedules, receipts, WhatsApp readback,
