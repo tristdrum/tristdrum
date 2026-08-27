@@ -50,17 +50,17 @@ verification, duplicate checks, independent monitoring, and a rollback window.
   tables after importing the existing ledger history.
 - Preserve the SAST schedule: today at 12:00, 12:10, and 12:20; tomorrow at
   13:30, 13:40, and 13:50; independent monitors at 12:50 and 14:20.
-- Rename the active `Airbnbs` group to `Airbnb Maids`, leave the old
+- Rename the active `Airbnbs` group to `Airbnb Team`, leave the old
   `Bowie airbnbs` group untouched, and create `Airbnb Management` containing
   Tristan and Jane.
-- Send cleaner plans only to `Airbnb Maids`. Send failures, blocked confidence
+- Send cleaner plans only to `Airbnb Team`. Send failures, blocked confidence
   checks, stock alerts, and guest escalations only to `Airbnb Management` or
   Tristan privately.
 
 ## Stock and orders
 
 - Infer stock from verified 1 Bowie Sixty60 purchases, confirmed guest
-  consumption, manual adjustments, and relevant Jane or maid messages.
+  consumption, manual adjustments, and relevant Jane or cleaning team messages.
 - Run idempotent full-review attempts every Tuesday at 06:00 and 06:20 SAST,
   safely before the first regular stock poll. Continue silent depletion
   forecasts through the day without overlapping Management sends.
@@ -73,8 +73,8 @@ verification, duplicate checks, independent monitoring, and a rollback window.
 - Track cleaning products, toilet rolls, refuse bags, bleach, multipurpose
   cleaner, dishwashing liquid, laundry detergent, bath mats, mugs, glasses, and
   linen readiness.
-- Mark inferred or stale quantities as counts to confirm. Do not ask the maids
-  for routine stock counts in the initial release.
+- Mark inferred or stale quantities as counts to confirm. Do not ask the
+  cleaning team for routine stock counts in the initial release.
 - Build suggested orders to at least R350, targeting roughly R400 by adding
   useful nonperishable buffer stock. Never place an order automatically.
 - Post a provisional Management alert when an order confirmation arrives because
@@ -166,8 +166,8 @@ verification, duplicate checks, independent monitoring, and a rollback window.
 
 - The cleaner never misses a due plan, sends at most one correction per changed
   plan, and fails closed on impossible reservation state.
-- The production cleaners chat, latest ledger row, run receipt, and reservation
-  evidence agree after every monitored window.
+- The production cleaning team chat, latest ledger row, run receipt, and
+  reservation evidence agree after every monitored window.
 - No stock is credited from an addressless confirmation or a non-Bowie invoice.
 - No autonomous guest reply can race or duplicate a human response.
 - Every external action is attributable through a sanitized audit record.

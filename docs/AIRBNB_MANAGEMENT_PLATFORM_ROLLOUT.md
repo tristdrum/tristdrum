@@ -12,11 +12,13 @@ Last updated: 2026-08-27 SAST.
 - The four stock schedules are active. The support schedule is dormant and the
   service remains shadow-only with all external reply and alert writes disabled.
 - The three local macOS cleaner LaunchAgents are disabled.
-- `Airbnb Maids` is the cleaner destination. `Airbnb Management` contains only
-  Tristan and Jane.
-- The group-subject rename did apply. WAHA/GOWS returned an empty successful
-  response that Min incorrectly recorded as a terminal HTTP 409. Do not replay
-  that rename with another idempotency key.
+- `Airbnb Team` is the cleaning team destination. `Airbnb Management` contains
+  only Tristan and Jane.
+- Jane renamed the existing cleaning team chat to `Airbnb Team` on 27 August;
+  its stable chat id did not change and no automation write was needed.
+- The earlier automated group-subject rename did apply. WAHA/GOWS returned an
+  empty successful response that Min incorrectly recorded as a terminal HTTP
+  409. Do not replay that rename with another idempotency key.
 
 ## Candidate hardening release
 
@@ -128,7 +130,7 @@ The reviewed hardening cutover completed at 2026-08-24 09:10 SAST.
 
 ### Stock WhatsApp timeout repair
 
-The first 14:25 monitoring pass found that the Maids chat read took about 19
+The first 14:25 monitoring pass found that the Airbnb Team chat read took about 19
 seconds while the stock worker allowed only eight seconds. Email ingestion,
 forecasting, and scheduling still succeeded, but WhatsApp stock evidence was
 being skipped with a sanitized timeout receipt.

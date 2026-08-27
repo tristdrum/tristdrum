@@ -13,7 +13,7 @@ const WORK_DIR = resolve(process.env.AIRBNB_CLEANER_HOME ?? "/data");
 const LEDGER_PATH = resolve(WORK_DIR, "sent-ledger.jsonl");
 const WHATSAPP_ACCOUNT_ID = process.env.AIRBNB_WHATSAPP_ACCOUNT_ID ?? "";
 const WHATSAPP_CHAT_ID = process.env.AIRBNB_WHATSAPP_CHAT_ID ?? "";
-const WHATSAPP_CHAT_NAME = process.env.AIRBNB_WHATSAPP_CHAT_NAME ?? "Airbnb Maids";
+const WHATSAPP_CHAT_NAME = process.env.AIRBNB_WHATSAPP_CHAT_NAME ?? "Airbnb Team";
 const MESSAGE_FOOTER = process.env.AIRBNB_CLEANER_FOOTER ?? "Sent by Airbnb cleaner automation.";
 const LEGACY_MESSAGE_FOOTER = "Sent by Codex AI automation.";
 const WEATHER = {
@@ -1119,7 +1119,7 @@ export async function applyDelivery({
   if (mode === "live") {
     if (duplicate) {
       if (!duplicateChatVerified) {
-        throw new Error("Ledger duplicate could not be confirmed in the cleaners chat.");
+        throw new Error("Ledger duplicate could not be confirmed in the cleaning team chat.");
       }
       result.status = "duplicate_skipped";
       result.duplicateSource = duplicate.source ?? "ledger";
@@ -1285,7 +1285,7 @@ export async function sendFinalFailureAlert(
   const alertChatId = String(env.AIRBNB_WHATSAPP_ALERT_CHAT_ID ?? "").trim();
   const cleanersChatId = whatsappConfig(env).chatId;
   if (!alertChatId) throw new Error("Private failure-alert chat is not configured.");
-  if (alertChatId === cleanersChatId) throw new Error("Failure alerts may not target the cleaners chat.");
+  if (alertChatId === cleanersChatId) throw new Error("Failure alerts may not target the cleaning team chat.");
   const incidentReason = reason === "database_sync" || reason === "blocked" ? reason : "delivery";
   const incidentId = `${incidentReason}:${targetDate}`;
   const text = reason === "database_sync"

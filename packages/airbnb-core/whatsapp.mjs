@@ -147,7 +147,7 @@ export async function sendVerifiedManagementMessage({
   const chatId = required("AIRBNB_MANAGEMENT_WHATSAPP_CHAT_ID", env);
   const cleanersChatId = String(env.AIRBNB_WHATSAPP_CHAT_ID ?? "").trim();
   if (cleanersChatId && cleanersChatId === chatId) {
-    throw new Error("Airbnb Management alerts may not target the cleaners chat.");
+    throw new Error("Airbnb Management alerts may not target the cleaning team chat.");
   }
   return sendVerifiedWhatsAppGroupMessage({
     chatId,
