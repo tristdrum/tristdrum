@@ -156,7 +156,15 @@ export async function collectAirbnbMessages({
       const describedMessages = messages
         .map((message) => ({ message, evidence: describeEvidence(message) }))
       const acceptedChanges = describedMessages
-        .filter(({ evidence }) => evidence?.guestCountChangeAccepted && evidence.providerThreadId);
+        .filter(({ evidence }) => (
+          evidence?.guestCountChangeAccepted
+          && evidence.providerThreadId
+          && describedMessages.some(({ evidence: confirmation }) => (
+            confirmation?.evidenceKind === "confirmed"
+            && confirmation.confirmationCode === evidence.confirmationCode
+            && confirmation.touchesHorizon === true
+          ))
+        ));
       if (acceptedChanges.length > 4) {
         throw Object.assign(new Error("Accepted reservation-change context exceeded the safe notice bound."), {
           code: "ACCEPTED_CHANGE_NOTICE_LIMIT",

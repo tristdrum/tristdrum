@@ -1470,6 +1470,11 @@ export async function collectReservations(
     describeEvidence: ({ envelope, body }) => {
       const evidenceKind = reservationEvidenceKind(envelope.subject, body);
       const parsed = body ? parseReservation(envelope, body, targetDate) : null;
+      const touchesHorizon = Boolean(
+        parsed?.checkIn
+        && parsed.checkOut
+        && horizonDates.some((date) => reservationTouchesTarget(parsed, date))
+      );
       return {
         evidenceKind,
         evidenceSubtype: reservationEvidenceSubtype(envelope.subject, body, evidenceKind),
@@ -1477,6 +1482,7 @@ export async function collectReservations(
         providerThreadId: parsed?.providerThreadId ?? "",
         guestCountChangeAccepted: parsed?.guestCountChangeAccepted === true,
         listingName: parsed?.listingName ?? "",
+        touchesHorizon,
       };
     },
   });

@@ -226,6 +226,7 @@ test("an accepted change recovers its bounded matching Airbnb thread context bey
       providerThreadId: parsed?.providerThreadId ?? "",
       guestCountChangeAccepted: parsed?.guestCountChangeAccepted === true,
       listingName: parsed?.listingName ?? "",
+      touchesHorizon: evidenceKind === "confirmed",
     };
   };
   const result = await collectAirbnbMessages({
@@ -291,6 +292,7 @@ test("accepted-change context fails closed before a twenty-fifth MIME read", asy
       providerThreadId: parsed?.providerThreadId ?? "",
       guestCountChangeAccepted: parsed?.guestCountChangeAccepted === true,
       listingName: parsed?.listingName ?? "",
+      touchesHorizon: evidenceKind === "confirmed",
     };
   };
 
