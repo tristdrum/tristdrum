@@ -52,7 +52,7 @@ test("adaptive support uses GPT-5.6 Sol at xhigh reasoning with a minimal decisi
       sendReply: true,
       alertManagement: true,
       summary: "The guest needs immediate practical help with an unplanned situation.",
-      draft: "Thanks for letting us know. Please leave it where it is for now; we’ve alerted the hosts so they can check it.",
+      draft: "Thanks for letting us know. Please leave it where it is for now while we arrange for the hosts to check it.",
     }, (value) => { request = value; }),
   });
 
@@ -204,7 +204,7 @@ test("a problem-report emoji does not force a cheerful emoji into the reply", as
       sendReply: true,
       alertManagement: true,
       summary: "The guest reports an urgent maintenance problem.",
-      draft: "I’m sorry about this, Nandi. Please avoid the wet area for now; we’ve alerted the hosts so it can be handled quickly.",
+      draft: "I’m sorry about this, Nandi. Please avoid the wet area for now while we arrange for it to be handled quickly.",
     }, () => { callCount += 1; }),
   });
   assert.equal(callCount, 1);
@@ -227,7 +227,7 @@ test("the agent may reply and alert Management at the same time", async () => {
       sendReply: true,
       alertManagement: true,
       summary: "The guest is outside and needs immediate access help.",
-      draft: "Hi, we’ve seen your message and alerted the hosts so we can help you get in quickly.",
+      draft: "Hi, we’ve seen your message. Please wait there while we arrange help for you.",
     }),
   });
   assert.equal(result.autoReply, true);
@@ -253,13 +253,48 @@ test("a guest outside before the booked night gets a grounded reply and host ale
       sendReply: true,
       alertManagement: true,
       summary: "The guest arrived before the reservation starts and needs immediate host help.",
-      draft: "Hi Anele, we’ve seen your message. Your booking starts tomorrow, with check-in from 15:00. We’ve alerted the hosts so they can help you quickly.",
+      draft: "Hi Anele, we’ve seen your message. Your booking starts tomorrow, with check-in from 15:00. Please wait there while we arrange help for you.",
     }, (request) => { input = JSON.parse(request.input[1].content[0].text); }),
   });
   assert.equal(input.stayPhase, "before_stay");
   assert.equal(result.autoReply, true);
   assert.equal(result.alertManagement, true);
   assert.match(result.draft, /starts tomorrow/i);
+});
+
+test("a host-action reply cannot claim Management delivery before verification", async () => {
+  const requests = [];
+  const result = await decideGuestResponse({
+    guestMessage: "I am here to collect the shoes.",
+    guestName: "Khanyisa",
+    listingName: "Bougainvillea Courtyard Studio",
+    facts: { checkInTime: "15:00", checkOutTime: "10:00" },
+    stayLabel: "AUG 27 – 28",
+    latestEventAt: "2026-08-28T12:09:45.000Z",
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecisionSequence([
+      {
+        replyNeeded: true,
+        sendReply: true,
+        alertManagement: true,
+        summary: "The guest is waiting for a shoe handover.",
+        draft: "Thanks for letting us know — I’ve alerted the team that you’re here.",
+      },
+      {
+        replyNeeded: true,
+        sendReply: true,
+        alertManagement: true,
+        summary: "The guest is waiting for a shoe handover.",
+        draft: "Thanks for letting us know. Please wait there while we arrange the handover.",
+      },
+    ], (request) => requests.push(JSON.parse(request.input[1].content[0].text))),
+  });
+
+  assert.ok(requests[1].revisionFeedback.some((issue) => /not verified yet/i.test(issue)));
+  assert.equal(result.autoReply, true);
+  assert.equal(result.alertManagement, true);
+  assert.equal(result.qualityRevisionCount, 1);
+  assert.doesNotMatch(result.draft, /alerted|notified|contacted|informed/i);
 });
 
 test("a conversational early check-in decision still creates the cleaner operation", async () => {

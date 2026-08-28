@@ -33,7 +33,7 @@ const ADJUDICATED_DECISIONS = Object.freeze({
   },
   "unanswered-request": {
     alertManagement: true,
-    draft: "I’m sorry you’ve been waiting. We’ve alerted the hosts so they can respond properly as soon as possible.",
+    draft: "I’m sorry you’ve been waiting. Please bear with us while we arrange a proper response from the hosts.",
   },
   "booking-question": {
     alertManagement: true,
@@ -41,7 +41,7 @@ const ADJUDICATED_DECISIONS = Object.freeze({
   },
   complaint: {
     alertManagement: true,
-    draft: "I’m sorry the studio wasn’t clean. We’ve alerted the hosts so this can be handled quickly.",
+    draft: "I’m sorry the studio wasn’t clean. We’re arranging help so this can be handled quickly.",
   },
   "exception-request": {
     alertManagement: false,
