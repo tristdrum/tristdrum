@@ -23,4 +23,5 @@ test("the five-minute support watcher keeps one Fly machine warm", () => {
 
 test("the production Gmail import allows bounded transient latency", () => {
   assert.match(flyConfig, /AIRBNB_SUPPORT_GMAIL_IMPORT_DEADLINE_MS\s*=\s*"45000"/);
+  assert.match(flyConfig, /AIRBNB_SUPPORT_GMAIL_OVERLAP_MINUTES\s*=\s*"360"/);
 });
