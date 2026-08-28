@@ -36,6 +36,8 @@ import {
 } from "./repository.mjs";
 import { assertSupportModeAllowed } from "./runtime.mjs";
 
+const DEFAULT_CURSOR_OVERLAP_MINUTES = 6 * 60;
+
 function localDate(value) {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Africa/Johannesburg",
@@ -45,10 +47,19 @@ function localDate(value) {
   }).format(value);
 }
 
-function earlierOfRecentCursor(now, cursor, initialLookbackDays) {
+export function earlierOfRecentCursor(
+  now,
+  cursor,
+  initialLookbackDays,
+  overlapMinutes = DEFAULT_CURSOR_OVERLAP_MINUTES,
+) {
   const initial = new Date(now.getTime() - initialLookbackDays * 86_400_000);
   if (!cursor) return initial;
-  const overlap = new Date(cursor.getTime() - 24 * 60 * 60 * 1000);
+  const parsedOverlap = Number.parseInt(String(overlapMinutes), 10);
+  const boundedOverlap = Number.isFinite(parsedOverlap) && parsedOverlap > 0
+    ? Math.max(60, Math.min(parsedOverlap, 24 * 60))
+    : DEFAULT_CURSOR_OVERLAP_MINUTES;
+  const overlap = new Date(cursor.getTime() - boundedOverlap * 60 * 1000);
   return overlap > initial ? overlap : initial;
 }
 
@@ -154,10 +165,13 @@ export async function runSupport({
         ? latestConversationEvidenceAt(ownDatabase.sql, householdId, "jane")
         : Promise.resolve(null),
     ]);
+    const overlapMinutes = env.AIRBNB_SUPPORT_GMAIL_OVERLAP_MINUTES
+      ?? DEFAULT_CURSOR_OVERLAP_MINUTES;
     const since = earlierOfRecentCursor(
       startedAt,
       cursor,
       Number.parseInt(env.AIRBNB_SUPPORT_INITIAL_LOOKBACK_DAYS ?? "90", 10),
+      overlapMinutes,
     );
     const canonicalCollection = collectMessages({
       since,
@@ -170,6 +184,7 @@ export async function runSupport({
         startedAt,
         janeCursor,
         Number.parseInt(env.AIRBNB_SUPPORT_INITIAL_LOOKBACK_DAYS ?? "90", 10),
+        overlapMinutes,
       )
       : null;
     const supplementalCollection = janeConfigured

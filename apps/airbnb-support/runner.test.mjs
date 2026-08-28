@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   applyReplyRouteGuard,
   canReuseStoredDecision,
+  earlierOfRecentCursor,
   summarizeDeliveryOutcomes,
 } from "./runner.mjs";
 
@@ -12,6 +13,23 @@ const liveDecision = {
   decisionVersion: 2,
   shadowMode: false,
 };
+
+test("support cursor overlap bounds repeated Gmail work without weakening first import", () => {
+  const now = new Date("2026-08-28T18:25:00.000Z");
+  const cursor = new Date("2026-08-28T17:57:13.000Z");
+  assert.equal(
+    earlierOfRecentCursor(now, cursor, 90, 360).toISOString(),
+    "2026-08-28T11:57:13.000Z",
+  );
+  assert.equal(
+    earlierOfRecentCursor(now, cursor, 90, 30).toISOString(),
+    "2026-08-28T16:57:13.000Z",
+  );
+  assert.equal(
+    earlierOfRecentCursor(now, null, 90, 360).toISOString(),
+    new Date(now.getTime() - 90 * 86_400_000).toISOString(),
+  );
+});
 
 test("only successful adaptive decisions from the same runtime mode are cached", () => {
   assert.equal(canReuseStoredDecision(liveDecision, "live"), true);
