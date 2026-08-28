@@ -16,11 +16,13 @@ import {
   mergeReservations,
   parseReservation,
   parseISODate,
+  planSubstantiveHash,
   planDelivery,
   runReport,
   sendFinalFailureAlert,
   subjectMayTouchTarget,
   whatsappSend,
+  weatherUpdateIsMaterial,
   xhosaGuestCountLabel,
   xhosaInfantCountLabel,
 } from "./report.mjs";
@@ -31,12 +33,21 @@ const dryWeather = {
   rainPossible: false,
   rainSummary: "none currently showing",
   maxProbability: 0,
+  maxPrecipitation: 0,
 };
 const rainyWeather = {
   available: true,
   rainPossible: true,
   rainSummary: "10 a.m.-noon",
   maxProbability: 80,
+  maxPrecipitation: 1.2,
+};
+const lowRainWeather = {
+  available: true,
+  rainPossible: true,
+  rainSummary: "noon-midnight",
+  maxProbability: 17,
+  maxPrecipitation: 0.2,
 };
 
 function reservation({
@@ -459,7 +470,7 @@ test("duplicate midday content skips the live send and ledger append", async () 
   assert.equal(appended.length, 0);
 });
 
-test("booking and rain changes each produce exactly one live update", async () => {
+test("booking and material rain changes each produce exactly one live update", async () => {
   const checkoutReports = classifyUnits(checkoutReservations(), targetDate);
   const turnoverReports = classifyUnits(turnoverReservations(), targetDate);
   const original = planDelivery({
@@ -468,7 +479,12 @@ test("booking and rain changes each produce exactly one live update", async () =
     weather: dryWeather,
     ledgerRecords: [],
   });
-  const priorLedger = [{ targetDate: original.targetDateKey, messageHash: original.hash }];
+  const priorLedger = [{
+    targetDate: original.targetDateKey,
+    messageHash: original.hash,
+    messageText: original.message,
+    weather: dryWeather,
+  }];
 
   for (const delivery of [
     planDelivery({ targetDate, unitReports: turnoverReports, weather: dryWeather, ledgerRecords: priorLedger }),
@@ -495,6 +511,107 @@ test("booking and rain changes each produce exactly one live update", async () =
     assert.equal(calls.filter((call) => call.dryRun === false).length, 1);
     assert.equal(calls.filter((call) => call.dryRun === true).length, 1);
     assert.equal(appended.length, 1);
+  }
+});
+
+test("slight low-rain drift reuses the delivered plan without another live message", async () => {
+  const unitReports = classifyUnits(turnoverReservations(), targetDate);
+  const first = planDelivery({ targetDate, unitReports, weather: lowRainWeather, ledgerRecords: [] });
+  const driftedWeather = {
+    ...lowRainWeather,
+    rainSummary: "3 p.m.-midnight",
+    maxProbability: 11,
+  };
+  const drifted = planDelivery({
+    targetDate,
+    unitReports,
+    weather: driftedWeather,
+    ledgerRecords: [{
+      targetDate: first.targetDateKey,
+      messageHash: first.hash,
+      messageText: first.message,
+      weather: lowRainWeather,
+      contentOccurrence: 1,
+      sentAt: "2026-07-27T11:30:00Z",
+      source: "supabase",
+      isUpdate: false,
+    }],
+  });
+
+  assert.equal(planSubstantiveHash(first.message), planSubstantiveHash(
+    buildMessage({ targetDate, unitReports, weather: driftedWeather, isUpdate: true }),
+  ));
+  assert.equal(drifted.hash, first.hash);
+  assert.equal(drifted.message, first.message);
+  assert.equal(drifted.duplicate?.source, "non_substantive_weather");
+  assert.equal(drifted.suppressedUpdate?.reason, "non_substantive_weather");
+
+  const calls = [];
+  const appended = [];
+  const result = await applyDelivery({
+    mode: "live",
+    result: resultFor(drifted),
+    message: drifted.message,
+    idempotencyKey: "low-rain-drift",
+    duplicate: drifted.duplicate,
+    whatsappSendFn: fakeSender(calls),
+    appendLedgerFn: (record) => appended.push(record),
+  });
+  assert.equal(result.status, "duplicate_skipped");
+  assert.equal(result.duplicateSource, "non_substantive_weather");
+  assert.equal(calls.filter((call) => call.dryRun === false).length, 0);
+  assert.equal(appended.length, 0);
+});
+
+test("weather-only updates require operationally material rain", () => {
+  assert.equal(weatherUpdateIsMaterial(lowRainWeather, {
+    ...lowRainWeather,
+    rainSummary: "3 p.m.-midnight",
+    maxProbability: 11,
+  }), false);
+  assert.equal(weatherUpdateIsMaterial(dryWeather, rainyWeather), true);
+  assert.equal(weatherUpdateIsMaterial(rainyWeather, {
+    ...rainyWeather,
+    rainSummary: "3 p.m.-midnight",
+  }), true);
+  assert.equal(weatherUpdateIsMaterial(rainyWeather, {
+    available: false,
+    rainPossible: null,
+  }), false);
+});
+
+test("booking and timing-note changes remain substantive regardless of low rain", () => {
+  const checkoutReports = classifyUnits(checkoutReservations(), targetDate);
+  const first = planDelivery({ targetDate, unitReports: checkoutReports, weather: lowRainWeather, ledgerRecords: [] });
+  const ledgerRecords = [{
+    targetDate: first.targetDateKey,
+    messageHash: first.hash,
+    messageText: first.message,
+    weather: lowRainWeather,
+    sentAt: "2026-07-27T11:30:00Z",
+    source: "supabase",
+  }];
+  const bookingChange = planDelivery({
+    targetDate,
+    unitReports: classifyUnits(turnoverReservations(), targetDate),
+    weather: { ...lowRainWeather, maxProbability: 11 },
+    ledgerRecords,
+  });
+  const timingChange = planDelivery({
+    targetDate,
+    unitReports: checkoutReports,
+    weather: { ...lowRainWeather, maxProbability: 11 },
+    operationalNotes: [{
+      unitId: 1,
+      english: "Early check-in requested for 13:00.",
+      xhosa: "Kucelwe ukungena kwangethuba ngo-13:00.",
+    }],
+    ledgerRecords,
+  });
+  for (const delivery of [bookingChange, timingChange]) {
+    assert.equal(delivery.isUpdate, true);
+    assert.equal(delivery.duplicate, undefined);
+    assert.match(delivery.message, /^Updated Airbnb plan/);
   }
 });
 
@@ -681,6 +798,9 @@ test("cleaners-chat history participates in duplicate detection", () => {
   const delivery = planDelivery({ targetDate, unitReports, weather: dryWeather, ledgerRecords: records });
 
   assert.equal(records.length, 1);
+  assert.equal(records[0].messageText, providerNormalizedMessage);
+  assert.deepEqual(records[0].weather, dryWeather);
+  assert.equal(records[0].isUpdate, false);
   assert.equal(delivery.duplicate?.source, "whatsapp_chat");
   assert.equal(delivery.isUpdate, false);
   assert.equal(chatContainsMessage(chatMessages, message), true);

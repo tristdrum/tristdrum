@@ -27,6 +27,33 @@ test("cleaner ledger rows become report-compatible Supabase records", () => {
   }
 });
 
+test("cleaner ledger keeps delivered content for substantive update comparison", () => {
+  const weather = {
+    available: true,
+    rainPossible: true,
+    rainSummary: "noon-midnight",
+    maxProbability: 17,
+    maxPrecipitation: 0.2,
+  };
+  assert.deepEqual(cleanerLedgerRecords([{
+    targetDate: "2026-08-28",
+    messageHash: "delivered-plan",
+    messageText: "Updated Airbnb plan for Friday",
+    isUpdate: true,
+    weather,
+    sentAt: "2026-08-27T11:53:29.000Z",
+  }]), [{
+    targetDate: "2026-08-28",
+    messageHash: "delivered-plan",
+    messageText: "Updated Airbnb plan for Friday",
+    isUpdate: true,
+    weather,
+    contentOccurrence: 1,
+    sentAt: "2026-08-27T11:53:29.000Z",
+    source: "supabase",
+  }]);
+});
+
 test("cleaner failure text removes credential-shaped values", () => {
   const redacted = redactSensitiveText(
     "Bearer secret-token api_key=private-value access_token=refresh-value cookie=session-value serialized={\"apiKey\":\"json-secret\"} postgresql://worker:password@example.test/db",

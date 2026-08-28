@@ -25,6 +25,10 @@ const WEATHER_FORECAST_URL = process.env.AIRBNB_WEATHER_URL ?? "https://api.open
 const WEATHER_MAX_ATTEMPTS = Math.max(1, Number.parseInt(process.env.AIRBNB_WEATHER_MAX_ATTEMPTS ?? "3", 10) || 3);
 const WEATHER_RETRY_DELAY_MS = Math.max(0, Number.parseInt(process.env.AIRBNB_WEATHER_RETRY_DELAY_MS ?? "1500", 10) || 1500);
 const WEATHER_REQUEST_TIMEOUT_MS = Math.max(1000, Number.parseInt(process.env.AIRBNB_WEATHER_TIMEOUT_MS ?? "10000", 10) || 10000);
+const MATERIAL_RAIN_PROBABILITY = 30;
+const MATERIAL_RAIN_PRECIPITATION_MM = 0.5;
+const MATERIAL_RAIN_PROBABILITY_CHANGE = 20;
+const MATERIAL_RAIN_PRECIPITATION_CHANGE_MM = 1;
 const WHATSAPP_MAX_ATTEMPTS = Math.max(1, Number.parseInt(process.env.AIRBNB_WHATSAPP_MAX_ATTEMPTS ?? "3", 10) || 3);
 const WHATSAPP_RETRY_DELAY_MS = Math.max(0, Number.parseInt(process.env.AIRBNB_WHATSAPP_RETRY_DELAY_MS ?? "1500", 10) || 1500);
 const WHATSAPP_REQUEST_TIMEOUT_MS = Math.max(1000, Number.parseInt(process.env.AIRBNB_WHATSAPP_TIMEOUT_MS ?? "15000", 10) || 15000);
@@ -1029,6 +1033,55 @@ export function planDelivery({ targetDate, unitReports, weather, operationalNote
   )
     ? latestForDate
     : undefined;
+  const latestMessageText = String(latestForDate?.messageText ?? "").trim();
+  const previousWeather = latestForDate?.weather ?? weatherFromPlanMessage(latestMessageText);
+  const nonSubstantiveWeatherUpdate = Boolean(
+    latestForDate
+    && !sameContentDuplicate
+    && latestMessageText
+    && planSubstantiveHash(baseMessage) === planSubstantiveHash(latestMessageText)
+    && !weatherUpdateIsMaterial(previousWeather, weather)
+  );
+  if (nonSubstantiveWeatherUpdate) {
+    const previousHash = latestForDate.messageHash || messageHash(latestMessageText);
+    const previousLegacyHash = messageHash(withLegacyFooter(latestMessageText));
+    const previousNormalizedHashes = new Set([
+      messageHash(normaliseChatText(latestMessageText)),
+      messageHash(normaliseChatText(withLegacyFooter(latestMessageText))),
+    ]);
+    const matchingRecords = ledgerRecords.filter((record) =>
+      record.targetDate === targetDateKey && (
+        record.messageHash === previousHash ||
+        previousNormalizedHashes.has(record.normalizedMessageHash)
+      )
+    );
+    const chatOccurrenceCount = matchingRecords.filter((record) => record.source === "whatsapp_chat").length;
+    const ledgerOccurrenceCount = matchingRecords
+      .filter((record) => record.source !== "whatsapp_chat")
+      .reduce((highest, record) => Math.max(highest, Number(record.contentOccurrence ?? 1)), 0);
+    const contentOccurrence = Math.max(
+      chatOccurrenceCount,
+      ledgerOccurrenceCount,
+      Number(latestForDate.contentOccurrence ?? 1),
+    );
+    return {
+      targetDateKey,
+      baseMessage,
+      baseHash,
+      legacyBaseHash,
+      message: latestMessageText,
+      hash: previousHash,
+      legacyHash: previousLegacyHash,
+      contentOccurrence,
+      isUpdate: latestForDate.isUpdate ?? /^Updated Airbnb plan/i.test(latestMessageText),
+      duplicate: { ...latestForDate, source: "non_substantive_weather" },
+      suppressedUpdate: {
+        reason: "non_substantive_weather",
+        previousWeather,
+        currentWeather: weather,
+      },
+    };
+  }
   const previousForDate = Boolean(latestForDate);
   const isUpdate = Boolean(previousForDate && !sameContentDuplicate);
   const message = isUpdate
@@ -1364,6 +1417,65 @@ function normaliseChatText(text) {
   return String(text ?? "").replace(/\s+/g, " ").trim();
 }
 
+export function planSubstantiveHash(message) {
+  const withoutWeather = String(message ?? "")
+    .replace(/^Updated Airbnb plan for/i, "Airbnb plan for")
+    .replace(/\*?Rain:\*?[\s\S]*?(?=\*?English:\*?)/i, "")
+    .replace(/\*?Imvula:\*?[\s\S]*?(?=Sent by )/i, "");
+  return messageHash(normaliseChatText(withoutWeather));
+}
+
+export function weatherFromPlanMessage(message) {
+  const text = normaliseChatText(message);
+  if (!text) return null;
+  if (/\*?Rain:\*? forecast temporarily unavailable\./i.test(text)) {
+    return { available: false, rainPossible: null, rainSummary: "forecast temporarily unavailable" };
+  }
+  if (/\*?Rain:\*? none currently showing\./i.test(text)) {
+    return {
+      available: true,
+      rainPossible: false,
+      rainSummary: "none currently showing",
+      maxProbability: 0,
+      maxPrecipitation: 0,
+    };
+  }
+  const rainy = text.match(/\*?Rain:\*?\s*(.+?);\s*up to\s*(\d+)%\s*chance\./i);
+  if (!rainy) return null;
+  return {
+    available: true,
+    rainPossible: true,
+    rainSummary: rainy[1].trim(),
+    maxProbability: Number(rainy[2]),
+    maxPrecipitation: null,
+  };
+}
+
+function materialRain(weather) {
+  if (!weather?.available || weather.rainPossible !== true) return false;
+  const probability = Number(weather.maxProbability ?? 0);
+  const precipitation = Number(weather.maxPrecipitation ?? 0);
+  return probability >= MATERIAL_RAIN_PROBABILITY || precipitation >= MATERIAL_RAIN_PRECIPITATION_MM;
+}
+
+export function weatherUpdateIsMaterial(previousWeather, currentWeather) {
+  if (!currentWeather?.available) return false;
+  const previousIsMaterial = materialRain(previousWeather);
+  const currentIsMaterial = materialRain(currentWeather);
+  if (!previousWeather?.available) return currentIsMaterial;
+  if (previousIsMaterial !== currentIsMaterial) return true;
+  if (!currentIsMaterial) return false;
+  if (String(previousWeather.rainSummary ?? "") !== String(currentWeather.rainSummary ?? "")) return true;
+  const probabilityChange = Math.abs(
+    Number(currentWeather.maxProbability ?? 0) - Number(previousWeather.maxProbability ?? 0),
+  );
+  const precipitationChange = Math.abs(
+    Number(currentWeather.maxPrecipitation ?? 0) - Number(previousWeather.maxPrecipitation ?? 0),
+  );
+  return probabilityChange >= MATERIAL_RAIN_PROBABILITY_CHANGE
+    || precipitationChange >= MATERIAL_RAIN_PRECIPITATION_CHANGE_MM;
+}
+
 export function chatLedgerRecords(messages, targetDate) {
   const dateLabel = displayDate(targetDate);
   return messages.flatMap((message) => {
@@ -1378,6 +1490,9 @@ export function chatLedgerRecords(messages, targetDate) {
       targetDate: formatISODate(targetDate),
       messageHash: messageHash(text),
       normalizedMessageHash: messageHash(normaliseChatText(text)),
+      messageText: text,
+      isUpdate: plain.includes(`Updated Airbnb plan for ${dateLabel}`),
+      weather: weatherFromPlanMessage(text),
       source: "whatsapp_chat",
       sentAt: message.timestamp ?? null,
     }];
@@ -1566,6 +1681,7 @@ export async function runReport({
     contentOccurrence,
     isUpdate,
     duplicate,
+    suppressedUpdate,
   } = delivery;
   const confidence = confidenceCheck({
     reservations: collected.reservations,
@@ -1623,6 +1739,7 @@ export async function runReport({
     legacyBaseMessageHash: legacyBaseHash,
     contentOccurrence,
     isUpdate,
+    suppressedUpdate: suppressedUpdate ?? null,
     idempotencyKey,
     message,
     chatRead: mode === "preview" ? null : { ok: true, messageCount: chatMessages.length },

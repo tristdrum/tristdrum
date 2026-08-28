@@ -43,13 +43,19 @@ function databaseDateKey(value) {
 }
 
 export function cleanerLedgerRecords(rows) {
-  return rows.map((row) => ({
-    targetDate: databaseDateKey(row.targetDate),
-    messageHash: row.messageHash,
-    contentOccurrence: Number(row.contentOccurrence ?? 1),
-    sentAt: row.sentAt ?? row.completedAt,
-    source: "supabase",
-  }));
+  return rows.map((row) => {
+    const record = {
+      targetDate: databaseDateKey(row.targetDate),
+      messageHash: row.messageHash,
+      contentOccurrence: Number(row.contentOccurrence ?? 1),
+      sentAt: row.sentAt ?? row.completedAt,
+      source: "supabase",
+    };
+    if (String(row.messageText ?? "").trim()) record.messageText = row.messageText;
+    if (typeof row.isUpdate === "boolean") record.isUpdate = row.isUpdate;
+    if (row.weather && typeof row.weather === "object") record.weather = row.weather;
+    return record;
+  });
 }
 
 export async function loadCleanerLedgerRecords({
@@ -67,12 +73,18 @@ export async function loadCleanerLedgerRecords({
   const sql = databaseClient(url, postgresFactory, "airbnb-cleaner-ledger");
   try {
     const rows = await sql`
-      select target_date, message_hash, content_occurrence, sent_at, completed_at
-      from airbnb.cleaner_plans
-      where household_id = ${householdId}
-        and target_date = ${targetDate}
-        and delivery_status in ('sent', 'duplicate_skipped')
-      order by coalesce(sent_at, completed_at) asc, created_at asc
+      select plan.target_date, plan.message_hash, plan.content_occurrence,
+             plan.message_text, plan.is_update, plan.sent_at, plan.completed_at,
+             run.receipt->'weather' as weather
+      from airbnb.cleaner_plans plan
+      left join airbnb.job_runs run
+        on run.household_id = plan.household_id
+       and run.service = 'cleaner'
+       and run.run_id = plan.run_id
+      where plan.household_id = ${householdId}
+        and plan.target_date = ${targetDate}
+        and plan.delivery_status in ('sent', 'duplicate_skipped')
+      order by coalesce(plan.sent_at, plan.completed_at) asc, plan.created_at asc
     `;
     return { status: "loaded", records: cleanerLedgerRecords(rows) };
   } finally {
