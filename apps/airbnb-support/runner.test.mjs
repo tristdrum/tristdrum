@@ -4,8 +4,10 @@ import test from "node:test";
 import {
   applyReplyRouteGuard,
   canReuseStoredDecision,
+  collectWithTransientMailboxRetry,
   earlierOfRecentCursor,
   summarizeDeliveryOutcomes,
+  transientMailboxError,
 } from "./runner.mjs";
 
 const liveDecision = {
@@ -29,6 +31,37 @@ test("support cursor overlap bounds repeated Gmail work without weakening first 
     earlierOfRecentCursor(now, null, 90, 360).toISOString(),
     new Date(now.getTime() - 90 * 86_400_000).toISOString(),
   );
+});
+
+test("transient mailbox failures get one fresh-client retry", async () => {
+  let attempts = 0;
+  let retries = 0;
+  const result = await collectWithTransientMailboxRetry(async () => {
+    attempts += 1;
+    if (attempts === 1) {
+      throw Object.assign(new Error("Airbnb support Gmail import exceeded 45000ms."), {
+        code: "IMAP_IMPORT_DEADLINE",
+      });
+    }
+    return { messages: [], envelopesFound: 0 };
+  }, { maxAttempts: 2, onRetry: () => { retries += 1; } });
+
+  assert.deepEqual(result, { messages: [], envelopesFound: 0 });
+  assert.equal(attempts, 2);
+  assert.equal(retries, 1);
+  assert.equal(transientMailboxError(Object.assign(new Error("Socket timeout"), { code: "ETIMEOUT" })), true);
+});
+
+test("non-transient mailbox failures are never retried", async () => {
+  let attempts = 0;
+  await assert.rejects(
+    collectWithTransientMailboxRetry(async () => {
+      attempts += 1;
+      throw Object.assign(new Error("Authentication failed"), { code: "EAUTH" });
+    }, { maxAttempts: 2 }),
+    { code: "EAUTH" },
+  );
+  assert.equal(attempts, 1);
 });
 
 test("only successful adaptive decisions from the same runtime mode are cached", () => {
