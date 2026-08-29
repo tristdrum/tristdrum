@@ -297,6 +297,50 @@ test("a host-action reply cannot claim Management delivery before verification",
   assert.doesNotMatch(result.draft, /alerted|notified|contacted|informed/i);
 });
 
+test("checkout details include every verified departure task", async () => {
+  const requests = [];
+  const result = await decideGuestResponse({
+    guestMessage: "Good morning. Please remind me of the check-out details.",
+    guestName: "Alice",
+    listingName: "Bougainvillea Courtyard Studio",
+    facts: {
+      checkInTime: "15:00",
+      checkOutTime: "10:00",
+      checkoutTasks: [
+        "Throw away any rubbish lying around.",
+        "Close and lock the sliding door.",
+        "Once out the gate, place the keys back into the lockbox.",
+      ],
+    },
+    stayLabel: "AUG 28 – 29",
+    latestEventAt: "2026-08-29T05:13:39.000Z",
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecisionSequence([
+      {
+        replyNeeded: true,
+        sendReply: true,
+        alertManagement: false,
+        summary: "The guest asks for checkout details.",
+        draft: "Good morning! Check-out is by 10:00. Please throw away any rubbish and turn everything off.",
+      },
+      {
+        replyNeeded: true,
+        sendReply: true,
+        alertManagement: false,
+        summary: "The guest asks for checkout details.",
+        draft: "Good morning! Check-out is by 10:00. Please throw away any rubbish, close and lock the sliding door, and place the keys back into the lockbox once you are outside the gate. Thank you!",
+      },
+    ], (request) => requests.push(JSON.parse(request.input[1].content[0].text))),
+  });
+
+  assert.ok(requests[1].revisionFeedback.some((issue) => /every verified checkout task/i.test(issue)));
+  assert.equal(result.autoReply, true);
+  assert.equal(result.qualityRevisionCount, 1);
+  assert.deepEqual(result.qualityIssues, []);
+  assert.match(result.draft, /lock the sliding door/i);
+  assert.match(result.draft, /keys back into the lockbox/i);
+});
+
 test("a conversational early check-in decision still creates the cleaner operation", async () => {
   const result = await decideGuestResponse({
     guestMessage: "Hi Jane! We’re excited for our stay. Would 2pm be possible for check-in?",
