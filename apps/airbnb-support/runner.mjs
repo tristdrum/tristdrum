@@ -37,6 +37,7 @@ import {
 import { assertSupportModeAllowed } from "./runtime.mjs";
 
 const DEFAULT_CURSOR_OVERLAP_MINUTES = 6 * 60;
+const DEFAULT_MAILBOX_ATTEMPTS = 2;
 
 function localDate(value) {
   return new Intl.DateTimeFormat("en-CA", {
@@ -61,6 +62,41 @@ export function earlierOfRecentCursor(
     : DEFAULT_CURSOR_OVERLAP_MINUTES;
   const overlap = new Date(cursor.getTime() - boundedOverlap * 60 * 1000);
   return overlap > initial ? overlap : initial;
+}
+
+export function transientMailboxError(error) {
+  const code = String(error?.code ?? "").trim().toUpperCase();
+  const name = String(error?.name ?? "").trim().toUpperCase();
+  const message = String(error?.message ?? "").trim();
+  return [
+    "IMAP_IMPORT_DEADLINE",
+    "ETIMEOUT",
+    "ETIMEDOUT",
+    "ECONNRESET",
+    "EPIPE",
+    "23",
+  ].includes(code)
+    || ["TIMEOUTERROR", "NOCONNECTION"].includes(name)
+    || /\b(?:socket timeout|connection not available|network timeout)\b/i.test(message);
+}
+
+export async function collectWithTransientMailboxRetry(operation, {
+  maxAttempts = DEFAULT_MAILBOX_ATTEMPTS,
+  onRetry = () => {},
+} = {}) {
+  const parsedAttempts = Number.parseInt(String(maxAttempts), 10);
+  const attempts = Number.isFinite(parsedAttempts)
+    ? Math.max(1, Math.min(parsedAttempts, DEFAULT_MAILBOX_ATTEMPTS))
+    : DEFAULT_MAILBOX_ATTEMPTS;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt >= attempts || !transientMailboxError(error)) throw error;
+      onRetry(error, attempt);
+    }
+  }
+  throw new Error("Airbnb support mailbox retry exhausted unexpectedly.");
 }
 
 function optionalInstant(value) {
@@ -167,18 +203,26 @@ export async function runSupport({
     ]);
     const overlapMinutes = env.AIRBNB_SUPPORT_GMAIL_OVERLAP_MINUTES
       ?? DEFAULT_CURSOR_OVERLAP_MINUTES;
+    const mailboxAttempts = env.AIRBNB_SUPPORT_GMAIL_ATTEMPTS
+      ?? DEFAULT_MAILBOX_ATTEMPTS;
     const since = earlierOfRecentCursor(
       startedAt,
       cursor,
       Number.parseInt(env.AIRBNB_SUPPORT_INITIAL_LOOKBACK_DAYS ?? "90", 10),
       overlapMinutes,
     );
-    const canonicalCollection = collectMessages({
-      since,
-      maxRead: Number.parseInt(env.AIRBNB_SUPPORT_MAX_EMAILS ?? "500", 10),
-      mailboxScope: "tristan",
-      env,
-    });
+    let canonicalMailboxRetryCount = 0;
+    let supplementalMailboxRetryCount = 0;
+    let lifecycleMailboxRetryCount = 0;
+    const canonicalCollection = collectWithTransientMailboxRetry(
+      () => collectMessages({
+        since,
+        maxRead: Number.parseInt(env.AIRBNB_SUPPORT_MAX_EMAILS ?? "500", 10),
+        mailboxScope: "tristan",
+        env,
+      }),
+      { maxAttempts: mailboxAttempts, onRetry: () => { canonicalMailboxRetryCount += 1; } },
+    );
     const janeSince = janeConfigured
       ? earlierOfRecentCursor(
         startedAt,
@@ -188,18 +232,24 @@ export async function runSupport({
       )
       : null;
     const supplementalCollection = janeConfigured
-      ? collectMessages({
-        since: janeSince,
-        maxRead: Number.parseInt(env.AIRBNB_SUPPORT_JANE_MAX_EMAILS ?? env.AIRBNB_SUPPORT_MAX_EMAILS ?? "500", 10),
-        mailboxScope: "jane",
-        env,
-      })
+      ? collectWithTransientMailboxRetry(
+        () => collectMessages({
+          since: janeSince,
+          maxRead: Number.parseInt(env.AIRBNB_SUPPORT_JANE_MAX_EMAILS ?? env.AIRBNB_SUPPORT_MAX_EMAILS ?? "500", 10),
+          mailboxScope: "jane",
+          env,
+        }),
+        { maxAttempts: mailboxAttempts, onRetry: () => { supplementalMailboxRetryCount += 1; } },
+      )
       : Promise.resolve({ messages: [], envelopesFound: 0 });
-    const lifecycleCollection = collectLifecycleMessages({
-      since,
-      maxRead: Number.parseInt(env.AIRBNB_SUPPORT_LIFECYCLE_MAX_EMAILS ?? "100", 10),
-      env,
-    });
+    const lifecycleCollection = collectWithTransientMailboxRetry(
+      () => collectLifecycleMessages({
+        since,
+        maxRead: Number.parseInt(env.AIRBNB_SUPPORT_LIFECYCLE_MAX_EMAILS ?? "100", 10),
+        env,
+      }),
+      { maxAttempts: mailboxAttempts, onRetry: () => { lifecycleMailboxRetryCount += 1; } },
+    );
     const [canonicalResult, supplementalResult, lifecycleResult] = await Promise.allSettled([
       canonicalCollection,
       supplementalCollection,
@@ -421,6 +471,9 @@ export async function runSupport({
         : janeUserConfigured && janePasswordConfigured
           ? { status: "enabled" }
           : { status: "disabled" },
+      canonicalMailboxRetryCount,
+      supplementalMailboxRetryCount,
+      lifecycleMailboxRetryCount,
       handledByHumanCount: ingested.filter((item) => item.latestDirection === "host").length,
       candidateCount: candidates.length,
       draftCount: drafts.length,
