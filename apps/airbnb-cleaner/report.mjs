@@ -29,6 +29,8 @@ const MATERIAL_RAIN_PROBABILITY = 30;
 const MATERIAL_RAIN_PRECIPITATION_MM = 0.5;
 const MATERIAL_RAIN_PROBABILITY_CHANGE = 20;
 const MATERIAL_RAIN_PRECIPITATION_CHANGE_MM = 1;
+const CLEANING_DAY_START_HOUR = 7;
+const CLEANING_DAY_END_HOUR = 18;
 const WHATSAPP_MAX_ATTEMPTS = Math.max(1, Number.parseInt(process.env.AIRBNB_WHATSAPP_MAX_ATTEMPTS ?? "3", 10) || 3);
 const WHATSAPP_RETRY_DELAY_MS = Math.max(0, Number.parseInt(process.env.AIRBNB_WHATSAPP_RETRY_DELAY_MS ?? "1500", 10) || 1500);
 const WHATSAPP_REQUEST_TIMEOUT_MS = Math.max(1000, Number.parseInt(process.env.AIRBNB_WHATSAPP_TIMEOUT_MS ?? "15000", 10) || 15000);
@@ -1458,6 +1460,54 @@ function materialRain(weather) {
   return probability >= MATERIAL_RAIN_PROBABILITY || precipitation >= MATERIAL_RAIN_PRECIPITATION_MM;
 }
 
+function clockHour(value, fallbackPeriod = null, { end = false } = {}) {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (text === "midnight") return end ? 24 : 0;
+  if (text === "noon") return 12;
+  const match = /^(\d{1,2})(?:\s*(a\.m\.|p\.m\.))?$/.exec(text);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const period = match[2] ?? fallbackPeriod;
+  if (!Number.isInteger(hour) || hour < 1 || hour > 12 || !period) return null;
+  if (period === "a.m.") return hour === 12 ? 0 : hour;
+  return hour === 12 ? 12 : hour + 12;
+}
+
+function rainHoursFromSummary(summary) {
+  const text = String(summary ?? "").trim().toLowerCase();
+  if (!text || text === "rain possible" || text === "none currently showing") return null;
+  const hours = new Set();
+  for (const segment of text.split(" and ")) {
+    const range = segment.split("-");
+    if (range.length === 1) {
+      const hour = clockHour(range[0]);
+      if (hour == null || hour === 24) return null;
+      hours.add(hour);
+      continue;
+    }
+    if (range.length !== 2) return null;
+    const startPeriod = range[0].match(/(a\.m\.|p\.m\.)\s*$/)?.[1] ?? null;
+    const endPeriod = range[1].match(/(a\.m\.|p\.m\.)\s*$/)?.[1] ?? null;
+    const start = clockHour(range[0], endPeriod);
+    let end = clockHour(range[1], startPeriod, { end: true });
+    if (start == null || end == null) return null;
+    if (end <= start) end += 24;
+    if (end - start > 24) return null;
+    for (let hour = start; hour < end; hour += 1) hours.add(hour % 24);
+  }
+  return hours;
+}
+
+function cleaningDayRainTimingChanged(previousSummary, currentSummary) {
+  const previousHours = rainHoursFromSummary(previousSummary);
+  const currentHours = rainHoursFromSummary(currentSummary);
+  if (!previousHours || !currentHours) return false;
+  for (let hour = CLEANING_DAY_START_HOUR; hour <= CLEANING_DAY_END_HOUR; hour += 1) {
+    if (previousHours.has(hour) !== currentHours.has(hour)) return true;
+  }
+  return false;
+}
+
 export function weatherUpdateIsMaterial(previousWeather, currentWeather) {
   if (!currentWeather?.available) return false;
   const previousIsMaterial = materialRain(previousWeather);
@@ -1465,7 +1515,7 @@ export function weatherUpdateIsMaterial(previousWeather, currentWeather) {
   if (!previousWeather?.available) return currentIsMaterial;
   if (previousIsMaterial !== currentIsMaterial) return true;
   if (!currentIsMaterial) return false;
-  if (String(previousWeather.rainSummary ?? "") !== String(currentWeather.rainSummary ?? "")) return true;
+  if (cleaningDayRainTimingChanged(previousWeather.rainSummary, currentWeather.rainSummary)) return true;
   const probabilityChange = Math.abs(
     Number(currentWeather.maxProbability ?? 0) - Number(previousWeather.maxProbability ?? 0),
   );
