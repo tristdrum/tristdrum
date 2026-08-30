@@ -563,6 +563,41 @@ test("slight low-rain drift reuses the delivered plan without another live messa
   assert.equal(appended.length, 0);
 });
 
+test("overnight-only drift in material rain reuses the delivered plan", () => {
+  const unitReports = classifyUnits(turnoverReservations(), targetDate);
+  const allDayRain = {
+    ...rainyWeather,
+    rainSummary: "midnight-midnight",
+    maxProbability: 94,
+    maxPrecipitation: 1.1,
+  };
+  const first = planDelivery({ targetDate, unitReports, weather: allDayRain, ledgerRecords: [] });
+  const drifted = planDelivery({
+    targetDate,
+    unitReports,
+    weather: {
+      ...allDayRain,
+      rainSummary: "1 a.m.-midnight",
+      maxProbability: 97,
+    },
+    ledgerRecords: [{
+      targetDate: first.targetDateKey,
+      messageHash: first.hash,
+      messageText: first.message,
+      weather: allDayRain,
+      contentOccurrence: 1,
+      sentAt: "2026-08-29T19:32:18Z",
+      source: "supabase",
+      isUpdate: true,
+    }],
+  });
+
+  assert.equal(drifted.hash, first.hash);
+  assert.equal(drifted.message, first.message);
+  assert.equal(drifted.duplicate?.source, "non_substantive_weather");
+  assert.equal(drifted.suppressedUpdate?.reason, "non_substantive_weather");
+});
+
 test("weather-only updates require operationally material rain", () => {
   assert.equal(weatherUpdateIsMaterial(lowRainWeather, {
     ...lowRainWeather,
@@ -573,6 +608,24 @@ test("weather-only updates require operationally material rain", () => {
   assert.equal(weatherUpdateIsMaterial(rainyWeather, {
     ...rainyWeather,
     rainSummary: "3 p.m.-midnight",
+  }), true);
+  assert.equal(weatherUpdateIsMaterial({
+    ...rainyWeather,
+    rainSummary: "midnight-midnight",
+    maxProbability: 94,
+    maxPrecipitation: 1.1,
+  }, {
+    ...rainyWeather,
+    rainSummary: "1 a.m.-midnight",
+    maxProbability: 97,
+    maxPrecipitation: 1.1,
+  }), false);
+  assert.equal(weatherUpdateIsMaterial({
+    ...rainyWeather,
+    rainSummary: "midnight-midnight",
+  }, {
+    ...rainyWeather,
+    rainSummary: "7 p.m.-midnight",
   }), true);
   assert.equal(weatherUpdateIsMaterial(rainyWeather, {
     available: false,
