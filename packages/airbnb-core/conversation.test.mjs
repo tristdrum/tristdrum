@@ -112,6 +112,30 @@ test("initial Airbnb inquiry notices become non-SMTP support conversations", () 
   assert.equal(parsed.replyCapable, false);
 });
 
+test("initial inquiries accept Airbnb-since profile metadata without identity text", () => {
+  const parsed = parseAirbnbInitialInquiryEmail({
+    providerMessageId: "<initial-inquiry-airbnb-since@example.test>",
+    from: "automated@airbnb.com",
+    subject: "Inquiry for Jasmine Studio Stay for Oct 3 – 9, 2026",
+    occurredAt: "2026-08-31T14:29:00Z",
+    body: [
+      "RESPOND TO MININTLE’S INQUIRY",
+      "Minintle",
+      "https://www.airbnb.co.za/hosting/thread/2652483931?thread_type=home_booking",
+      "On Airbnb since 2026",
+      "Hi Jane, I would like to ask if Jasmine studio and Spekboom is the same place or not?",
+      "Where are they located? I would like book for 9 nights (30 Sept - 09 Oct).",
+      "Pre-approve / Decline",
+    ].join("\n"),
+  });
+  assert.equal(parsed.providerThreadId, "2652483931");
+  assert.equal(parsed.entries[0].name, "Minintle");
+  assert.match(parsed.entries[0].text, /Jasmine studio and Spekboom/i);
+  assert.doesNotMatch(parsed.entries[0].text, /On Airbnb since/i);
+  assert.equal(parsed.replyRequired, true);
+  assert.equal(parsed.replyCapable, false);
+});
+
 test("initial inquiries converge with later express thread copies", () => {
   const cases = [
     {
