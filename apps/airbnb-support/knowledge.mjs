@@ -35,8 +35,18 @@ export const SUPPORT_KNOWLEDGE = deepFreeze({
     "Early check-in may be offered from 13:00, but it is always conditional on the previous guest and cleaning being finished.",
     "Guests are always welcome to drop bags after the previous guest has actually checked out. This is normally from 10:00; if the previous guest leaves late, bag drop starts only after their actual departure.",
     "Bag drop is luggage storage only. It does not mean the studio is ready and never grants room access before cleaning readiness is confirmed.",
+    "When a past guest says they submitted general improvement feedback or a review without naming a concrete issue, reply with sincere thanks, take the feedback on board, apologise gently for anything that was not up to scratch, and commit to learning and making it right next time.",
     "Late check-out requests are politely declined so the studio can be prepared for the next guest.",
   ],
+  approvedResponsePatterns: {
+    generalPostStayImprovementFeedback: {
+      autoReplyEligible: true,
+      appliesWhen: "A past guest says they submitted general improvement feedback or a review without naming a concrete issue that requires action.",
+      approach: "Thank them genuinely for their time, say the feedback will be taken on board, apologise for anything that was not up to scratch, and say the hosts will learn from it and make it right next time.",
+      escalation: "Do not alert Management solely for general feedback. Alert when the guest names a safety, maintenance, refund, reservation, or urgent issue requiring action.",
+      constraints: "Do not invent the hidden review contents, claim to have read feedback that is not visible, or promise compensation.",
+    },
+  },
   precedents: [
     {
       situation: "The requested booking date is ambiguous.",
@@ -57,6 +67,10 @@ export const SUPPORT_KNOWLEDGE = deepFreeze({
     {
       situation: "A guest reports a problem during the stay.",
       approach: "Acknowledge the specific problem warmly, apologise for the inconvenience, and ask only the detail needed for a host to act.",
+    },
+    {
+      situation: "A past guest says they left improvement feedback or a review, but does not name the issues.",
+      approach: "Send a warm, accountable thank-you automatically without inventing details; take it on board, apologise for anything not up to scratch, and commit to doing better next time.",
     },
     {
       situation: "A historical host reply conflicts with current listing or property data.",
