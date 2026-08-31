@@ -23,12 +23,12 @@ function canonicalParticipantHash(name, role, text) {
 }
 
 const CONVERSATION_SUBJECT_PATTERNS = Object.freeze([
-  /^RE:\s*(?:Reservation|Inquiry)\s+for\s+(.+?),\s*(.+)$/i,
+  /^RE:\s*(?:Reservation|Inquiry|Pre-approval)\s+for\s+(.+?),\s*(.+)$/i,
   /^RE:\s*Reservation request\s+(?:for|at)\s+(.+?)(?:,\s*|\s+for\s+)(.+)$/i,
 ]);
 
 const CONVERSATION_HEADING_PATTERNS = Object.freeze([
-  /(?:Reservation|Inquiry)\s+for\s+(.+?),\s*(.+?)(?:\n|$)/i,
+  /(?:Reservation|Inquiry|Pre-approval)\s+for\s+(.+?),\s*(.+?)(?:\n|$)/i,
   /Reservation request\s+(?:for|at)\s+(.+?)(?:,\s*|\s+for\s+)(.+?)(?:\n|$)/i,
 ]);
 
