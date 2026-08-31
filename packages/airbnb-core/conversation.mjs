@@ -151,14 +151,17 @@ export function parseAirbnbInitialInquiryEmail({
   if (!subjectMatch || !threadId) return null;
   const bodyLines = lines(body);
   const headingIndex = bodyLines.findIndex((line) => /^RESPOND TO .+[’']S INQUIRY$/i.test(line));
-  const identityIndex = bodyLines.findIndex((line, index) => index > headingIndex && /^Identity verified\b/i.test(line));
-  const endIndex = bodyLines.findIndex((line, index) => index > identityIndex && /^Pre-approve\s*\/\s*Decline/i.test(line));
-  if (headingIndex < 0 || identityIndex < 0 || endIndex < 0) return null;
+  const profileIndex = bodyLines.findIndex((line, index) => (
+    index > headingIndex
+    && /^(?:Identity verified\b|On Airbnb since\b|Joined Airbnb\b|New to Airbnb\b)/i.test(line)
+  ));
+  const endIndex = bodyLines.findIndex((line, index) => index > profileIndex && /^Pre-approve\s*\/\s*Decline/i.test(line));
+  if (headingIndex < 0 || profileIndex < 0 || endIndex < 0) return null;
   const headingName = /^RESPOND TO (.+?)[’']S INQUIRY$/i.exec(bodyLines[headingIndex])?.[1]?.trim();
-  const bodyName = bodyLines.slice(headingIndex + 1, identityIndex)
+  const bodyName = bodyLines.slice(headingIndex + 1, profileIndex)
     .find((line) => !/^https?:/i.test(line));
   const guestName = bodyName || headingName || null;
-  const text = bodyLines.slice(identityIndex + 1, endIndex)
+  const text = bodyLines.slice(profileIndex + 1, endIndex)
     .filter((line) => !/^https?:/i.test(line))
     .join(" ")
     .replace(/\s+/g, " ")
