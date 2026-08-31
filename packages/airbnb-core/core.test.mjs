@@ -16,6 +16,7 @@ import {
   projectInventory,
   setupGuestCount,
   stockObservationSkus,
+  supportBagDropRequestDecision,
   supportEscalationStages,
   supportTimeFollowUpDecision,
   supportTimeRequestDecision,
@@ -253,6 +254,21 @@ test("early check-in policy accepts only the two-hour window and keeps the promi
     supportTimeRequestDecision("Hi Jane! Would 2pm be possible for check-in?", {}).effectiveTime,
     "14:00",
   );
+});
+
+test("bag drop creates a cleaner operation without granting room access", () => {
+  const decision = supportBagDropRequestDecision(
+    "Could we check in at 11 or 12, or leave our bags there earlier?",
+    { checkOutTime: "10:00" },
+  );
+  assert.equal(decision.requestType, "bag_drop");
+  assert.equal(decision.action, "accept_after_checkout");
+  assert.equal(decision.effectiveTime, "10:00");
+  assert.equal(decision.createsOperationalRequest, true);
+  assert.equal(decision.needsCleanerNotification, true);
+  assert.match(decision.reply, /after the previous guest has actually checked out/i);
+  assert.match(decision.reply, /luggage storage only/i);
+  assert.equal(supportBagDropRequestDecision("We no longer need to drop our bags.", {}), null);
 });
 
 test("late checkout policy politely declines every extension and never creates a cleaner note", () => {

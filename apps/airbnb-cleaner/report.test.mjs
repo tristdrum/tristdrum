@@ -413,9 +413,16 @@ test("reproduces the July 28 checkout-only and turnover timeline", () => {
   assert.doesNotMatch(updatedMessage, /tomorrow|ngomso/i);
 });
 
-test("accepted early and late times appear beneath the correct unit in English and Xhosa", () => {
+test("accepted timing and bag-drop notes appear beneath the correct unit in English and Xhosa", () => {
   const unitReports = classifyUnits(turnoverReservations(), targetDate);
   const operationalNotes = [
+    {
+      unitId: 1,
+      requestType: "bag_drop",
+      effectiveTime: "10:00",
+      english: "Bag drop expected from 10:00, but only after the previous guest has actually checked out. Luggage only; no room access before cleaning is complete.",
+      xhosa: "Ukushiya iibhegi kulindeleke ukususela ngo-10:00, kodwa kuphela emva kokuba undwendwe lwangaphambili luphume ngokupheleleyo. Kukushiya iibhegi kuphela; akukho kungena egumbini ngaphambi kokuba ukucoca kugqitywe.",
+    },
     {
       unitId: 2,
       requestType: "early_checkin",
@@ -432,8 +439,10 @@ test("accepted early and late times appear beneath the correct unit in English a
     },
   ];
   const message = buildMessage({ targetDate, unitReports, weather: dryWeather, operationalNotes });
+  assert.match(message, /Unit 1\n- 2 guests; Arrival One\n- Bag drop expected from 10:00/);
   assert.match(message, /Unit 2\n- 1 guest; Arrival Two\n- Early check-in requested for 13:00/);
   assert.match(message, /Unit 3\n- 1 guest; Arrival Three\n- Late check-out approved for 11:00/);
+  assert.match(message, /Unit 1\n- 2 iindwendwe; Arrival One\.\n- Ukushiya iibhegi kulindeleke ukususela ngo-10:00/);
   assert.match(message, /Unit 2\n- 1 undwendwe; Arrival Two\.\n- Kucelwe ukungena kwangethuba ngo-13:00/);
   assert.match(message, /Unit 3\n- 1 undwendwe; Arrival Three\.\n- Ukuhamba kade ngo-11:00/);
 

@@ -152,6 +152,14 @@ export function applyReplyRouteGuard(decision, candidate) {
   };
 }
 
+export function actionableOperationalRequests(decision) {
+  return [decision?.operationalRequest, decision?.bagDropRequest]
+    .filter((request) => (
+      request?.createsOperationalRequest === true
+      || request?.cancelsOperationalRequest === true
+    ));
+}
+
 export function summarizeDeliveryOutcomes(deliveries) {
   return {
     deliveredReplyCount: deliveries.filter((delivery) => delivery.action === "sent").length,
@@ -331,38 +339,40 @@ export async function runSupport({
         decision = fallbackDecision(error);
       }
       decision = applyReplyRouteGuard(decision, candidate);
-      let timeRequestOutcome = null;
       const operationalRequest = decision.operationalRequest;
+      const operationalRequests = actionableOperationalRequests(decision);
       if (
         mode === "live"
         && capabilities.timeRequestsEnabled
         && !existingDecision
         && decision.autoReply === true
-        && (
-          operationalRequest?.createsOperationalRequest === true
-          || operationalRequest?.cancelsOperationalRequest === true
-        )
+        && operationalRequests.length
       ) {
         try {
-          timeRequestOutcome = operationalRequest.createsOperationalRequest
-            ? await captureTimeRequest({
-              sql: ownDatabase.sql,
-              householdId,
-              candidate,
-              decision: operationalRequest,
-              now: startedAt,
-              env,
-            })
-            : await withdrawTimeRequest({
-              sql: ownDatabase.sql,
-              householdId,
-              candidate,
-              decision: operationalRequest,
-              now: startedAt,
-              env,
-            });
-          timeRequests.push(timeRequestOutcome);
-          if (!["notified", "already_notified", "cancelled", "no_change"].includes(timeRequestOutcome.status)) {
+          let operationallySafe = true;
+          for (const request of operationalRequests) {
+            const outcome = request.createsOperationalRequest
+              ? await captureTimeRequest({
+                sql: ownDatabase.sql,
+                householdId,
+                candidate,
+                decision: request,
+                now: startedAt,
+                env,
+              })
+              : await withdrawTimeRequest({
+                sql: ownDatabase.sql,
+                householdId,
+                candidate,
+                decision: request,
+                now: startedAt,
+                env,
+              });
+            timeRequests.push(outcome);
+            operationallySafe = operationallySafe
+              && ["notified", "already_notified", "cancelled", "no_change"].includes(outcome.status);
+          }
+          if (!operationallySafe) {
             decision = {
               ...decision,
               autoReply: false,
@@ -379,7 +389,7 @@ export async function runSupport({
           });
         }
       }
-      const timePolicyAllowed = !operationalRequest
+      const timePolicyAllowed = !(operationalRequest || decision.bagDropRequest)
         || capabilities.timeRequestsEnabled === true;
       return storeSupportDraft(ownDatabase.sql, {
         householdId,

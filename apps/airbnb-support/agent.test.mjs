@@ -401,6 +401,33 @@ test("a conversational early check-in decision still creates the cleaner operati
   assert.equal(result.operationalRequest.effectiveTime, "14:00");
 });
 
+test("a bag-drop reply creates a separate dated cleaner operation", async () => {
+  const requests = [];
+  const result = await decideGuestResponse({
+    guestMessage: "Could we check in at 11 or 12, or leave our bags there earlier?",
+    guestName: "Asakhe",
+    listingName: "The Spekboom Studio",
+    facts: { checkInTime: "15:00", checkOutTime: "10:00" },
+    stayLabel: "SEP 3 – 4",
+    latestEventAt: "2026-08-30T16:00:00.000Z",
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecision({
+      replyNeeded: true,
+      sendReply: true,
+      alertManagement: false,
+      summary: "The guest asks about early check-in and bag drop.",
+      draft: "Hi Asakhe, the earliest conditional check-in is 13:00, depending on cleaning. You’re welcome to leave your bags from 10:00 after the previous guest has actually checked out. If they leave late, bag drop starts only after their actual departure. This is luggage storage only and does not grant room access before cleaning is complete.",
+    }, (request) => requests.push(JSON.parse(request.input[1].content[0].text))),
+  });
+  assert.equal(result.autoReply, true);
+  assert.equal(result.operationalRequest.action, "offer_earliest");
+  assert.equal(result.bagDropRequest.requestType, "bag_drop");
+  assert.equal(result.bagDropRequest.effectiveTime, "10:00");
+  assert.equal(result.bagDropRequest.createsOperationalRequest, true);
+  assert.equal(requests[0].timePolicyDecision.action, "offer_earliest");
+  assert.equal(requests[0].bagDropPolicyDecision.action, "accept_after_checkout");
+});
+
 test("returning to standard check-in creates the cleaner withdrawal operation", async () => {
   const result = await decideGuestResponse({
     guestMessage: "Actually, 15:00 is fine for us.",
