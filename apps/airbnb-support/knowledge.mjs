@@ -18,6 +18,12 @@ export const SUPPORT_KNOWLEDGE = deepFreeze({
     standardCheckInTime: "15:00",
     standardCheckOutTime: "10:00",
     earliestConditionalCheckInTime: "13:00",
+    bagDrop: {
+      allowedAfter: "The previous guest has actually checked out.",
+      usualFromTime: "10:00",
+      delayedByLateDeparture: true,
+      grantsRoomAccess: false,
+    },
     propertyLayout: "Three separately listed studios share one property.",
   },
   policies: [
@@ -27,6 +33,8 @@ export const SUPPORT_KNOWLEDGE = deepFreeze({
     "When a fact is missing or contradictory, say that it needs checking instead of choosing the most convenient answer.",
     "Historical examples guide tone and problem-solving, but they do not make a changing property detail current.",
     "Early check-in may be offered from 13:00, but it is always conditional on the previous guest and cleaning being finished.",
+    "Guests are always welcome to drop bags after the previous guest has actually checked out. This is normally from 10:00; if the previous guest leaves late, bag drop starts only after their actual departure.",
+    "Bag drop is luggage storage only. It does not mean the studio is ready and never grants room access before cleaning readiness is confirmed.",
     "Late check-out requests are politely declined so the studio can be prepared for the next guest.",
   ],
   precedents: [
@@ -41,6 +49,10 @@ export const SUPPORT_KNOWLEDGE = deepFreeze({
     {
       situation: "A guest asks for a distance or travel time.",
       approach: "Use a verified location fact and make clear that the estimate is approximate; otherwise offer to check.",
+    },
+    {
+      situation: "A guest asks for room access before 13:00 and offers to drop bags instead.",
+      approach: "Keep early room access subject to the 13:00 readiness policy, but welcome a bag drop after the previous guest's actual checkout, normally from 10:00.",
     },
     {
       situation: "A guest reports a problem during the stay.",

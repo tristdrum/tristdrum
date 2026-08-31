@@ -9,6 +9,14 @@ test("support knowledge identifies each canonical listing without storing privat
   assert.equal(jasmine.property.listingName, "Jasmine Studio Stay");
   assert.match(jasmine.property.cautions[0], /conflict/i);
   assert.equal(jasmine.knownProperties.length, 3);
+  assert.deepEqual(jasmine.sharedFacts.bagDrop, {
+    allowedAfter: "The previous guest has actually checked out.",
+    usualFromTime: "10:00",
+    delayedByLateDeparture: true,
+    grantsRoomAccess: false,
+  });
+  assert.match(jasmine.policies.join(" "), /always welcome to drop bags after the previous guest has actually checked out/i);
+  assert.match(jasmine.policies.join(" "), /does not mean the studio is ready/i);
 
   const serialized = JSON.stringify(SUPPORT_KNOWLEDGE);
   assert.doesNotMatch(serialized, /@gmail\.com|\/hosting\/thread\//i);
