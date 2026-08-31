@@ -30,7 +30,7 @@ function conversationEmail({
   };
 }
 
-test("Airbnb conversation parser accepts reservation, inquiry, and reservation-request replies", () => {
+test("Airbnb conversation parser accepts reservation, inquiry, pre-approval, and reservation-request replies", () => {
   const cases = [
     {
       subject: "RE: Reservation for Jasmine Studio Stay, Aug 24 - 25",
@@ -39,6 +39,11 @@ test("Airbnb conversation parser accepts reservation, inquiry, and reservation-r
     {
       subject: "RE: Inquiry for The Spekboom Studio, Aug 24 - 25",
       heading: "INQUIRY FOR THE SPEKBOOM STUDIO, AUG 24 - 25",
+    },
+    {
+      subject: "RE: Pre-approval for Jasmine Studio Stay, Sep 25 - 26",
+      heading: "PRE-APPROVAL FOR JASMINE STUDIO STAY, SEP 25 - 26",
+      stayPattern: /Sep 25 - 26/i,
     },
     {
       subject: "RE: Reservation request for Bougainvillea Courtyard Studio, Aug 24 - 25",
@@ -55,7 +60,7 @@ test("Airbnb conversation parser accepts reservation, inquiry, and reservation-r
     assert.ok(parsed, fixture.subject);
     assert.equal(parsed.providerThreadId, "2635168007", fixture.subject);
     assert.match(parsed.listingName, /Jasmine|Spekboom|Bougainvillea/i, fixture.subject);
-    assert.match(parsed.stayLabel, /Aug 24 - 25/i, fixture.subject);
+    assert.match(parsed.stayLabel, fixture.stayPattern ?? /Aug 24 - 25/i, fixture.subject);
   }
 });
 
