@@ -17,6 +17,15 @@ test("support knowledge identifies each canonical listing without storing privat
   });
   assert.match(jasmine.policies.join(" "), /always welcome to drop bags after the previous guest has actually checked out/i);
   assert.match(jasmine.policies.join(" "), /does not mean the studio is ready/i);
+  assert.equal(jasmine.approvedResponsePatterns.generalPostStayImprovementFeedback.autoReplyEligible, true);
+  assert.match(
+    jasmine.approvedResponsePatterns.generalPostStayImprovementFeedback.approach,
+    /take(?:n)? on board.*not up to scratch.*make it right next time/i,
+  );
+  assert.match(
+    jasmine.approvedResponsePatterns.generalPostStayImprovementFeedback.constraints,
+    /do not invent the hidden review contents/i,
+  );
 
   const serialized = JSON.stringify(SUPPORT_KNOWLEDGE);
   assert.doesNotMatch(serialized, /@gmail\.com|\/hosting\/thread\//i);

@@ -323,6 +323,7 @@ async function requestDecision({ model, effort, input, env, fetchFn }) {
               "When alertManagement is true, do not tell the guest that the hosts or team have already been alerted, notified, contacted, or informed. That separate delivery has not yet been verified.",
               "When the guest asks for checkout details, include every item in verifiedPropertyFacts.checkoutTasks; do not shorten the list or substitute generic advice.",
               "When the guest asks to drop bags, distinguish luggage storage from room entry, follow canonicalKnowledge.sharedFacts.bagDrop, and never imply that the studio is ready before cleaning readiness is confirmed.",
+              "When canonicalKnowledge.approvedResponsePatterns.generalPostStayImprovementFeedback applies, a warm thank-you is eligible for automatic delivery: appreciate the guest's time, take the feedback on board, apologise gently for anything not up to scratch, and commit to learning and making it right next time without inventing hidden review details.",
               "Use stayPhase for tense. For after_stay, acknowledge the completed stay rather than talking as if it is still ahead.",
               "Use the guest's name when it fits naturally. Match their warmth and mirror their use of an emoji when that feels human.",
               "When timePolicyDecision is present, its action, effective time, and conditions are binding. Phrase it naturally but never contradict or omit the operational decision.",

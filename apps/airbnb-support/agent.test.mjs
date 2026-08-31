@@ -196,6 +196,37 @@ test("welcoming a past guest back is valid post-stay wording", async () => {
   assert.deepEqual(result.qualityIssues, []);
 });
 
+test("general post-stay improvement feedback is eligible for a warm automatic acknowledgement", async () => {
+  let input;
+  const result = await decideGuestResponse({
+    guestMessage: "Thank you for the stay. I have submitted some improvement feedback and left a review.",
+    guestName: "GUEST",
+    listingName: "The Spekboom Studio",
+    facts: { checkInTime: "15:00", checkOutTime: "10:00" },
+    stayLabel: "AUG 29 - 30",
+    latestEventAt: "2026-08-31T09:06:47.000Z",
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecision({
+      replyNeeded: true,
+      sendReply: true,
+      alertManagement: false,
+      summary: "The past guest submitted general improvement feedback without naming an actionable issue.",
+      draft: "Thank you so much for taking the time to share your feedback and leave a review. We really appreciate it and will take everything on board. We are sorry for anything that was not up to scratch, and we will learn from it and make it right next time.",
+    }, (request) => { input = JSON.parse(request.input[1].content[0].text); }),
+  });
+
+  assert.equal(input.stayPhase, "after_stay");
+  assert.equal(input.canonicalKnowledge.approvedResponsePatterns.generalPostStayImprovementFeedback.autoReplyEligible, true);
+  assert.equal(result.autoReply, true);
+  assert.equal(result.alertManagement, false);
+  assert.deepEqual(result.qualityIssues, []);
+  assert.match(result.draft, /thank you so much/i);
+  assert.match(result.draft, /take everything on board/i);
+  assert.match(result.draft, /not up to scratch/i);
+  assert.match(result.draft, /make it right next time/i);
+  assert.doesNotMatch(result.draft, /Automated reply/i);
+});
+
 test("a problem-report emoji does not force a cheerful emoji into the reply", async () => {
   let callCount = 0;
   const result = await decideGuestResponse({
