@@ -69,6 +69,7 @@ export function buildGuestTimeRequest({ candidate, decision }) {
   const stayDate = stayStartDate(candidate.stayLabel, candidate.latestEventAt);
   if (!property || !candidate.propertyId || !stayDate) return null;
   const early = decision.requestType === "early_checkin";
+  const bagDrop = decision.requestType === "bag_drop";
   return {
     requestType: decision.requestType,
     action: decision.action,
@@ -76,10 +77,14 @@ export function buildGuestTimeRequest({ candidate, decision }) {
     requestedTime: decision.requestedTime,
     effectiveTime: decision.effectiveTime,
     unitNumber: property.unitNumber,
-    cleanerNoteEn: early
+    cleanerNoteEn: bagDrop
+      ? `Bag drop expected from ${decision.effectiveTime}, but only after the previous guest has actually checked out; if departure is late, wait until they leave. Luggage only; no room access before cleaning is complete.`
+      : early
       ? `Early check-in requested for ${decision.effectiveTime}. Please prioritise this unit; the time is not guaranteed yet.`
       : `Late check-out approved for ${decision.effectiveTime}. Please start cleaning after the guest leaves.`,
-    cleanerNoteXh: early
+    cleanerNoteXh: bagDrop
+      ? `Ukushiya iibhegi kulindeleke ukususela ngo-${decision.effectiveTime}, kodwa kuphela emva kokuba undwendwe lwangaphambili luphume ngokupheleleyo; ukuba luphuma kade, linda lude luhambe. Kukushiya iibhegi kuphela; akukho kungena egumbini ngaphambi kokuba ukucoca kugqitywe.`
+      : early
       ? `Kucelwe ukungena kwangethuba ngo-${decision.effectiveTime}. Nceda ubeke le unit phambili; ixesha alikaqinisekiswa.`
       : `Ukuhamba kade ngo-${decision.effectiveTime} kuvunyiwe. Nceda uqale ukucoca emva kokuba undwendwe luhambile.`,
     readinessCheckAt: early ? readinessCheckAt(stayDate, decision.effectiveTime) : null,
@@ -87,8 +92,11 @@ export function buildGuestTimeRequest({ candidate, decision }) {
 }
 
 export function cleanerTimingMessage(request, { isUpdate = false } = {}) {
+  const heading = request.requestType === "bag_drop"
+    ? (isUpdate ? "Updated Airbnb bag-drop" : "Airbnb bag-drop update")
+    : `${isUpdate ? "Updated Airbnb timing" : "Airbnb timing update"}`;
   return [
-    `${isUpdate ? "Updated Airbnb timing" : "Airbnb timing update"} for *${displayDate(request.stayDate)}*`,
+    `${heading} for *${displayDate(request.stayDate)}*`,
     "",
     `Unit ${request.unitNumber}`,
     `- ${request.cleanerNoteEn}`,

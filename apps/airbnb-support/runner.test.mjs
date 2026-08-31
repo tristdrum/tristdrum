@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  actionableOperationalRequests,
   applyReplyRouteGuard,
   canReuseStoredDecision,
   collectWithTransientMailboxRetry,
@@ -94,6 +95,19 @@ test("initial inquiries without an SMTP reply route are held and escalated", () 
   assert.equal(guarded.alertManagement, true);
   assert.equal(guarded.deterministicGuard, "initial_inquiry_requires_airbnb_ui");
   assert.equal(guarded.draft, "A useful monthly-rate acknowledgement.");
+});
+
+test("early-arrival and bag-drop operations can be captured independently", () => {
+  const early = { requestType: "early_checkin", createsOperationalRequest: true };
+  const bags = { requestType: "bag_drop", createsOperationalRequest: true };
+  assert.deepEqual(actionableOperationalRequests({
+    operationalRequest: early,
+    bagDropRequest: bags,
+  }), [early, bags]);
+  assert.deepEqual(actionableOperationalRequests({
+    operationalRequest: { requestType: "early_checkin", createsOperationalRequest: false },
+    bagDropRequest: bags,
+  }), [bags]);
 });
 
 test("retry-safe guard failures are not reported as delivery ambiguity", () => {

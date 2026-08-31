@@ -58,6 +58,29 @@ test("an accepted early check-in becomes one bilingual cleaner instruction", () 
   assert.match(cleanerTimingMessage(request, { isUpdate: true }), /^Updated Airbnb timing for /);
 });
 
+test("an accepted bag drop becomes one bilingual dated cleaner instruction", () => {
+  const request = buildGuestTimeRequest({
+    candidate,
+    decision: {
+      requestType: "bag_drop",
+      action: "accept_after_checkout",
+      requestedTime: "10:00",
+      effectiveTime: "10:00",
+      createsOperationalRequest: true,
+    },
+  });
+  assert.equal(request.unitNumber, 3);
+  assert.equal(request.stayDate, "2026-08-25");
+  assert.equal(request.readinessCheckAt, null);
+  assert.match(request.cleanerNoteEn, /after the previous guest has actually checked out/i);
+  assert.match(request.cleanerNoteEn, /luggage only; no room access/i);
+  assert.match(request.cleanerNoteXh, /Ukushiya iibhegi kulindeleke/);
+  assert.match(request.cleanerNoteXh, /akukho kungena egumbini/);
+  const message = cleanerTimingMessage(request);
+  assert.match(message, /^Airbnb bag-drop update for /);
+  assert.match(message, /\*Xhosa:\*\nUnit 3\n- Ukushiya iibhegi/);
+});
+
 test("capturing a time request verifies one cleaner notification and skips an existing one", async () => {
   const sql = fakeSql([
     [{ id: "request-1", status: "accepted", cleanersNotifiedAt: null }],

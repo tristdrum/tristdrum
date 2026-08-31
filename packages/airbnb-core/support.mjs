@@ -99,6 +99,33 @@ function timeRequestType(message) {
   return null;
 }
 
+function asksForBagDrop(message) {
+  const text = String(message ?? "").normalize("NFKC");
+  const bag = "(?:bags?|luggage|suitcases?)";
+  const action = "(?:drop(?:ping)?(?:\\s+off)?|leave|store|keep)";
+  const asks = new RegExp(`\\b(?:bag\\s+drop(?:-?off)?|${action}[^.!?]{0,40}${bag}|${bag}[^.!?]{0,40}${action})\\b`, "i")
+    .test(text);
+  if (!asks) return false;
+  return !new RegExp(`\\b(?:no longer|do not|don't|dont|won't|will not|no need to)\\b[^.!?]{0,50}${action}[^.!?]{0,30}${bag}`, "i")
+    .test(text);
+}
+
+export function supportBagDropRequestDecision(message, facts = {}) {
+  if (!asksForBagDrop(message)) return null;
+  const standardCheckOut = clockMinutes(facts.checkOutTime, 10 * 60);
+  const effectiveTime = clockLabel(standardCheckOut);
+  return {
+    topic: "bag_drop",
+    requestType: "bag_drop",
+    action: "accept_after_checkout",
+    requestedTime: effectiveTime,
+    effectiveTime,
+    createsOperationalRequest: true,
+    needsCleanerNotification: true,
+    reply: `You’re welcome to drop your bags after the previous guest has actually checked out, normally from ${effectiveTime}. If they leave late, bag drop starts only after their actual departure. This is luggage storage only and does not grant room access before cleaning is complete.`,
+  };
+}
+
 export function supportTimeRequestDecision(message, facts = {}) {
   const requestType = timeRequestType(message);
   if (!requestType) return null;

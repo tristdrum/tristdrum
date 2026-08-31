@@ -180,6 +180,24 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
       now: new Date("2026-08-21T12:00:00.000Z"),
     });
     assert.equal(timingRequest.status, "accepted");
+    const bagDropRequest = await upsertGuestTimeRequest(database.sql, {
+      householdId,
+      candidate: candidates[0],
+      request: {
+        requestType: "bag_drop",
+        action: "accept_after_checkout",
+        stayDate: "2026-08-22",
+        requestedTime: "10:00",
+        effectiveTime: "10:00",
+        unitNumber: 3,
+        cleanerNoteEn: "Bag drop after the previous guest checks out.",
+        cleanerNoteXh: "Ukushiya iibhegi emva kokuba undwendwe lwangaphambili luphume.",
+        readinessCheckAt: null,
+      },
+      now: new Date("2026-08-21T12:01:00.000Z"),
+    });
+    assert.equal(bagDropRequest.status, "accepted");
+    assert.equal(bagDropRequest.readinessCheckAt, null);
     await admin`
       update airbnb.guest_time_requests
       set status = 'cleaners_notified', cleaners_notified_at = '2026-08-22T09:00:00.000Z'

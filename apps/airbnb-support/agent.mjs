@@ -1,4 +1,5 @@
 import {
+  supportBagDropRequestDecision,
   supportTimeFollowUpDecision,
   supportTimeRequestDecision,
 } from "@tristdrum/airbnb-core";
@@ -252,6 +253,25 @@ function timePolicyQualityIssues(draft, decision) {
   return issues;
 }
 
+function bagDropQualityIssues(draft, decision) {
+  if (!decision) return [];
+  const text = String(draft ?? "");
+  const issues = [];
+  if (!draftMentionsClock(text, decision.effectiveTime)) {
+    issues.push(`Use the verified usual bag-drop time of ${decision.effectiveTime}.`);
+  }
+  if (!/\b(?:previous|departing) guest\b[^.!?]{0,80}\b(?:check(?:ed)?[ -]?out|leave|left|depart)/i.test(text)) {
+    issues.push("Say that bag drop starts only after the previous guest has actually checked out.");
+  }
+  if (!/\b(?:late|later|actual departure|actually (?:leaves?|left|checked[ -]?out))\b/i.test(text)) {
+    issues.push("Explain that a late departure delays bag drop until the previous guest has actually left.");
+  }
+  if (!/\b(?:luggage|bags?)\b[^.!?]{0,100}\b(?:only|storage)\b|\b(?:no|not|doesn't|does not)\b[^.!?]{0,100}\b(?:room access|enter|check[ -]?in|studio is ready|room is ready)\b/i.test(text)) {
+    issues.push("Make clear that bag drop is luggage storage only and does not grant room access before cleaning is complete.");
+  }
+  return issues;
+}
+
 function timePolicyFactsVerified(decision, facts, knowledge) {
   if (!decision || !knowledge.listingRecognized) return false;
   if (decision.topic === "early_check_in_follow_up" && decision.cancelsOperationalRequest !== true) return true;
@@ -262,6 +282,14 @@ function timePolicyFactsVerified(decision, facts, knowledge) {
       : ["checkOutTime"];
   return keys.every((key) => normalizedClock(facts[key]))
     && !knowledge.conflicts.some((conflict) => keys.includes(conflict.key));
+}
+
+function bagDropPolicyFactsVerified(decision, facts, knowledge) {
+  if (!decision) return false;
+  return knowledge.listingRecognized
+    && Boolean(knowledge.sharedFacts?.bagDrop)
+    && Boolean(normalizedClock(facts.checkOutTime))
+    && !knowledge.conflicts.some((conflict) => conflict.key === "checkOutTime");
 }
 
 function requestInput({
@@ -275,6 +303,7 @@ function requestInput({
   conversationContext,
   activeTimeRequest,
   timePolicyDecision,
+  bagDropPolicyDecision,
   knowledge,
   verifiedFacts,
   revisionFeedback = [],
@@ -291,6 +320,7 @@ function requestInput({
     conversationStyle: style,
     activeTimeRequest,
     timePolicyDecision,
+    bagDropPolicyDecision,
     canonicalKnowledge: knowledge,
     verifiedPropertyFacts: verifiedFacts,
     revisionFeedback,
@@ -323,6 +353,7 @@ async function requestDecision({ model, effort, input, env, fetchFn }) {
               "When alertManagement is true, do not tell the guest that the hosts or team have already been alerted, notified, contacted, or informed. That separate delivery has not yet been verified.",
               "When the guest asks for checkout details, include every item in verifiedPropertyFacts.checkoutTasks; do not shorten the list or substitute generic advice.",
               "When the guest asks to drop bags, distinguish luggage storage from room entry, follow canonicalKnowledge.sharedFacts.bagDrop, and never imply that the studio is ready before cleaning readiness is confirmed.",
+              "When bagDropPolicyDecision is present, its checkout condition, usual time, late-departure condition, and luggage-only boundary are binding.",
               "When canonicalKnowledge.approvedResponsePatterns.generalPostStayImprovementFeedback applies, a warm thank-you is eligible for automatic delivery: appreciate the guest's time, take the feedback on board, apologise gently for anything not up to scratch, and commit to learning and making it right next time without inventing hidden review details.",
               "Use stayPhase for tense. For after_stay, acknowledge the completed stay rather than talking as if it is still ahead.",
               "Use the guest's name when it fits naturally. Match their warmth and mirror their use of an emoji when that feels human.",
@@ -379,8 +410,11 @@ export async function decideGuestResponse({
     now,
     verifiedFacts,
   ) ?? supportTimeRequestDecision(guestMessage, verifiedFacts);
+  const bagDropPolicyDecision = supportBagDropRequestDecision(guestMessage, verifiedFacts);
   const timePolicyVerified = timePolicyFactsVerified(timePolicyDecision, verifiedFacts, knowledge);
   const timePolicyBlocked = Boolean(timePolicyDecision && !timePolicyVerified);
+  const bagDropPolicyVerified = bagDropPolicyFactsVerified(bagDropPolicyDecision, verifiedFacts, knowledge);
+  const bagDropPolicyBlocked = Boolean(bagDropPolicyDecision && !bagDropPolicyVerified);
 
   const input = requestInput({
     now,
@@ -393,18 +427,20 @@ export async function decideGuestResponse({
     conversationContext,
     activeTimeRequest,
     timePolicyDecision: timePolicyVerified ? timePolicyDecision : null,
+    bagDropPolicyDecision: bagDropPolicyVerified ? bagDropPolicyDecision : null,
     knowledge,
     verifiedFacts,
   });
   let raw = await requestDecision({ model, effort, input, env, fetchFn });
   let draft = typeof raw.draft === "string" ? raw.draft.trim() : null;
-  let replyNeeded = raw.replyNeeded === true || Boolean(timePolicyDecision);
+  let replyNeeded = raw.replyNeeded === true || Boolean(timePolicyDecision) || Boolean(bagDropPolicyDecision);
   let wantsToSend = replyNeeded && raw.sendReply === true && Boolean(draft);
   let requiresManagement = raw.alertManagement === true;
-  const initialQualityIssues = wantsToSend && !timePolicyBlocked
+  const initialQualityIssues = wantsToSend && !timePolicyBlocked && !bagDropPolicyBlocked
     ? [
       ...draftQualityIssues({ draft, stayPhase, style }),
       ...timePolicyQualityIssues(draft, timePolicyDecision),
+      ...bagDropQualityIssues(draft, bagDropPolicyDecision),
       ...managementAlertQualityIssues(draft, requiresManagement),
       ...checkoutTaskQualityIssues({ draft, guestMessage, facts: verifiedFacts }),
     ]
@@ -420,7 +456,7 @@ export async function decideGuestResponse({
       fetchFn,
     });
     draft = typeof raw.draft === "string" ? raw.draft.trim() : null;
-    replyNeeded = raw.replyNeeded === true || Boolean(timePolicyDecision);
+    replyNeeded = raw.replyNeeded === true || Boolean(timePolicyDecision) || Boolean(bagDropPolicyDecision);
     wantsToSend = replyNeeded && raw.sendReply === true && Boolean(draft);
     requiresManagement = requiresManagement || raw.alertManagement === true;
   }
@@ -428,15 +464,21 @@ export async function decideGuestResponse({
     ? [
       ...draftQualityIssues({ draft, stayPhase, style }),
       ...timePolicyQualityIssues(draft, timePolicyDecision),
+      ...bagDropQualityIssues(draft, bagDropPolicyDecision),
       ...managementAlertQualityIssues(draft, requiresManagement),
       ...checkoutTaskQualityIssues({ draft, guestMessage, facts: verifiedFacts }),
       ...(timePolicyBlocked ? ["The timing request is not backed by a verified operational path."] : []),
+      ...(bagDropPolicyBlocked ? ["The bag-drop request is not backed by a verified operational path."] : []),
     ]
     : [];
   const sendReply = wantsToSend && qualityIssues.length === 0 && !timePolicyBlocked;
   const operationalRequest = sendReply
     && timePolicyVerified
     ? timePolicyDecision
+    : null;
+  const bagDropRequest = sendReply
+    && bagDropPolicyVerified
+    ? bagDropPolicyDecision
     : null;
 
   return {
@@ -450,6 +492,7 @@ export async function decideGuestResponse({
     qualityRevisionCount,
     qualityIssues,
     operationalRequest,
+    bagDropRequest,
     autoReply: sendReply,
     status: sendReply ? "approved_for_guard" : "needs_human",
     alertManagement: requiresManagement || (replyNeeded && !sendReply),
