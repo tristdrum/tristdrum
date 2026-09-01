@@ -43,6 +43,12 @@ function positiveInteger(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function searchUids(value) {
+  return Array.isArray(value)
+    ? value.map(Number).filter((uid) => Number.isFinite(uid) && uid > 0)
+    : [];
+}
+
 function observeClientErrors(client) {
   if (typeof client.on !== "function") {
     return new Promise(() => {});
@@ -185,8 +191,8 @@ export async function collectConversationMessages({
         : [{ since, from: "airbnb.com" }];
       const uidSet = new Set();
       for (const senderQuery of senderQueries) {
-        const matches = await client.search(senderQuery, { uid: true });
-        for (const uid of matches ?? []) uidSet.add(Number(uid));
+        const matches = searchUids(await client.search(senderQuery, { uid: true }));
+        for (const uid of matches) uidSet.add(uid);
       }
       const uids = [...uidSet].sort((left, right) => left - right);
       if (!uids.length) return { messages: [], envelopesFound: 0, lastUid: Number(afterUid) };
@@ -263,11 +269,11 @@ export async function collectBookingLifecycleMessages({
         env,
         String(env.AIRBNB_SUPPORT_GMAIL_FOLDER ?? DEFAULT_FOLDER),
       ));
-      const uids = await client.search({
+      const uids = searchUids(await client.search({
         since,
         from: "automated@airbnb.com",
         subject: "request",
-      }, { uid: true });
+      }, { uid: true }));
       if (!uids.length) return { messages: [], envelopesFound: 0 };
       const candidates = [];
       for await (const message of client.fetch(uids, { envelope: true, internalDate: true, uid: true }, { uid: true })) {
@@ -331,7 +337,7 @@ export async function findSentMessageIds({
       lock = await client.getMailboxLock(String(env.AIRBNB_SUPPORT_GMAIL_SENT_FOLDER ?? DEFAULT_SENT_FOLDER));
       const found = [];
       for (const messageId of wanted) {
-        const matches = await client.search({ header: { "message-id": messageId } }, { uid: true });
+        const matches = searchUids(await client.search({ header: { "message-id": messageId } }, { uid: true }));
         if (matches?.length) found.push(messageId);
       }
       return found;
@@ -379,13 +385,13 @@ export async function findSentThreadEvidence({
       ));
       const found = [];
       for (const messageId of wanted) {
-        const matches = await client.search({ header: { "message-id": messageId } }, { uid: true });
+        const matches = searchUids(await client.search({ header: { "message-id": messageId } }, { uid: true }));
         if (matches?.length) found.push(messageId);
       }
 
-      const candidateUids = await client.search({ since: cutoff }, { uid: true });
+      const candidateUids = searchUids(await client.search({ since: cutoff }, { uid: true }));
       let humanReplyAt = null;
-      const selectedUids = (candidateUids ?? []).slice(-200);
+      const selectedUids = candidateUids.slice(-200);
       if (selectedUids.length) {
         for await (const message of client.fetch(
           selectedUids,

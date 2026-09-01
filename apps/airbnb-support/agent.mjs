@@ -167,6 +167,24 @@ function managementAlertQualityIssues(draft, alertManagement) {
   ];
 }
 
+function reservationChangeQualityIssues({ draft, guestMessage }) {
+  const request = String(guestMessage ?? "");
+  const asksForDateCorrection = (
+    /\b(?:wrong|mistak(?:e|en)|mixed? up|change|move|instead)\b[^.!?]{0,100}\b(?:date|booking|reservation|september|october)\b/i.test(request)
+    || /\b(?:date|booking|reservation)\b[^.!?]{0,100}\b(?:wrong|mistak(?:e|en)|change|move|instead)\b/i.test(request)
+  );
+  if (!asksForDateCorrection) return [];
+  const text = String(draft ?? "");
+  const cancelAction = "cancel(?:l?ing|led|lation)?";
+  const directsBookingAction = (
+    new RegExp(`\\b(?:please\\s+)?(?:hold off|wait|avoid|do not|don't|dont|go ahead)\\b[^.!?]{0,100}\\b(?:${cancelAction}|book|rebook)\\b`, "i").test(text)
+    || new RegExp(`\\b(?:${cancelAction}|rebook|make another booking)\\b[^.!?]{0,80}\\b(?:until|before|now|yet)\\b`, "i").test(text)
+  );
+  return directsBookingAction
+    ? ["Do not instruct the guest to cancel, avoid cancelling, rebook, or make another booking. Current reservation status is not verified; acknowledge the request and say the date change and availability need checking."]
+    : [];
+}
+
 function checkoutTaskQualityIssues({ draft, guestMessage, facts }) {
   const request = String(guestMessage ?? "");
   const asksForDetails = (
@@ -354,6 +372,7 @@ async function requestDecision({ model, effort, input, env, fetchFn }) {
               "When the guest asks for checkout details, include every item in verifiedPropertyFacts.checkoutTasks; do not shorten the list or substitute generic advice.",
               "When the guest asks to drop bags, distinguish luggage storage from room entry, follow canonicalKnowledge.sharedFacts.bagDrop, and never imply that the studio is ready before cleaning readiness is confirmed.",
               "When bagDropPolicyDecision is present, its checkout condition, usual time, late-departure condition, and luggage-only boundary are binding.",
+              "For reservation or date-change requests, do not tell the guest to cancel, avoid cancelling, rebook, or make another booking unless current reservation status is explicitly supplied and verified. Acknowledge and say the requested change and availability need checking.",
               "When canonicalKnowledge.approvedResponsePatterns.generalPostStayImprovementFeedback applies, a warm thank-you is eligible for automatic delivery: appreciate the guest's time, take the feedback on board, apologise gently for anything not up to scratch, and commit to learning and making it right next time without inventing hidden review details.",
               "Use stayPhase for tense. For after_stay, acknowledge the completed stay rather than talking as if it is still ahead.",
               "Use the guest's name when it fits naturally. Match their warmth and mirror their use of an emoji when that feels human.",
@@ -442,6 +461,7 @@ export async function decideGuestResponse({
       ...timePolicyQualityIssues(draft, timePolicyDecision),
       ...bagDropQualityIssues(draft, bagDropPolicyDecision),
       ...managementAlertQualityIssues(draft, requiresManagement),
+      ...reservationChangeQualityIssues({ draft, guestMessage }),
       ...checkoutTaskQualityIssues({ draft, guestMessage, facts: verifiedFacts }),
     ]
     : [];
@@ -466,6 +486,7 @@ export async function decideGuestResponse({
       ...timePolicyQualityIssues(draft, timePolicyDecision),
       ...bagDropQualityIssues(draft, bagDropPolicyDecision),
       ...managementAlertQualityIssues(draft, requiresManagement),
+      ...reservationChangeQualityIssues({ draft, guestMessage }),
       ...checkoutTaskQualityIssues({ draft, guestMessage, facts: verifiedFacts }),
       ...(timePolicyBlocked ? ["The timing request is not backed by a verified operational path."] : []),
       ...(bagDropPolicyBlocked ? ["The bag-drop request is not backed by a verified operational path."] : []),

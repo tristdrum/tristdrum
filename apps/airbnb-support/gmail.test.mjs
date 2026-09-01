@@ -171,6 +171,31 @@ test("canonical collector includes trusted initial inquiry notices", async () =>
   assert.equal(result.messages[0].providerMessageId, "<initial-inquiry@example.test>");
 });
 
+test("mailbox searches may return false when there are no matches", async () => {
+  let released = false;
+  let loggedOut = false;
+  const client = {
+    usable: true,
+    async connect() {},
+    async getMailboxLock() { return { release() { released = true; } }; },
+    async search() { return false; },
+    async *fetch() { throw new Error("an empty search must not fetch"); },
+    async logout() { loggedOut = true; },
+    close() {},
+  };
+  const result = await collectConversationMessages({
+    since: new Date("2026-09-01T00:00:00Z"),
+    env: {
+      AIRBNB_SUPPORT_GMAIL_USER: "tristan@example.test",
+      AIRBNB_SUPPORT_GMAIL_APP_PASSWORD: "not-a-secret",
+    },
+    createClient: () => client,
+  });
+  assert.deepEqual(result, { messages: [], envelopesFound: 0, lastUid: 0 });
+  assert.equal(released, true);
+  assert.equal(loggedOut, true);
+});
+
 test("historical collection pages forward by UID without rereading newer mail", async () => {
   const client = {
     usable: true,

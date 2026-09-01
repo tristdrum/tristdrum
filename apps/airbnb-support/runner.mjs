@@ -250,14 +250,16 @@ export async function runSupport({
         { maxAttempts: mailboxAttempts, onRetry: () => { supplementalMailboxRetryCount += 1; } },
       )
       : Promise.resolve({ messages: [], envelopesFound: 0 });
-    const lifecycleCollection = collectWithTransientMailboxRetry(
+    // Canonical and lifecycle evidence share Tristan's mailbox. Sequence those
+    // imports so one poll never opens two competing IMAP sessions for the same account.
+    const lifecycleCollection = canonicalCollection.then(() => collectWithTransientMailboxRetry(
       () => collectLifecycleMessages({
         since,
         maxRead: Number.parseInt(env.AIRBNB_SUPPORT_LIFECYCLE_MAX_EMAILS ?? "100", 10),
         env,
       }),
       { maxAttempts: mailboxAttempts, onRetry: () => { lifecycleMailboxRetryCount += 1; } },
-    );
+    ));
     const [canonicalResult, supplementalResult, lifecycleResult] = await Promise.allSettled([
       canonicalCollection,
       supplementalCollection,
