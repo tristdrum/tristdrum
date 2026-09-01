@@ -335,6 +335,41 @@ test("a host-action reply cannot claim Management delivery before verification",
   assert.doesNotMatch(result.draft, /alerted|notified|contacted|informed/i);
 });
 
+test("a date-change acknowledgement cannot give stale cancellation instructions", async () => {
+  const requests = [];
+  const result = await decideGuestResponse({
+    guestMessage: "I made a mistake by booking 5 October instead of 5 September.",
+    guestName: "Busisiwe",
+    listingName: "Jasmine Studio Stay",
+    facts: { checkInTime: "15:00", checkOutTime: "10:00" },
+    stayLabel: "OCT 5 – 6",
+    latestEventAt: "2026-09-01T12:04:29.000Z",
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecisionSequence([
+      {
+        replyNeeded: true,
+        sendReply: true,
+        alertManagement: true,
+        summary: "The guest booked the wrong dates.",
+        draft: "Thanks for clarifying. I’ll check availability. Please hold off on cancelling or making another booking until this is confirmed.",
+      },
+      {
+        replyNeeded: true,
+        sendReply: true,
+        alertManagement: true,
+        summary: "The guest booked the wrong dates.",
+        draft: "Thanks for clarifying. I’ll check whether Jasmine is available for 5–6 September and whether the dates can be changed.",
+      },
+    ], (request) => requests.push(JSON.parse(request.input[1].content[0].text))),
+  });
+
+  assert.ok(requests[1].revisionFeedback.some((issue) => /do not instruct the guest to cancel/i.test(issue)));
+  assert.equal(result.autoReply, true);
+  assert.equal(result.alertManagement, true);
+  assert.equal(result.qualityRevisionCount, 1);
+  assert.doesNotMatch(result.draft, /cancel|rebook|another booking/i);
+});
+
 test("checkout details include every verified departure task", async () => {
   const requests = [];
   const result = await decideGuestResponse({
