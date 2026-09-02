@@ -194,6 +194,65 @@ test("an accepted guest-count change unlocks one newer matching Airbnb thread co
   });
 });
 
+test("an accepted accommodation change uses the newer same-thread itinerary snapshot", () => {
+  const referenceDate = parseISODate("2026-09-02");
+  const confirmation = parseReservation(
+    { id: "confirmed", date: "2026-08-28T17:53:00Z", subject: "Reservation confirmed - Anathi Gadini arrives Oct 30" },
+    "NEW BOOKING CONFIRMED! ANATHI GADINI ARRIVES OCT 30.\nJasmine Studio Stay\nCheck-in Checkout\nOctober 30, 2026\nNovember 1, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHM5W2YSBPS",
+    referenceDate,
+  );
+  const accepted = parseReservation(
+    { id: "accepted", date: "2026-09-01T17:17:00Z", subject: "Your reservation change was accepted" },
+    "ANATHI AGREED TO CHANGE THEIR RESERVATION\nBougainvillea Courtyard Studio\nhttps://airbnb.example/hosting/reservations/details/HM5W2YSBPS\nhttps://airbnb.example/messaging/thread/2649658578",
+    referenceDate,
+  );
+  const snapshot = parseReservation(
+    { id: "snapshot", date: "2026-09-01T17:21:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Sep 7 - 10" },
+    "ANATHI\nBooker\nThank you\nReply\nhttps://airbnb.example/hosting/thread/2649658578\nBougainvillea Courtyard Studio\nCheck-in Checkout\nSeptember 7, 2026\nSeptember 10, 2026\nGUESTS\n1 adult",
+    referenceDate,
+  );
+
+  const [merged] = mergeReservations([confirmation, accepted, snapshot]);
+  assert.equal(merged.commonName, "Bougainvillea");
+  assert.equal(merged.checkIn, "2026-09-07");
+  assert.equal(merged.checkOut, "2026-09-10");
+  assert.equal(merged.guestName, "Anathi Gadini");
+  assert.equal(merged.guests, "1 adult");
+  assert.deepEqual(merged.acceptedItineraryChangeEvidence, {
+    acceptedEnvelopeId: "accepted",
+    snapshotEnvelopeId: "snapshot",
+  });
+  assert.deepEqual(merged.sources, ["confirmed", "accepted", "snapshot"]);
+});
+
+test("an incomplete accepted accommodation change fails closed without a current itinerary snapshot", () => {
+  const confirmation = {
+    ...reservation({ unitId: 3, guestName: "Anathi Gadini", guests: "1 adult", checkIn: "2026-10-30", checkOut: "2026-11-01" }),
+    sourceEnvelopeId: "confirmed",
+    sourceTimestamp: 100,
+    confirmationCode: "HM5W2YSBPS",
+    evidenceKind: "confirmed",
+  };
+  const accepted = {
+    sourceEnvelopeId: "accepted",
+    sourceTimestamp: 200,
+    confirmationCode: "HM5W2YSBPS",
+    evidenceKind: "supplemental",
+    evidenceSubtype: "update",
+    guestCountChangeAccepted: true,
+    providerThreadId: "2649658578",
+    unitId: 1,
+    checkIn: null,
+    checkOut: null,
+    guests: "",
+  };
+
+  assert.throws(
+    () => mergeReservations([confirmation, accepted]),
+    { code: "ACCEPTED_CHANGE_ITINERARY_UNRESOLVED" },
+  );
+});
+
 test("an accepted change cannot turn a generic update-you reply into guest-count authority", () => {
   const confirmation = {
     ...reservation({ unitId: 1, guestName: "Alpha Guest", guests: "1 adult", checkIn: "2026-08-28", checkOut: "2026-08-29" }),

@@ -504,6 +504,52 @@ export function mergeReservations(reservations) {
   const replies = reservations
     .filter((reservation) => evidenceKind(reservation) === "supplemental" && reservation.evidenceSubtype !== "update")
     .sort((a, b) => (a.sourceTimestamp || 0) - (b.sourceTimestamp || 0));
+  const acceptedChangeWindowMs = 15 * 60 * 1000;
+  for (const accepted of explicitUpdates.filter((update) => update.guestCountChangeAccepted)) {
+    if (!accepted.confirmationCode || !accepted.providerThreadId) continue;
+    const existing = activeByConfirmationCode.get(accepted.confirmationCode);
+    const acceptedAt = accepted.sourceTimestamp || 0;
+    if (!existing || acceptedAt < (existing.sourceTimestamp || 0)) continue;
+    const itinerarySnapshot = [...replies].reverse().find((reply) => {
+      const replyAt = reply.sourceTimestamp || 0;
+      if (
+        replyAt < acceptedAt
+        || replyAt - acceptedAt > acceptedChangeWindowMs
+        || reply.providerThreadId !== accepted.providerThreadId
+        || !reply.unitId
+        || !reply.checkIn
+        || !reply.checkOut
+      ) return false;
+      return reply.unitId !== existing.unitId
+        || reply.checkIn !== existing.checkIn
+        || reply.checkOut !== existing.checkOut;
+    });
+    if (!itinerarySnapshot) continue;
+    activeByConfirmationCode.set(accepted.confirmationCode, {
+      ...existing,
+      unitId: itinerarySnapshot.unitId,
+      unitLabel: itinerarySnapshot.unitLabel,
+      commonName: itinerarySnapshot.commonName,
+      listingName: itinerarySnapshot.listingName,
+      checkIn: itinerarySnapshot.checkIn,
+      checkOut: itinerarySnapshot.checkOut,
+      dateSource: itinerarySnapshot.dateSource,
+      guestName: existing.guestName || itinerarySnapshot.guestName,
+      sourceEnvelopeId: itinerarySnapshot.sourceEnvelopeId,
+      sourceDate: itinerarySnapshot.sourceDate,
+      sourceTimestamp: itinerarySnapshot.sourceTimestamp,
+      subject: itinerarySnapshot.subject,
+      acceptedItineraryChangeEvidence: {
+        acceptedEnvelopeId: accepted.sourceEnvelopeId,
+        snapshotEnvelopeId: itinerarySnapshot.sourceEnvelopeId,
+      },
+      sources: [...new Set([
+        ...(existing.sources ?? [existing.sourceEnvelopeId]),
+        accepted.sourceEnvelopeId,
+        itinerarySnapshot.sourceEnvelopeId,
+      ])],
+    });
+  }
   const guestCountChangeWindowMs = 15 * 60 * 1000;
   const guestCountDiscussionWindowMs = 60 * 60 * 1000;
   for (const accepted of explicitUpdates.filter((update) => update.guestCountChangeAccepted && !update.guests)) {
@@ -573,6 +619,18 @@ export function mergeReservations(reservations) {
     if (!update.confirmationCode) continue;
     const existing = activeByConfirmationCode.get(update.confirmationCode);
     if (!existing || (update.sourceTimestamp || 0) < (existing.sourceTimestamp || 0)) continue;
+    const hasAnyItinerary = Boolean(update.unitId || update.checkIn || update.checkOut);
+    const hasCompleteItinerary = Boolean(update.unitId && update.checkIn && update.checkOut);
+    const conflictsWithExisting = Boolean(
+      (update.unitId && update.unitId !== existing.unitId)
+      || (update.checkIn && update.checkIn !== existing.checkIn)
+      || (update.checkOut && update.checkOut !== existing.checkOut)
+    );
+    if (update.guestCountChangeAccepted && hasAnyItinerary && !hasCompleteItinerary && conflictsWithExisting) {
+      throw Object.assign(new Error("Accepted reservation change is missing its complete updated itinerary."), {
+        code: "ACCEPTED_CHANGE_ITINERARY_UNRESOLVED",
+      });
+    }
     activeByConfirmationCode.set(update.confirmationCode, {
       ...existing,
       unitId: update.unitId ?? existing.unitId,
@@ -1623,6 +1681,7 @@ export async function collectReservations(
   futureHorizonDays = 8
 ) {
   const afterDate = formatISODate(addDays(targetDate, -searchDays));
+  const recentAcceptedChangeStart = parseISODate(formatISODate(addDays(targetDate, -2))).getTime();
   const horizonDates = Array.from(
     { length: Math.max(1, futureHorizonDays) },
     (_, index) => addDays(targetDate, index),
@@ -1646,6 +1705,8 @@ export async function collectReservations(
         confirmationCode: extractConfirmationCode(body),
         providerThreadId: parsed?.providerThreadId ?? "",
         guestCountChangeAccepted: parsed?.guestCountChangeAccepted === true,
+        recoverAcceptedChangeContext: parsed?.guestCountChangeAccepted === true
+          && Date.parse(envelope.date) >= recentAcceptedChangeStart,
         listingName: parsed?.listingName ?? "",
         touchesHorizon,
       };

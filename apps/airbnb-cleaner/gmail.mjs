@@ -162,7 +162,10 @@ export async function collectAirbnbMessages({
           && describedMessages.some(({ evidence: confirmation }) => (
             confirmation?.evidenceKind === "confirmed"
             && confirmation.confirmationCode === evidence.confirmationCode
-            && confirmation.touchesHorizon === true
+            && (
+              confirmation.touchesHorizon === true
+              || evidence.recoverAcceptedChangeContext === true
+            )
           ))
         ));
       if (acceptedChanges.length > 4) {
@@ -185,7 +188,7 @@ export async function collectAirbnbMessages({
           since: contextSince,
           before: contextBefore,
           from: "airbnb.com",
-          subject: `RE: Reservation for ${confirmationEvidence.listingName}`,
+          subject: "RE: Reservation",
         }, { uid: true });
         if (!contextUids.length) continue;
         const contextEnvelopes = [];
