@@ -685,6 +685,13 @@ test("weather-only updates require operationally material rain", () => {
   assert.equal(weatherUpdateIsMaterial(belowPrecipitationThreshold, atPrecipitationThreshold), true);
   assert.equal(weatherUpdateIsMaterial(atPrecipitationThreshold, belowPrecipitationThreshold), true);
   assert.equal(weatherUpdateIsMaterial(dryWeather, rainyWeather), true);
+  assert.equal(weatherUpdateIsMaterial({
+    ...rainyWeather,
+    maxProbability: 40,
+  }, {
+    ...rainyWeather,
+    maxProbability: 90,
+  }), false);
   assert.equal(weatherUpdateIsMaterial(rainyWeather, {
     ...rainyWeather,
     rainSummary: "3 p.m.-midnight",
