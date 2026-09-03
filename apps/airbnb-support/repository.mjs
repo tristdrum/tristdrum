@@ -554,6 +554,7 @@ export async function storeSupportDraft(sql, {
         and alert_type in ('guest_escalation', 'guest_overdue')
         and details->>'threadId' = ${candidate.id}
         and coalesce(details->>'shadowMode', 'true') = 'true'
+        and coalesce(details->>'stage', '') <> 'delivery_ambiguous'
     `;
   }
   const escalationStages = classificationToStore.alertManagement === true

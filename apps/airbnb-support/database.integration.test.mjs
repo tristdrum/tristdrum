@@ -1070,6 +1070,21 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
       .filter((alert) => alert.details.replyDeliveryId === hostActionDraft.id);
     assert.equal(survivingHostActionAlerts.length, 1);
     assert.equal(survivingHostActionAlerts[0].details.requiresManagementAction, true);
+    const ambiguityAlert = (await admin`
+      insert into airbnb.alerts (
+        household_id, alert_type, severity, status, dedupe_key, summary, details
+      ) values (
+        ${householdId}, 'guest_overdue', 'critical', 'suppressed',
+        ${`guest:${hostActionPromotedCandidate.id}:delivery-ambiguous:${randomUUID()}`},
+        'Airbnb reply delivery outcome needs confirmation',
+        jsonb_build_object(
+          'threadId', ${hostActionPromotedCandidate.id}::text,
+          'replyDeliveryId', ${hostActionDraft.id}::text,
+          'stage', 'delivery_ambiguous'
+        )
+      )
+      returning id
+    `)[0];
 
     await storeSupportDraft(database.sql, {
       householdId,
@@ -1098,6 +1113,12 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
       from airbnb.alerts
       where household_id = ${householdId}
         and id = ${survivingHostActionAlerts[0].id}
+    `)[0].status, "suppressed");
+    assert.equal((await admin`
+      select status
+      from airbnb.alerts
+      where household_id = ${householdId}
+        and id = ${ambiguityAlert.id}
     `)[0].status, "suppressed");
     assert.equal((await admin`
       select status

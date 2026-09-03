@@ -239,6 +239,11 @@ test("a no-reply follow-up preserves an earlier actionable Management alert", as
   assert.match(threadUpdate.query, /requiresManagementAction/);
   assert.match(threadUpdate.query, /"shadowMode": false/);
   assert.match(threadUpdate.query, /delivery_ambiguous/);
+  const shadowResolution = queries.find(({ query }) => (
+    query.includes("coalesce(details->>'shadowMode', 'true') = 'true'")
+  ));
+  assert.ok(shadowResolution);
+  assert.match(shadowResolution.query, /<> 'delivery_ambiguous'/);
 });
 
 test("a no-reply decision can still require durable Management action", async () => {
