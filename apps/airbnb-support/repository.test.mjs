@@ -182,11 +182,68 @@ test("messages needing no reply become terminal and resolve old alerts", async (
   assert.deepEqual(stored.alertStages, []);
   assert.equal(queries[0].values.includes("No reply needed."), true);
   assert.equal(queries.some(({ query, values }) => (
-    query.includes("update airbnb.guest_threads") && values.includes("handled")
+    query.includes("update airbnb.guest_threads")
+    && query.includes("requiresManagementAction")
+    && values.includes("handled")
   )), true);
   assert.equal(queries.some(({ query }) => (
-    query.includes("update airbnb.alerts") && query.includes("status = 'resolved'")
+    query.includes("update airbnb.alerts")
+    && query.includes("status = 'resolved'")
+    && query.includes("requiresManagementAction")
   )), true);
+});
+
+test("a no-reply follow-up preserves an earlier actionable Management alert", async () => {
+  const queries = [];
+  const sql = async (strings, ...values) => {
+    const query = strings.join("?");
+    queries.push({ query, values });
+    if (query.includes("insert into airbnb.reply_deliveries")) {
+      return [{ id: "delivery-thanks", status: "cancelled" }];
+    }
+    return [];
+  };
+  sql.json = (value) => value;
+
+  await storeSupportDraft(sql, {
+    householdId: "22222222-2222-4222-8222-222222222222",
+    candidate: {
+      id: "33333333-3333-4333-8333-333333333333",
+      providerThreadId: "thread-action-follow-up",
+      sourceFingerprint: "source-thanks",
+      latestEventAt: "2026-09-03T09:04:52.000Z",
+      listingName: "The Spekboom Studio",
+      guestDisplayName: "Guest",
+    },
+    classification: {
+      topic: "thanks",
+      riskTier: "low",
+      replyNeeded: false,
+      draft: null,
+      summary: "No reply is needed.",
+      alertManagement: false,
+    },
+    now: new Date("2026-09-03T09:05:00.000Z"),
+    shadowMode: false,
+  });
+
+  const resolution = queries.find(({ query }) => (
+    query.includes("update airbnb.alerts") && query.includes("status = 'resolved'")
+  ));
+  assert.ok(resolution);
+  assert.match(resolution.query, /requiresManagementAction/);
+  assert.match(resolution.query, /delivery_ambiguous/);
+  const threadUpdate = queries.find(({ query }) => query.includes("update airbnb.guest_threads"));
+  assert.ok(threadUpdate);
+  assert.match(threadUpdate.query, /exists \(/);
+  assert.match(threadUpdate.query, /requiresManagementAction/);
+  assert.match(threadUpdate.query, /"shadowMode": false/);
+  assert.match(threadUpdate.query, /delivery_ambiguous/);
+  const shadowResolution = queries.find(({ query }) => (
+    query.includes("coalesce(details->>'shadowMode', 'true') = 'true'")
+  ));
+  assert.ok(shadowResolution);
+  assert.match(shadowResolution.query, /<> 'delivery_ambiguous'/);
 });
 
 test("a no-reply decision can still require durable Management action", async () => {
