@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { collectAirbnbMessages } from "./gmail.mjs";
+import {
+  acceptedChangeNeedsContext,
+  acceptedChangesForContext,
+  collectAirbnbMessages,
+} from "./gmail.mjs";
 import {
   candidateEnvelope,
   parseISODate,
@@ -161,6 +165,48 @@ test("collection includes a date-less accepted reservation change notice", async
   assert.equal(result.envelopesFound, 1);
   assert.deepEqual(fetched, [51]);
   assert.equal(result.messages[0].envelope.subject, "Your reservation change was accepted");
+});
+
+test("accepted-change context eligibility does not depend on stale confirmation dates", () => {
+  const accepted = {
+    guestCountChangeAccepted: true,
+    providerThreadId: "2649658578",
+    confirmationCode: "HM5W2YSBPS",
+    recoverAcceptedChangeContext: true,
+  };
+  const confirmation = {
+    evidenceKind: "confirmed",
+    confirmationCode: "HM5W2YSBPS",
+    touchesHorizon: false,
+  };
+
+  assert.equal(acceptedChangeNeedsContext(accepted, [{ evidence: confirmation }]), true);
+  assert.equal(acceptedChangeNeedsContext({ ...accepted, recoverAcceptedChangeContext: false }, [
+    { evidence: confirmation },
+  ]), false);
+});
+
+test("accepted-change notice recovery is bounded before thread searches", () => {
+  const confirmation = {
+    evidenceKind: "confirmed",
+    confirmationCode: "HMBOUND",
+    touchesHorizon: false,
+  };
+  const accepted = Array.from({ length: 9 }, (_, index) => ({
+    message: { envelope: { id: `accepted-${index}` } },
+    evidence: {
+      guestCountChangeAccepted: true,
+      providerThreadId: `thread-${index}`,
+      confirmationCode: "HMBOUND",
+      recoverAcceptedChangeContext: true,
+    },
+  }));
+
+  assert.equal(acceptedChangesForContext([{ evidence: confirmation }, ...accepted.slice(0, 8)]).length, 8);
+  assert.throws(
+    () => acceptedChangesForContext([{ evidence: confirmation }, ...accepted]),
+    { code: "ACCEPTED_CHANGE_NOTICE_LIMIT" },
+  );
 });
 
 test("an accepted change recovers its bounded matching Airbnb thread context beyond the read cap", async () => {

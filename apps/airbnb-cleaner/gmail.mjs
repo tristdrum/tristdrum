@@ -3,6 +3,33 @@ import { simpleParser } from "mailparser";
 import { htmlToText } from "html-to-text";
 
 const DEFAULT_FOLDER = "[Gmail]/All Mail";
+const MAX_ACCEPTED_CHANGE_NOTICES = 8;
+
+export function acceptedChangeNeedsContext(evidence, describedMessages) {
+  if (!evidence?.guestCountChangeAccepted || !evidence.providerThreadId) return false;
+  const confirmation = describedMessages.find(({ evidence: candidate }) => (
+    candidate?.evidenceKind === "confirmed"
+    && candidate.confirmationCode === evidence.confirmationCode
+  ))?.evidence;
+  return Boolean(
+    confirmation
+    && (
+      confirmation.touchesHorizon === true
+      || evidence.recoverAcceptedChangeContext === true
+    )
+  );
+}
+
+export function acceptedChangesForContext(describedMessages) {
+  const acceptedChanges = describedMessages
+    .filter(({ evidence }) => acceptedChangeNeedsContext(evidence, describedMessages));
+  if (acceptedChanges.length > MAX_ACCEPTED_CHANGE_NOTICES) {
+    throw Object.assign(new Error("Accepted reservation-change context exceeded the safe notice bound."), {
+      code: "ACCEPTED_CHANGE_NOTICE_LIMIT",
+    });
+  }
+  return acceptedChanges;
+}
 
 function requireEnv(name, env) {
   const value = String(env[name] ?? "").trim();
@@ -155,24 +182,7 @@ export async function collectAirbnbMessages({
 
       const describedMessages = messages
         .map((message) => ({ message, evidence: describeEvidence(message) }))
-      const acceptedChanges = describedMessages
-        .filter(({ evidence }) => (
-          evidence?.guestCountChangeAccepted
-          && evidence.providerThreadId
-          && describedMessages.some(({ evidence: confirmation }) => (
-            confirmation?.evidenceKind === "confirmed"
-            && confirmation.confirmationCode === evidence.confirmationCode
-            && (
-              confirmation.touchesHorizon === true
-              || evidence.recoverAcceptedChangeContext === true
-            )
-          ))
-        ));
-      if (acceptedChanges.length > 4) {
-        throw Object.assign(new Error("Accepted reservation-change context exceeded the safe notice bound."), {
-          code: "ACCEPTED_CHANGE_NOTICE_LIMIT",
-        });
-      }
+      const acceptedChanges = acceptedChangesForContext(describedMessages);
       let recoveredContextReadCount = 0;
       for (const { message: acceptedMessage, evidence: acceptedEvidence } of acceptedChanges) {
         const acceptedAt = Date.parse(acceptedMessage.envelope.date);
