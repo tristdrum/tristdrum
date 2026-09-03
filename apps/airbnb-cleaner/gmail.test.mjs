@@ -188,6 +188,7 @@ test("an accepted change recovers its bounded matching Airbnb thread context bey
     async search(query) {
       if (query.subject) {
         assert.equal(query.subject, "RE: Reservation");
+        assert.equal(query.body, "2647000000");
         assert.equal(query.since.toISOString(), "2026-08-27T05:09:00.000Z");
         assert.equal(query.before.toISOString(), "2026-08-28T07:09:00.000Z");
         return [...envelopes.keys()];

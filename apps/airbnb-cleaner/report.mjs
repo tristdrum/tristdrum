@@ -1671,7 +1671,6 @@ export async function collectReservations(
   futureHorizonDays = 8
 ) {
   const afterDate = formatISODate(addDays(targetDate, -searchDays));
-  const recentAcceptedChangeStart = parseISODate(formatISODate(addDays(targetDate, -2))).getTime();
   const horizonDates = Array.from(
     { length: Math.max(1, futureHorizonDays) },
     (_, index) => addDays(targetDate, index),
@@ -1695,8 +1694,7 @@ export async function collectReservations(
         confirmationCode: extractConfirmationCode(body),
         providerThreadId: parsed?.providerThreadId ?? "",
         guestCountChangeAccepted: parsed?.guestCountChangeAccepted === true,
-        recoverAcceptedChangeContext: parsed?.guestCountChangeAccepted === true
-          && Date.parse(envelope.date) >= recentAcceptedChangeStart,
+        recoverAcceptedChangeContext: parsed?.guestCountChangeAccepted === true,
         listingName: parsed?.listingName ?? "",
         touchesHorizon,
       };
