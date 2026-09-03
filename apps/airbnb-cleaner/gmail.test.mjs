@@ -210,6 +210,15 @@ test("accepted-change notice recovery is bounded before thread searches", () => 
 });
 
 test("an accepted change recovers its bounded matching Airbnb thread context beyond the read cap", async () => {
+  const dateLevelDecoys = Array.from({ length: 18 }, (_, index) => [
+    56 + index,
+    {
+      uid: 56 + index,
+      date: new Date(Date.parse("2026-08-27T07:25:00Z") + index * 60_000).toISOString(),
+      subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29",
+      from: "express@airbnb.com",
+    },
+  ]);
   const envelopes = new Map([
     [50, { uid: 50, date: "2026-08-27T06:29:00Z", subject: "Reservation confirmed - Alpha Guest arrives Aug 28", from: "automated@airbnb.com" }],
     [51, { uid: 51, date: "2026-08-27T07:09:00Z", subject: "Your reservation change was accepted", from: "automated@airbnb.com" }],
@@ -217,6 +226,7 @@ test("an accepted change recovers its bounded matching Airbnb thread context bey
     [53, { uid: 53, date: "2026-08-27T07:11:00Z", subject: "RE: Reservation for Jasmine Studio Stay, Sep 7 - 10", from: "express@airbnb.com" }],
     [54, { uid: 54, date: "2026-08-27T07:10:00Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29", from: "express@airbnb.com" }],
     [55, { uid: 55, date: "2026-08-27T07:10:30Z", subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29", from: "airbnb.com.example.test" }],
+    ...dateLevelDecoys,
   ]);
   const bodies = {
     50: "NEW BOOKING CONFIRMED! ALPHA GUEST ARRIVES AUG 28.\nBougainvillea Courtyard Studio\nCheck-in Checkout\nAugust 28, 2026\nAugust 29, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHMCHANGE01",
@@ -237,6 +247,7 @@ test("an accepted change recovers its bounded matching Airbnb thread context bey
         assert.equal(query.body, undefined);
         assert.equal(query.since.toISOString(), "2026-08-27T05:09:00.000Z");
         assert.equal(query.before.toISOString(), "2026-08-28T07:09:00.000Z");
+        assert.equal(envelopes.size, 24);
         return [...envelopes.keys()];
       }
       return [...envelopes.keys()];
@@ -292,6 +303,7 @@ test("an accepted change recovers its bounded matching Airbnb thread context bey
   assert.equal(result.messages.some(({ envelope }) => envelope.id === "54"), false);
   assert.equal(fetched.includes(54), true);
   assert.equal(fetched.includes(55), false);
+  assert.equal(fetched.some((uid) => uid >= 56), false);
 });
 
 test("accepted-change context fails closed before a twenty-fifth MIME read", async () => {
