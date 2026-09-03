@@ -8,6 +8,7 @@ import {
   chatContainsMessage,
   chatLedgerRecords,
   classifyUnits,
+  collectReservations,
   deliveryIdempotencyKey,
   fetchChatMessages,
   guestComposition,
@@ -223,6 +224,51 @@ test("an accepted accommodation change uses the newer same-thread itinerary snap
     snapshotEnvelopeId: "snapshot",
   });
   assert.deepEqual(merged.sources, ["confirmed", "accepted", "snapshot"]);
+});
+
+test("accepted accommodation-change context does not expire before the updated stay", async () => {
+  const referenceDate = parseISODate("2026-09-04");
+  const confirmation = {
+    envelope: {
+      id: "confirmed",
+      date: "2026-08-28T17:53:00Z",
+      subject: "Reservation confirmed - Anathi Gadini arrives Oct 30",
+    },
+    body: "NEW BOOKING CONFIRMED! ANATHI GADINI ARRIVES OCT 30.\nJasmine Studio Stay\nCheck-in Checkout\nOctober 30, 2026\nNovember 1, 2026\nGUESTS\n1 adult\nCONFIRMATION CODE\nHM5W2YSBPS",
+  };
+  const accepted = {
+    envelope: {
+      id: "accepted",
+      date: "2026-09-01T17:17:00Z",
+      subject: "Your reservation change was accepted",
+    },
+    body: "ANATHI AGREED TO CHANGE THEIR RESERVATION\nBougainvillea Courtyard Studio\nhttps://airbnb.example/hosting/reservations/details/HM5W2YSBPS\nhttps://airbnb.example/messaging/thread/2649658578",
+  };
+  const snapshot = {
+    envelope: {
+      id: "snapshot",
+      date: "2026-09-01T17:21:00Z",
+      subject: "RE: Reservation for Bougainvillea Courtyard Studio, Sep 7 - 10",
+    },
+    body: "ANATHI\nBooker\nThank you\nReply\nhttps://airbnb.example/hosting/thread/2649658578\nBougainvillea Courtyard Studio\nCheck-in Checkout\nSeptember 7, 2026\nSeptember 10, 2026\nGUESTS\n1 adult",
+  };
+  let recoverAcceptedChangeContext = null;
+
+  const collected = await collectReservations(referenceDate, 90, 80, async ({ describeEvidence }) => {
+    recoverAcceptedChangeContext = describeEvidence(accepted).recoverAcceptedChangeContext;
+    return { messages: [confirmation, accepted, snapshot], envelopesFound: 3 };
+  });
+
+  assert.equal(recoverAcceptedChangeContext, true);
+  assert.deepEqual(
+    collected.reservations.map(({ confirmationCode, unitId, checkIn, checkOut }) => ({
+      confirmationCode,
+      unitId,
+      checkIn,
+      checkOut,
+    })),
+    [{ confirmationCode: "HM5W2YSBPS", unitId: 1, checkIn: "2026-09-07", checkOut: "2026-09-10" }],
+  );
 });
 
 test("an incomplete accepted accommodation change fails closed without a current itinerary snapshot", () => {
