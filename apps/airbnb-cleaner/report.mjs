@@ -27,8 +27,6 @@ const WEATHER_RETRY_DELAY_MS = Math.max(0, Number.parseInt(process.env.AIRBNB_WE
 const WEATHER_REQUEST_TIMEOUT_MS = Math.max(1000, Number.parseInt(process.env.AIRBNB_WEATHER_TIMEOUT_MS ?? "10000", 10) || 10000);
 const MATERIAL_RAIN_PROBABILITY = 30;
 const MATERIAL_RAIN_PRECIPITATION_MM = 0.5;
-const MATERIAL_RAIN_PROBABILITY_CHANGE = 20;
-const MATERIAL_RAIN_PRECIPITATION_CHANGE_MM = 1;
 const CLEANING_DAY_START_HOUR = 7;
 const CLEANING_DAY_END_HOUR = 18;
 const WHATSAPP_MAX_ATTEMPTS = Math.max(1, Number.parseInt(process.env.AIRBNB_WHATSAPP_MAX_ATTEMPTS ?? "3", 10) || 3);
@@ -1573,15 +1571,7 @@ export function weatherUpdateIsMaterial(previousWeather, currentWeather) {
   if (!previousWeather?.available) return currentIsMaterial;
   if (previousIsMaterial !== currentIsMaterial) return true;
   if (!currentIsMaterial) return false;
-  if (cleaningDayRainTimingChanged(previousWeather.rainSummary, currentWeather.rainSummary)) return true;
-  const probabilityChange = Math.abs(
-    Number(currentWeather.maxProbability ?? 0) - Number(previousWeather.maxProbability ?? 0),
-  );
-  const precipitationChange = Math.abs(
-    Number(currentWeather.maxPrecipitation ?? 0) - Number(previousWeather.maxPrecipitation ?? 0),
-  );
-  return probabilityChange >= MATERIAL_RAIN_PROBABILITY_CHANGE
-    || precipitationChange >= MATERIAL_RAIN_PRECIPITATION_CHANGE_MM;
+  return cleaningDayRainTimingChanged(previousWeather.rainSummary, currentWeather.rainSummary);
 }
 
 export function chatLedgerRecords(messages, targetDate) {

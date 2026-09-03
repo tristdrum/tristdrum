@@ -631,13 +631,13 @@ test("slight low-rain drift reuses the delivered plan without another live messa
   assert.equal(appended.length, 0);
 });
 
-test("overnight-only drift in material rain reuses the delivered plan", () => {
+test("overnight-only timing and intensity drift in material rain reuses the delivered plan", () => {
   const unitReports = classifyUnits(turnoverReservations(), targetDate);
   const allDayRain = {
     ...rainyWeather,
     rainSummary: "midnight-midnight",
-    maxProbability: 94,
-    maxPrecipitation: 1.1,
+    maxProbability: 100,
+    maxPrecipitation: 3,
   };
   const first = planDelivery({ targetDate, unitReports, weather: allDayRain, ledgerRecords: [] });
   const drifted = planDelivery({
@@ -645,8 +645,8 @@ test("overnight-only drift in material rain reuses the delivered plan", () => {
     unitReports,
     weather: {
       ...allDayRain,
-      rainSummary: "1 a.m.-midnight",
-      maxProbability: 97,
+      rainSummary: "midnight-3 a.m. and 6 a.m.-midnight",
+      maxPrecipitation: 14.5,
     },
     ledgerRecords: [{
       targetDate: first.targetDateKey,
@@ -672,7 +672,26 @@ test("weather-only updates require operationally material rain", () => {
     rainSummary: "3 p.m.-midnight",
     maxProbability: 11,
   }), false);
+  const belowPrecipitationThreshold = {
+    ...lowRainWeather,
+    rainSummary: "10 a.m.-noon",
+    maxProbability: 20,
+    maxPrecipitation: 0.4,
+  };
+  const atPrecipitationThreshold = {
+    ...belowPrecipitationThreshold,
+    maxPrecipitation: 0.5,
+  };
+  assert.equal(weatherUpdateIsMaterial(belowPrecipitationThreshold, atPrecipitationThreshold), true);
+  assert.equal(weatherUpdateIsMaterial(atPrecipitationThreshold, belowPrecipitationThreshold), true);
   assert.equal(weatherUpdateIsMaterial(dryWeather, rainyWeather), true);
+  assert.equal(weatherUpdateIsMaterial({
+    ...rainyWeather,
+    maxProbability: 40,
+  }, {
+    ...rainyWeather,
+    maxProbability: 90,
+  }), false);
   assert.equal(weatherUpdateIsMaterial(rainyWeather, {
     ...rainyWeather,
     rainSummary: "3 p.m.-midnight",
@@ -680,13 +699,13 @@ test("weather-only updates require operationally material rain", () => {
   assert.equal(weatherUpdateIsMaterial({
     ...rainyWeather,
     rainSummary: "midnight-midnight",
-    maxProbability: 94,
-    maxPrecipitation: 1.1,
+    maxProbability: 100,
+    maxPrecipitation: 3,
   }, {
     ...rainyWeather,
-    rainSummary: "1 a.m.-midnight",
-    maxProbability: 97,
-    maxPrecipitation: 1.1,
+    rainSummary: "midnight-3 a.m. and 6 a.m.-midnight",
+    maxProbability: 100,
+    maxPrecipitation: 14.5,
   }), false);
   assert.equal(weatherUpdateIsMaterial({
     ...rainyWeather,
