@@ -520,7 +520,10 @@ export async function storeSupportDraft(sql, {
                 and alert.status in ('open', 'suppressed', 'notified')
                 and alert.alert_type in ('guest_escalation', 'guest_overdue')
                 and alert.details->>'threadId' = ${candidate.id}
-                and alert.details @> '{"requiresManagementAction": true}'::jsonb
+                and (
+                  alert.details->>'stage' = 'delivery_ambiguous'
+                  or alert.details @> '{"requiresManagementAction": true, "shadowMode": false}'::jsonb
+                )
             )
           then 'needs_human'
           else ${terminalThreadStatus}
@@ -536,7 +539,10 @@ export async function storeSupportDraft(sql, {
         and status in ('open', 'suppressed', 'notified')
         and alert_type in ('guest_escalation', 'guest_overdue')
         and details->>'threadId' = ${candidate.id}
-        and not (details @> '{"requiresManagementAction": true}'::jsonb)
+        and not (
+          details->>'stage' = 'delivery_ambiguous'
+          or details @> '{"requiresManagementAction": true}'::jsonb
+        )
     `;
   }
   if (!shadowMode && !requiresManagementAction) {

@@ -231,11 +231,14 @@ test("a no-reply follow-up preserves an earlier actionable Management alert", as
     query.includes("update airbnb.alerts") && query.includes("status = 'resolved'")
   ));
   assert.ok(resolution);
-  assert.match(resolution.query, /not \(details @> '\{"requiresManagementAction": true\}'::jsonb\)/);
+  assert.match(resolution.query, /requiresManagementAction/);
+  assert.match(resolution.query, /delivery_ambiguous/);
   const threadUpdate = queries.find(({ query }) => query.includes("update airbnb.guest_threads"));
   assert.ok(threadUpdate);
   assert.match(threadUpdate.query, /exists \(/);
   assert.match(threadUpdate.query, /requiresManagementAction/);
+  assert.match(threadUpdate.query, /"shadowMode": false/);
+  assert.match(threadUpdate.query, /delivery_ambiguous/);
 });
 
 test("a no-reply decision can still require durable Management action", async () => {
