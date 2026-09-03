@@ -214,8 +214,12 @@ test("an accepted change recovers its bounded matching Airbnb thread context bey
     56 + index,
     {
       uid: 56 + index,
-      date: new Date(Date.parse("2026-08-27T07:25:00Z") + index * 60_000).toISOString(),
-      subject: "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29",
+      date: index === 0
+        ? "2026-08-27T07:12:00Z"
+        : new Date(Date.parse("2026-08-27T07:25:00Z") + index * 60_000).toISOString(),
+      subject: index === 0
+        ? "FWD: RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29"
+        : "RE: Reservation for Bougainvillea Courtyard Studio, Aug 28 - 29",
       from: "express@airbnb.com",
     },
   ]);
