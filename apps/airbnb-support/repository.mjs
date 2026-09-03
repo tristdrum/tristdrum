@@ -466,6 +466,7 @@ export async function storeSupportDraft(sql, {
   const noReplyNeeded = classificationToStore.replyNeeded === false;
   const requiresManagementAction = classificationToStore.alertManagement === true;
   const terminalNoReply = noReplyNeeded && !shadowMode;
+  const terminalThreadStatus = terminalNoReply && !requiresManagementAction ? "handled" : "needs_human";
   const initialStatus = terminalNoReply ? "cancelled" : automaticallyApprove ? "approved" : "needs_approval";
   const initialCancellationReason = terminalNoReply ? "No reply needed." : null;
   const rows = await sql`
@@ -510,7 +511,20 @@ export async function storeSupportDraft(sql, {
   `;
   await sql`
     update airbnb.guest_threads
-    set status = ${terminalNoReply && !requiresManagementAction ? "handled" : "needs_human"},
+    set status = case
+          when ${terminalThreadStatus} = 'handled'
+            and exists (
+              select 1
+              from airbnb.alerts alert
+              where alert.household_id = ${householdId}
+                and alert.status in ('open', 'suppressed', 'notified')
+                and alert.alert_type in ('guest_escalation', 'guest_overdue')
+                and alert.details->>'threadId' = ${candidate.id}
+                and alert.details @> '{"requiresManagementAction": true}'::jsonb
+            )
+          then 'needs_human'
+          else ${terminalThreadStatus}
+        end,
         risk_tier = ${classificationToStore.riskTier}
     where household_id = ${householdId} and id = ${candidate.id}
   `;
@@ -522,6 +536,7 @@ export async function storeSupportDraft(sql, {
         and status in ('open', 'suppressed', 'notified')
         and alert_type in ('guest_escalation', 'guest_overdue')
         and details->>'threadId' = ${candidate.id}
+        and not (details @> '{"requiresManagementAction": true}'::jsonb)
     `;
   }
   if (!shadowMode && !requiresManagementAction) {

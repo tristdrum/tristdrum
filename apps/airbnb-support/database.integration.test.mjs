@@ -1070,6 +1070,41 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
       .filter((alert) => alert.details.replyDeliveryId === hostActionDraft.id);
     assert.equal(survivingHostActionAlerts.length, 1);
     assert.equal(survivingHostActionAlerts[0].details.requiresManagementAction, true);
+
+    await storeSupportDraft(database.sql, {
+      householdId,
+      candidate: {
+        ...hostActionPromotedCandidate,
+        sourceFingerprint: "host-action-polite-follow-up",
+        latestEventAt: "2026-08-21T22:18:00.000Z",
+      },
+      classification: {
+        topic: "thanks",
+        riskTier: "low",
+        replyNeeded: false,
+        summary: "The guest acknowledged the reply; no further response is needed.",
+        draft: null,
+        autoReply: false,
+        status: "no_reply",
+        alertManagement: false,
+        decisionVersion: 2,
+        decisionSource: "adaptive_agent",
+      },
+      now: new Date("2026-08-21T22:18:30.000Z"),
+      shadowMode: false,
+    });
+    assert.equal((await admin`
+      select status
+      from airbnb.alerts
+      where household_id = ${householdId}
+        and id = ${survivingHostActionAlerts[0].id}
+    `)[0].status, "suppressed");
+    assert.equal((await admin`
+      select status
+      from airbnb.guest_threads
+      where household_id = ${householdId}
+        and id = ${hostActionPromotedCandidate.id}
+    `)[0].status, "needs_human");
   } finally {
     await database?.close();
     await admin.end({ timeout: 5 });
