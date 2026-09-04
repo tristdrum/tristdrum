@@ -79,7 +79,8 @@ export function cleanerReservationRecords(rows) {
     ].filter(([count]) => count > 0)
       .map(([count, singular, plural]) => `${count} ${count === 1 ? singular : plural}`)
       .join(", ") : "",
-    confirmationCode: row.confirmationCode,
+    confirmationCode: row.confirmationCode.startsWith("uncoded:") ? "" : row.confirmationCode,
+    guestCountChangeEvidence: row.guestCountChangeEvidence ?? undefined,
     evidenceKind: row.bookingStatus,
     cancelled: row.bookingStatus === "cancelled",
   }));
@@ -105,8 +106,12 @@ export async function loadCleanerReservations({
              reservation.adults, reservation.children, reservation.infants,
              reservation.guest_count_known, reservation.booking_status,
              reservation.source_cutoff_at,
+             evidence.normalized_payload->'guestCountChangeEvidence' as guest_count_change_evidence,
              property.unit_number, property.common_name, property.listing_name
       from airbnb.reservations reservation
+      join airbnb.evidence evidence
+        on evidence.household_id = reservation.household_id
+       and evidence.id = reservation.authoritative_evidence_id
       join airbnb.properties property
         on property.household_id = reservation.household_id
        and property.id = reservation.property_id

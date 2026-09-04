@@ -10,6 +10,7 @@ import {
   loadCleanerReservations,
 } from "./database.mjs";
 import { redactSensitiveText, sanitizeFailure } from "./storage.mjs";
+import { mergeReservations } from "./report.mjs";
 
 test("stored reservation revisions preserve dates, counts, cancellation, and source precedence", () => {
   const sourceCutoffAt = new Date("2026-06-03T17:14:47Z");
@@ -56,6 +57,36 @@ test("the stored reservation read is household and horizon scoped and retains ca
   assert.deepEqual(await loadCleanerReservations({ targetDate: "2026-09-04", env: {} }), {
     status: "disabled", reservations: [],
   });
+});
+
+test("stored uncoded reservations retain range cancellation and deduplication", () => {
+  const [record] = cleanerReservationRecords([{
+    id: "uncoded-booking", unitNumber: 3, commonName: "Jasmine", listingName: "Jasmine Studio Stay",
+    checkIn: "2026-09-04", checkOut: "2026-09-07", guestName: "Advance Guest",
+    adults: 1, children: 0, infants: 0, guestCountKnown: true,
+    confirmationCode: "uncoded:range-hash", bookingStatus: "confirmed", sourceCutoffAt: "2026-06-03T17:14:47Z",
+  }]);
+  assert.equal(record.confirmationCode, "");
+  assert.equal(mergeReservations([record, { ...record, sourceEnvelopeId: "mail-copy" }]).length, 1);
+  assert.deepEqual(mergeReservations([record, {
+    ...record, sourceEnvelopeId: "cancelled-mail", evidenceKind: "cancelled", cancelled: true,
+    sourceTimestamp: Date.parse("2026-09-04T06:00:00Z"),
+  }]), []);
+});
+
+test("stored guest-count provenance survives a reimport of the same count reply", () => {
+  const composite = { discussionEnvelopeId: "1", acceptedEnvelopeId: "2", countEnvelopeId: "3" };
+  const [record] = cleanerReservationRecords([{
+    id: "count-booking", unitNumber: 3, commonName: "Jasmine", listingName: "Jasmine Studio Stay",
+    checkIn: "2026-09-04", checkOut: "2026-09-07", guestName: "Advance Guest",
+    adults: 2, children: 0, infants: 0, guestCountKnown: true,
+    confirmationCode: "HMCOUNT", bookingStatus: "confirmed", sourceCutoffAt: "2026-09-02T10:02:00Z",
+    guestCountChangeEvidence: composite,
+  }]);
+  const reply = { ...record, sourceEnvelopeId: "3", evidenceKind: "supplemental", evidenceSubtype: "reply", guestCountChangeEvidence: undefined };
+  const [merged] = mergeReservations([record, reply]);
+  assert.deepEqual(merged.guestCountChangeEvidence, composite);
+  assert.deepEqual(cleanerEvidencePayload(reply, merged.guestCountChangeEvidence).guestCountChangeEvidence, composite);
 });
 
 test("cleaner ledger rows become report-compatible Supabase records", () => {
