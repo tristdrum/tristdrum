@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import postgres from "postgres";
-import { guestComposition } from "./report.mjs";
+import { DEFAULT_RESERVATION_SEARCH_DAYS, guestComposition } from "./report.mjs";
 
 function databaseConfiguration(env) {
   const url = String(env.AIRBNB_DATABASE_URL ?? "").trim();
@@ -88,6 +88,7 @@ export function cleanerReservationRecords(rows) {
 
 export async function loadCleanerReservations({
   targetDate,
+  historyDays = DEFAULT_RESERVATION_SEARCH_DAYS,
   env = process.env,
   postgresFactory = postgres,
 } = {}) {
@@ -96,6 +97,10 @@ export async function loadCleanerReservations({
   }
   const configuration = databaseConfiguration(env);
   if (!configuration) return { status: "disabled", reservations: [] };
+  const parsedHistoryDays = Number.parseInt(String(historyDays), 10);
+  if (!Number.isFinite(parsedHistoryDays) || parsedHistoryDays < 1 || parsedHistoryDays > 400) {
+    throw new Error("Cleaner reservation history days must be between 1 and 400.");
+  }
   const { householdId, url } = configuration;
   validateHouseholdId(householdId);
   const sql = databaseClient(url, postgresFactory, "airbnb-cleaner-reservations");
@@ -132,8 +137,13 @@ export async function loadCleanerReservations({
         limit 1
       ) count_evidence on true
       where reservation.household_id = ${householdId}
-        and reservation.check_out >= ${targetDate}::date
-        and reservation.check_in <= ${targetDate}::date + 7
+        and (
+          (
+            reservation.check_out >= ${targetDate}::date
+            and reservation.check_in <= ${targetDate}::date + 7
+          )
+          or reservation.source_cutoff_at >= ${targetDate}::date - (${parsedHistoryDays} * interval '1 day')
+        )
       order by property.unit_number, reservation.check_in, reservation.id
     `;
     return { status: "loaded", reservations: cleanerReservationRecords(rows) };

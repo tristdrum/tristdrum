@@ -34,6 +34,7 @@ const WHATSAPP_RETRY_DELAY_MS = Math.max(0, Number.parseInt(process.env.AIRBNB_W
 const WHATSAPP_REQUEST_TIMEOUT_MS = Math.max(1000, Number.parseInt(process.env.AIRBNB_WHATSAPP_TIMEOUT_MS ?? "15000", 10) || 15000);
 const WHATSAPP_READ_TIMEOUT_MS = Math.max(1000, Number.parseInt(process.env.AIRBNB_WHATSAPP_READ_TIMEOUT_MS ?? "45000", 10) || 45000);
 const CHAT_RECONCILIATION_LIMIT = 20;
+export const DEFAULT_RESERVATION_SEARCH_DAYS = 90;
 
 const UNITS = [
   {
@@ -98,7 +99,7 @@ function parseArgs(argv) {
     target: "auto",
     json: false,
     maxRead: 40,
-    searchDays: 90,
+    searchDays: DEFAULT_RESERVATION_SEARCH_DAYS,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -1739,7 +1740,7 @@ export async function runReport({
   mode = "preview",
   target = "auto",
   targetDate: requestedTargetDate = null,
-  searchDays = 90,
+  searchDays = DEFAULT_RESERVATION_SEARCH_DAYS,
   maxRead = 80,
   collectMessagesFn = collectAirbnbMessages,
   fetchWeatherFn = fetchWeather,
