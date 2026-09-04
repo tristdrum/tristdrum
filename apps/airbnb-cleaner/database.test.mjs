@@ -5,9 +5,58 @@ import {
   cleanerEvidencePayload,
   cleanerEvidenceSenderAddress,
   cleanerLedgerRecords,
+  cleanerReservationRecords,
   loadCleanerLedgerRecords,
+  loadCleanerReservations,
 } from "./database.mjs";
 import { redactSensitiveText, sanitizeFailure } from "./storage.mjs";
+
+test("stored reservation revisions preserve dates, counts, cancellation, and source precedence", () => {
+  const sourceCutoffAt = new Date("2026-06-03T17:14:47Z");
+  const row = {
+    id: "old-booking", unitNumber: 3, commonName: "Jasmine", listingName: "Jasmine Studio Stay",
+    checkIn: new Date("2026-09-04T00:00:00Z"), checkOut: "2026-09-07",
+    guestName: "Advance Guest", adults: 1, children: 1, infants: 2, guestCountKnown: true,
+    confirmationCode: "HMADVANCE", bookingStatus: "confirmed", sourceCutoffAt,
+  };
+  const [record] = cleanerReservationRecords([row]);
+  assert.equal(record.sourceEnvelopeId, "database:old-booking");
+  assert.equal(record.sourceTimestamp, sourceCutoffAt.getTime());
+  assert.equal(record.checkIn, "2026-09-04");
+  assert.equal(record.checkOut, "2026-09-07");
+  assert.equal(record.guests, "1 adult, 1 child, 2 infants");
+  assert.equal(record.evidenceKind, "confirmed");
+  const [cancelled] = cleanerReservationRecords([{ ...row, bookingStatus: "cancelled", guestCountKnown: false }]);
+  assert.equal(cancelled.evidenceKind, "cancelled");
+  assert.equal(cancelled.cancelled, true);
+  assert.equal(cancelled.guests, "");
+});
+
+test("the stored reservation read is household and horizon scoped and retains cancellations", async () => {
+  const householdId = "11111111-1111-4111-8111-111111111111";
+  let ended = false;
+  const sql = async (strings, ...values) => {
+    const query = strings.join("?");
+    assert.match(query, /property\.household_id = reservation\.household_id/);
+    assert.match(query, /reservation\.household_id = \?/);
+    assert.match(query, /reservation\.check_out >= \?::date/);
+    assert.match(query, /reservation\.check_in <= \?::date \+ 7/);
+    assert.doesNotMatch(query, /booking_status\s*=/);
+    assert.deepEqual(values, [householdId, "2026-09-04", "2026-09-04"]);
+    return [];
+  };
+  sql.end = async () => { ended = true; };
+  const result = await loadCleanerReservations({
+    targetDate: "2026-09-04",
+    env: { AIRBNB_DATABASE_URL: "postgresql://example.invalid/database", AIRBNB_HOUSEHOLD_ID: householdId },
+    postgresFactory: () => sql,
+  });
+  assert.deepEqual(result, { status: "loaded", reservations: [] });
+  assert.equal(ended, true);
+  assert.deepEqual(await loadCleanerReservations({ targetDate: "2026-09-04", env: {} }), {
+    status: "disabled", reservations: [],
+  });
+});
 
 test("cleaner ledger rows become report-compatible Supabase records", () => {
   for (const targetDate of ["2026-08-24", new Date("2026-08-24T00:00:00.000Z")]) {

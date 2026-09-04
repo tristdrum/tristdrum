@@ -58,6 +58,69 @@ export function cleanerLedgerRecords(rows) {
   });
 }
 
+export function cleanerReservationRecords(rows) {
+  return rows.map((row) => ({
+    // A stored revision is not a newly imported Gmail message.
+    sourceEnvelopeId: `database:${row.id}`,
+    sourceDate: row.sourceCutoffAt,
+    sourceTimestamp: new Date(row.sourceCutoffAt).getTime(),
+    unitId: Number(row.unitNumber),
+    unitLabel: `Unit ${row.unitNumber}`,
+    commonName: row.commonName,
+    listingName: row.listingName,
+    checkIn: databaseDateKey(row.checkIn),
+    checkOut: databaseDateKey(row.checkOut),
+    dateSource: "database-revision",
+    guestName: row.guestName ?? "",
+    guests: row.guestCountKnown ? [
+      [Number(row.adults), "adult", "adults"],
+      [Number(row.children), "child", "children"],
+      [Number(row.infants), "infant", "infants"],
+    ].filter(([count]) => count > 0)
+      .map(([count, singular, plural]) => `${count} ${count === 1 ? singular : plural}`)
+      .join(", ") : "",
+    confirmationCode: row.confirmationCode,
+    evidenceKind: row.bookingStatus,
+    cancelled: row.bookingStatus === "cancelled",
+  }));
+}
+
+export async function loadCleanerReservations({
+  targetDate,
+  env = process.env,
+  postgresFactory = postgres,
+} = {}) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(targetDate ?? ""))) {
+    throw new Error("A YYYY-MM-DD target date is required to load cleaner reservations.");
+  }
+  const configuration = databaseConfiguration(env);
+  if (!configuration) return { status: "disabled", reservations: [] };
+  const { householdId, url } = configuration;
+  validateHouseholdId(householdId);
+  const sql = databaseClient(url, postgresFactory, "airbnb-cleaner-reservations");
+  try {
+    const rows = await sql`
+      select reservation.id, reservation.confirmation_code, reservation.guest_name,
+             reservation.check_in, reservation.check_out,
+             reservation.adults, reservation.children, reservation.infants,
+             reservation.guest_count_known, reservation.booking_status,
+             reservation.source_cutoff_at,
+             property.unit_number, property.common_name, property.listing_name
+      from airbnb.reservations reservation
+      join airbnb.properties property
+        on property.household_id = reservation.household_id
+       and property.id = reservation.property_id
+      where reservation.household_id = ${householdId}
+        and reservation.check_out >= ${targetDate}::date
+        and reservation.check_in <= ${targetDate}::date + 7
+      order by property.unit_number, reservation.check_in, reservation.id
+    `;
+    return { status: "loaded", reservations: cleanerReservationRecords(rows) };
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
+
 export async function loadCleanerLedgerRecords({
   targetDate,
   env = process.env,
