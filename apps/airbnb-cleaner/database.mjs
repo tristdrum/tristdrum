@@ -106,7 +106,10 @@ export async function loadCleanerReservations({
              reservation.adults, reservation.children, reservation.infants,
              reservation.guest_count_known, reservation.booking_status,
              reservation.source_cutoff_at,
-             evidence.normalized_payload->'guestCountChangeEvidence' as guest_count_change_evidence,
+             coalesce(
+               nullif(evidence.normalized_payload->'guestCountChangeEvidence', 'null'::jsonb),
+               count_evidence.composite
+             ) as guest_count_change_evidence,
              property.unit_number, property.common_name, property.listing_name
       from airbnb.reservations reservation
       join airbnb.evidence evidence
@@ -115,6 +118,19 @@ export async function loadCleanerReservations({
       join airbnb.properties property
         on property.household_id = reservation.household_id
        and property.id = reservation.property_id
+      left join lateral (
+        select linked.normalized_payload->'guestCountChangeEvidence' as composite
+        from airbnb.reservation_evidence link
+        join airbnb.evidence linked
+          on linked.household_id = link.household_id
+         and linked.id = link.evidence_id
+        where link.household_id = reservation.household_id
+          and link.reservation_id = reservation.id
+          and linked.occurred_at <= reservation.source_cutoff_at
+          and linked.normalized_payload->'guestCountChangeEvidence' ? 'countEnvelopeId'
+        order by linked.occurred_at desc, linked.id
+        limit 1
+      ) count_evidence on true
       where reservation.household_id = ${householdId}
         and reservation.check_out >= ${targetDate}::date
         and reservation.check_in <= ${targetDate}::date + 7

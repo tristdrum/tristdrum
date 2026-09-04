@@ -43,6 +43,10 @@ test("the stored reservation read is household and horizon scoped and retains ca
     assert.match(query, /reservation\.check_out >= \?::date/);
     assert.match(query, /reservation\.check_in <= \?::date \+ 7/);
     assert.doesNotMatch(query, /booking_status\s*=/);
+    assert.match(query, /link\.household_id = reservation\.household_id/);
+    assert.match(query, /link\.reservation_id = reservation\.id/);
+    assert.match(query, /linked\.occurred_at <= reservation\.source_cutoff_at/);
+    assert.match(query, /count_evidence\.composite/);
     assert.deepEqual(values, [householdId, "2026-09-04", "2026-09-04"]);
     return [];
   };
@@ -87,6 +91,26 @@ test("stored guest-count provenance survives a reimport of the same count reply"
   const [merged] = mergeReservations([record, reply]);
   assert.deepEqual(merged.guestCountChangeEvidence, composite);
   assert.deepEqual(cleanerEvidencePayload(reply, merged.guestCountChangeEvidence).guestCountChangeEvidence, composite);
+});
+
+test("a later stored date revision retains its linked earlier count-reply provenance", () => {
+  const composite = { discussionEnvelopeId: "1", acceptedEnvelopeId: "2", countEnvelopeId: "3" };
+  const [laterDateRevision] = cleanerReservationRecords([{
+    id: "count-then-date", unitNumber: 3, commonName: "Jasmine", listingName: "Jasmine Studio Stay",
+    checkIn: "2026-09-05", checkOut: "2026-09-08", guestName: "Advance Guest",
+    adults: 2, children: 0, infants: 0, guestCountKnown: true,
+    confirmationCode: "HMCOUNT", bookingStatus: "confirmed", sourceCutoffAt: "2026-09-03T10:00:00Z",
+    guestCountChangeEvidence: composite,
+  }]);
+  const oldCountReply = {
+    ...laterDateRevision, sourceEnvelopeId: "3", sourceTimestamp: Date.parse("2026-09-02T10:02:00Z"),
+    evidenceKind: "supplemental", evidenceSubtype: "reply", guestCountChangeEvidence: undefined,
+    checkIn: "2026-09-04", checkOut: "2026-09-07",
+  };
+  const [merged] = mergeReservations([laterDateRevision, oldCountReply]);
+  assert.equal(merged.checkIn, "2026-09-05");
+  assert.deepEqual(merged.guestCountChangeEvidence, composite);
+  assert.deepEqual(cleanerEvidencePayload(oldCountReply, merged.guestCountChangeEvidence).guestCountChangeEvidence, composite);
 });
 
 test("cleaner ledger rows become report-compatible Supabase records", () => {
