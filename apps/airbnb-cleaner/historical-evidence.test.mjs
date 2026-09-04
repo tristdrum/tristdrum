@@ -181,6 +181,49 @@ test("a persisted historical booking anchors its date-less update inside the mai
     .flatMap((report) => report.touches), []);
 });
 
+test("a persisted historical booking older than a date-less update remains blocked", async () => {
+  const collected = await collectReservations(
+    parseISODate("2026-09-05"),
+    90,
+    80,
+    async () => ({
+      envelopesFound: 1,
+      messages: [{
+        envelope: {
+          id: "newer-accepted-change",
+          date: "2026-06-15T11:27:54Z",
+          subject: "Your reservation change was accepted",
+        },
+        body: [
+          "HISTORICAL GUEST AGREED TO CHANGE THEIR RESERVATION",
+          "Bougainvillea Courtyard Studio",
+          "https://airbnb.example/hosting/reservations/details/HMSTALEANCHOR",
+          "https://airbnb.example/messaging/thread/2562160077",
+        ].join("\n"),
+      }],
+    }),
+    8,
+    [{
+      sourceEnvelopeId: "database:stale-historical-booking",
+      sourceDate: "2026-06-12T16:13:50Z",
+      sourceTimestamp: Date.parse("2026-06-12T16:13:50Z"),
+      unitId: 1,
+      unitLabel: "Unit 1",
+      commonName: "Bougainvillea",
+      listingName: "Bougainvillea Courtyard Studio",
+      checkIn: "2026-06-13",
+      checkOut: "2026-06-16",
+      guestName: "Historical Guest",
+      guests: "1 adult",
+      confirmationCode: "HMSTALEANCHOR",
+      evidenceKind: "confirmed",
+      cancelled: false,
+    }],
+  );
+
+  assert.equal(collected.unmatchedUpdateCount, 1);
+});
+
 test("collection includes seven future stock dates without widening the cleaner target", async () => {
   let subjectFilter;
   const collected = await collectReservations(

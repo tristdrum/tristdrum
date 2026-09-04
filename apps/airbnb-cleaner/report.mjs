@@ -1709,11 +1709,22 @@ export async function collectReservations(
   }
 
   const combined = [...storedReservations, ...parsed];
-  const confirmedCodes = new Set(
-    combined
+  const importedConfirmationCodes = new Set(
+    parsed
       .filter((reservation) => reservation.evidenceKind === "confirmed" && reservation.confirmationCode)
       .map((reservation) => reservation.confirmationCode)
   );
+  const storedCutoffByConfirmationCode = new Map();
+  for (const reservation of storedReservations) {
+    if (!reservation.confirmationCode || !Number.isFinite(reservation.sourceTimestamp)) continue;
+    storedCutoffByConfirmationCode.set(
+      reservation.confirmationCode,
+      Math.max(
+        storedCutoffByConfirmationCode.get(reservation.confirmationCode) ?? 0,
+        reservation.sourceTimestamp,
+      ),
+    );
+  }
   const unmatchedUpdateCount = new Set(
     parsed
       .filter((reservation) =>
@@ -1721,7 +1732,8 @@ export async function collectReservations(
         reservation.evidenceSubtype === "update" &&
         reservation.confirmationCode &&
         (!reservation.unitId || !reservation.checkIn || !reservation.checkOut || reservationTouchesTarget(reservation, targetDate)) &&
-        !confirmedCodes.has(reservation.confirmationCode)
+        !importedConfirmationCodes.has(reservation.confirmationCode) &&
+        (storedCutoffByConfirmationCode.get(reservation.confirmationCode) ?? 0) < reservation.sourceTimestamp
       )
       .map((reservation) => reservation.confirmationCode)
   ).size;
