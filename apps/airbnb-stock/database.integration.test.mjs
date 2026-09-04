@@ -9,9 +9,11 @@ import {
 } from "@tristdrum/airbnb-db";
 import {
   loadCleanerLedgerRecords,
+  loadCleanerReservations,
   syncCleanerDatabase,
   syncCleanerFailureDatabase,
 } from "../airbnb-cleaner/database.mjs";
+import { collectReservations, parseISODate } from "../airbnb-cleaner/report.mjs";
 import {
   ingestOrderEvidence,
   ingestStockWhatsAppObservation,
@@ -382,6 +384,84 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
       record.messageHash === confirmed.result.messageHash
       && record.contentOccurrence === 1
     )), true);
+    const blockedConfirmationCode = "HMBLOCKSYNC01";
+    const historicalConfirmation = cleanerPayload({
+      runId: randomUUID(),
+      envelopeId: `historical-confirmation-${randomUUID()}`,
+      confirmationCode: blockedConfirmationCode,
+      occurredAt: "2026-06-12T16:13:50.000Z",
+      checkIn: "2026-09-20",
+      checkOut: "2026-09-21",
+    });
+    historicalConfirmation.receipt.targetDate = "2026-09-05";
+    historicalConfirmation.result.targetDate = "2026-09-05";
+    await syncCleanerDatabase({ ...historicalConfirmation, env: cleanerEnv });
+    const updateEnvelopeId = `historical-update-${randomUUID()}`;
+    const blockedUpdate = {
+      receipt: {
+        ...historicalConfirmation.receipt,
+        runId: randomUUID(),
+        status: "blocked",
+        startedAt: "2026-06-15T11:27:54.000Z",
+        completedAt: "2026-06-15T11:27:55.000Z",
+      },
+      result: {
+        ...historicalConfirmation.result,
+        status: "blocked",
+        messageHash: `blocked-${randomUUID()}`,
+        confidence: { ok: false, blockers: ["A reservation update is missing its confirmed booking anchor."] },
+        reservations: [{
+          ...historicalConfirmation.result.reservations[0],
+          sourceEnvelopeId: updateEnvelopeId,
+          sources: [historicalConfirmation.result.reservations[0].sourceEnvelopeId, updateEnvelopeId],
+        }],
+        reservationEvidence: [{
+          ...historicalConfirmation.result.reservationEvidence[0],
+          sourceEnvelopeId: updateEnvelopeId,
+          sourceTimestamp: Date.parse("2026-06-15T11:27:54.000Z"),
+          evidenceKind: "supplemental",
+          evidenceSubtype: "update",
+          subject: "Your reservation change was accepted",
+        }],
+      },
+    };
+    const blockedSync = await syncCleanerDatabase({ ...blockedUpdate, env: cleanerEnv });
+    assert.equal(blockedSync.reservationWritesSkipped, true);
+    const persistedCutoff = (await admin`
+      select source_cutoff_at
+      from airbnb.reservations
+      where household_id = ${householdId} and confirmation_code = ${blockedConfirmationCode}
+    `)[0].source_cutoff_at;
+    assert.equal(persistedCutoff.toISOString(), "2026-06-12T16:13:50.000Z");
+    const reloadedBaseline = await loadCleanerReservations({
+      targetDate: "2026-09-05",
+      historyDays: 90,
+      env: cleanerEnv,
+    });
+    const collectedAfterBlockedSync = await collectReservations(
+      parseISODate("2026-09-05"),
+      90,
+      80,
+      async () => ({
+        envelopesFound: 1,
+        messages: [{
+          envelope: {
+            id: updateEnvelopeId,
+            date: "2026-06-15T11:27:54.000Z",
+            subject: "Your reservation change was accepted",
+          },
+          body: [
+            "INTEGRATION MIRROR GUEST AGREED TO CHANGE THEIR RESERVATION",
+            "Bougainvillea Courtyard Studio",
+            `https://airbnb.example/hosting/reservations/details/${blockedConfirmationCode}`,
+            "https://airbnb.example/messaging/thread/2562160077",
+          ].join("\n"),
+        }],
+      }),
+      8,
+      reloadedBaseline.reservations,
+    );
+    assert.equal(collectedAfterBlockedSync.unmatchedUpdateCount, 1);
     const deliveredReversion = {
       receipt: {
         ...confirmed.receipt,

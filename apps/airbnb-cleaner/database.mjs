@@ -341,7 +341,8 @@ export async function syncCleanerDatabase({ result, receipt, env = process.env, 
         evidenceByEnvelope.set(String(evidence.sourceEnvelopeId), { id: rows[0].id, occurredAt, evidence });
       }
 
-      for (const entry of evidenceByEnvelope.values()) {
+      const reservationWritesSkipped = result.status === "blocked";
+      for (const entry of reservationWritesSkipped ? [] : evidenceByEnvelope.values()) {
         if (entry.evidence.evidenceKind !== "cancelled") continue;
         const cancellationCode = entry.evidence.confirmationCode || (
           entry.evidence.unitId && entry.evidence.checkIn && entry.evidence.checkOut
@@ -378,7 +379,7 @@ export async function syncCleanerDatabase({ result, receipt, env = process.env, 
       }
 
       let reservationCount = 0;
-      for (const reservation of result.reservations ?? []) {
+      for (const reservation of reservationWritesSkipped ? [] : result.reservations ?? []) {
         const propertyId = propertyByUnit.get(Number(reservation.unitId));
         const authoritative = evidenceByEnvelope.get(String(reservation.sourceEnvelopeId));
         if (!propertyId || !authoritative || !reservation.checkIn || !reservation.checkOut) continue;
@@ -524,6 +525,7 @@ export async function syncCleanerDatabase({ result, receipt, env = process.env, 
       const databaseSync = {
         status: "synced",
         reservationCount,
+        reservationWritesSkipped,
         evidenceCount: evidenceByEnvelope.size,
         cleanerPlanId: planRows[0].id,
       };
