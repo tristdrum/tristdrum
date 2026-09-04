@@ -33,7 +33,7 @@ test("stored reservation revisions preserve dates, counts, cancellation, and sou
   assert.equal(cancelled.guests, "");
 });
 
-test("the stored reservation read is household and horizon scoped and retains cancellations", async () => {
+test("the stored reservation read includes bounded historical confirmation context", async () => {
   const householdId = "11111111-1111-4111-8111-111111111111";
   let ended = false;
   const sql = async (strings, ...values) => {
@@ -42,12 +42,13 @@ test("the stored reservation read is household and horizon scoped and retains ca
     assert.match(query, /reservation\.household_id = \?/);
     assert.match(query, /reservation\.check_out >= \?::date/);
     assert.match(query, /reservation\.check_in <= \?::date \+ 7/);
+    assert.match(query, /reservation\.source_cutoff_at >= \?::date - \(\? \* interval '1 day'\)/);
     assert.doesNotMatch(query, /booking_status\s*=/);
     assert.match(query, /link\.household_id = reservation\.household_id/);
     assert.match(query, /link\.reservation_id = reservation\.id/);
     assert.match(query, /linked\.occurred_at <= reservation\.source_cutoff_at/);
     assert.match(query, /count_evidence\.composite/);
-    assert.deepEqual(values, [householdId, "2026-09-04", "2026-09-04"]);
+    assert.deepEqual(values, [householdId, "2026-09-04", "2026-09-04", "2026-09-04", 90]);
     return [];
   };
   sql.end = async () => { ended = true; };
@@ -58,6 +59,15 @@ test("the stored reservation read is household and horizon scoped and retains ca
   });
   assert.deepEqual(result, { status: "loaded", reservations: [] });
   assert.equal(ended, true);
+  await assert.rejects(
+    loadCleanerReservations({
+      targetDate: "2026-09-04",
+      historyDays: 401,
+      env: { AIRBNB_DATABASE_URL: "postgresql://example.invalid/database", AIRBNB_HOUSEHOLD_ID: householdId },
+      postgresFactory: () => sql,
+    }),
+    /history days must be between 1 and 400/i,
+  );
   assert.deepEqual(await loadCleanerReservations({ targetDate: "2026-09-04", env: {} }), {
     status: "disabled", reservations: [],
   });

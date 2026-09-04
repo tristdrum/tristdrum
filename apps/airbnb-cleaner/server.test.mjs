@@ -151,12 +151,14 @@ test("a cleaner timing-note read failure blocks the report", async () => {
 test("stored reservations reach the report and appear only as a count in the receipt", async () => {
   const storedReservations = [{ sourceEnvelopeId: "database:private-booking", guestName: "Private Baseline Guest" }];
   await withServer({
-    loadReservations: async ({ targetDate }) => {
+    loadReservations: async ({ targetDate, historyDays }) => {
       assert.equal(targetDate, "2026-09-04");
+      assert.equal(historyDays, 90);
       return { status: "loaded", reservations: storedReservations };
     },
     runReport: async (options) => {
       assert.deepEqual(options.storedReservations, storedReservations);
+      assert.equal(options.searchDays, 90);
       return successfulResult(options.mode, options.targetDate);
     },
   }, async (baseUrl) => {

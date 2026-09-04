@@ -10,7 +10,14 @@ import {
   syncCleanerDatabase,
   syncCleanerFailureDatabase,
 } from "./database.mjs";
-import { formatISODate, parseISODate, resolveTargetDate, runReport, sendFinalFailureAlert } from "./report.mjs";
+import {
+  DEFAULT_RESERVATION_SEARCH_DAYS,
+  formatISODate,
+  parseISODate,
+  resolveTargetDate,
+  runReport,
+  sendFinalFailureAlert,
+} from "./report.mjs";
 import {
   acquireRunLock,
   loadStatus,
@@ -118,13 +125,17 @@ async function handleRun(request, response, dependencies) {
       throw new Error("The required Supabase cleaner ledger is not configured.");
     }
     const operationalNotes = await dependencies.loadOperationalNotes({ targetDate });
-    const reservationBaseline = await dependencies.loadReservations({ targetDate });
+    const reservationBaseline = await dependencies.loadReservations({
+      targetDate,
+      historyDays: DEFAULT_RESERVATION_SEARCH_DAYS,
+    });
     if (mode === "live" && dependencies.sharedLedgerRequired && reservationBaseline.status !== "loaded") {
       throw new Error("The required Supabase cleaner reservations are not configured.");
     }
     const result = await dependencies.runReport({
       mode,
       targetDate,
+      searchDays: DEFAULT_RESERVATION_SEARCH_DAYS,
       authoritativeLedgerRecords: databaseLedger.status === "loaded" ? databaseLedger.records : null,
       operationalNotes: operationalNotes.notes,
       storedReservations: reservationBaseline.reservations,

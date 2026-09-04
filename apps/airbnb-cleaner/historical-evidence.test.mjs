@@ -136,6 +136,51 @@ test("an unrelated historical update without an anchor does not block the target
   assert.equal(collected.unmatchedUpdateCount, 0);
 });
 
+test("a persisted historical booking anchors its date-less update inside the mail lookback", async () => {
+  const collected = await collectReservations(
+    parseISODate("2026-09-05"),
+    90,
+    80,
+    async () => ({
+      envelopesFound: 1,
+      messages: [{
+        envelope: {
+          id: "historical-accepted-change",
+          date: "2026-06-15T11:27:54Z",
+          subject: "Your reservation change was accepted",
+        },
+        body: [
+          "HISTORICAL GUEST AGREED TO CHANGE THEIR RESERVATION",
+          "Bougainvillea Courtyard Studio",
+          "https://airbnb.example/hosting/reservations/details/HMHISTORICAL",
+          "https://airbnb.example/messaging/thread/2562160077",
+        ].join("\n"),
+      }],
+    }),
+    8,
+    [{
+      sourceEnvelopeId: "database:historical-booking",
+      sourceDate: "2026-06-15T11:27:54Z",
+      sourceTimestamp: Date.parse("2026-06-15T11:27:54Z"),
+      unitId: 1,
+      unitLabel: "Unit 1",
+      commonName: "Bougainvillea",
+      listingName: "Bougainvillea Courtyard Studio",
+      checkIn: "2026-06-13",
+      checkOut: "2026-06-16",
+      guestName: "Historical Guest",
+      guests: "1 adult",
+      confirmationCode: "HMHISTORICAL",
+      evidenceKind: "confirmed",
+      cancelled: false,
+    }],
+  );
+
+  assert.equal(collected.unmatchedUpdateCount, 0);
+  assert.deepEqual(classifyUnits(collected.reservations, parseISODate("2026-09-05"))
+    .flatMap((report) => report.touches), []);
+});
+
 test("collection includes seven future stock dates without widening the cleaner target", async () => {
   let subjectFilter;
   const collected = await collectReservations(
