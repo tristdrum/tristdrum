@@ -5,9 +5,113 @@ import {
   cleanerEvidencePayload,
   cleanerEvidenceSenderAddress,
   cleanerLedgerRecords,
+  cleanerReservationRecords,
   loadCleanerLedgerRecords,
+  loadCleanerReservations,
 } from "./database.mjs";
 import { redactSensitiveText, sanitizeFailure } from "./storage.mjs";
+import { mergeReservations } from "./report.mjs";
+
+test("stored reservation revisions preserve dates, counts, cancellation, and source precedence", () => {
+  const sourceCutoffAt = new Date("2026-06-03T17:14:47Z");
+  const row = {
+    id: "old-booking", unitNumber: 3, commonName: "Jasmine", listingName: "Jasmine Studio Stay",
+    checkIn: new Date("2026-09-04T00:00:00Z"), checkOut: "2026-09-07",
+    guestName: "Advance Guest", adults: 1, children: 1, infants: 2, guestCountKnown: true,
+    confirmationCode: "HMADVANCE", bookingStatus: "confirmed", sourceCutoffAt,
+  };
+  const [record] = cleanerReservationRecords([row]);
+  assert.equal(record.sourceEnvelopeId, "database:old-booking");
+  assert.equal(record.sourceTimestamp, sourceCutoffAt.getTime());
+  assert.equal(record.checkIn, "2026-09-04");
+  assert.equal(record.checkOut, "2026-09-07");
+  assert.equal(record.guests, "1 adult, 1 child, 2 infants");
+  assert.equal(record.evidenceKind, "confirmed");
+  const [cancelled] = cleanerReservationRecords([{ ...row, bookingStatus: "cancelled", guestCountKnown: false }]);
+  assert.equal(cancelled.evidenceKind, "cancelled");
+  assert.equal(cancelled.cancelled, true);
+  assert.equal(cancelled.guests, "");
+});
+
+test("the stored reservation read is household and horizon scoped and retains cancellations", async () => {
+  const householdId = "11111111-1111-4111-8111-111111111111";
+  let ended = false;
+  const sql = async (strings, ...values) => {
+    const query = strings.join("?");
+    assert.match(query, /property\.household_id = reservation\.household_id/);
+    assert.match(query, /reservation\.household_id = \?/);
+    assert.match(query, /reservation\.check_out >= \?::date/);
+    assert.match(query, /reservation\.check_in <= \?::date \+ 7/);
+    assert.doesNotMatch(query, /booking_status\s*=/);
+    assert.match(query, /link\.household_id = reservation\.household_id/);
+    assert.match(query, /link\.reservation_id = reservation\.id/);
+    assert.match(query, /linked\.occurred_at <= reservation\.source_cutoff_at/);
+    assert.match(query, /count_evidence\.composite/);
+    assert.deepEqual(values, [householdId, "2026-09-04", "2026-09-04"]);
+    return [];
+  };
+  sql.end = async () => { ended = true; };
+  const result = await loadCleanerReservations({
+    targetDate: "2026-09-04",
+    env: { AIRBNB_DATABASE_URL: "postgresql://example.invalid/database", AIRBNB_HOUSEHOLD_ID: householdId },
+    postgresFactory: () => sql,
+  });
+  assert.deepEqual(result, { status: "loaded", reservations: [] });
+  assert.equal(ended, true);
+  assert.deepEqual(await loadCleanerReservations({ targetDate: "2026-09-04", env: {} }), {
+    status: "disabled", reservations: [],
+  });
+});
+
+test("stored uncoded reservations retain range cancellation and deduplication", () => {
+  const [record] = cleanerReservationRecords([{
+    id: "uncoded-booking", unitNumber: 3, commonName: "Jasmine", listingName: "Jasmine Studio Stay",
+    checkIn: "2026-09-04", checkOut: "2026-09-07", guestName: "Advance Guest",
+    adults: 1, children: 0, infants: 0, guestCountKnown: true,
+    confirmationCode: "uncoded:range-hash", bookingStatus: "confirmed", sourceCutoffAt: "2026-06-03T17:14:47Z",
+  }]);
+  assert.equal(record.confirmationCode, "");
+  assert.equal(mergeReservations([record, { ...record, sourceEnvelopeId: "mail-copy" }]).length, 1);
+  assert.deepEqual(mergeReservations([record, {
+    ...record, sourceEnvelopeId: "cancelled-mail", evidenceKind: "cancelled", cancelled: true,
+    sourceTimestamp: Date.parse("2026-09-04T06:00:00Z"),
+  }]), []);
+});
+
+test("stored guest-count provenance survives a reimport of the same count reply", () => {
+  const composite = { discussionEnvelopeId: "1", acceptedEnvelopeId: "2", countEnvelopeId: "3" };
+  const [record] = cleanerReservationRecords([{
+    id: "count-booking", unitNumber: 3, commonName: "Jasmine", listingName: "Jasmine Studio Stay",
+    checkIn: "2026-09-04", checkOut: "2026-09-07", guestName: "Advance Guest",
+    adults: 2, children: 0, infants: 0, guestCountKnown: true,
+    confirmationCode: "HMCOUNT", bookingStatus: "confirmed", sourceCutoffAt: "2026-09-02T10:02:00Z",
+    guestCountChangeEvidence: composite,
+  }]);
+  const reply = { ...record, sourceEnvelopeId: "3", evidenceKind: "supplemental", evidenceSubtype: "reply", guestCountChangeEvidence: undefined };
+  const [merged] = mergeReservations([record, reply]);
+  assert.deepEqual(merged.guestCountChangeEvidence, composite);
+  assert.deepEqual(cleanerEvidencePayload(reply, merged.guestCountChangeEvidence).guestCountChangeEvidence, composite);
+});
+
+test("a later stored date revision retains its linked earlier count-reply provenance", () => {
+  const composite = { discussionEnvelopeId: "1", acceptedEnvelopeId: "2", countEnvelopeId: "3" };
+  const [laterDateRevision] = cleanerReservationRecords([{
+    id: "count-then-date", unitNumber: 3, commonName: "Jasmine", listingName: "Jasmine Studio Stay",
+    checkIn: "2026-09-05", checkOut: "2026-09-08", guestName: "Advance Guest",
+    adults: 2, children: 0, infants: 0, guestCountKnown: true,
+    confirmationCode: "HMCOUNT", bookingStatus: "confirmed", sourceCutoffAt: "2026-09-03T10:00:00Z",
+    guestCountChangeEvidence: composite,
+  }]);
+  const oldCountReply = {
+    ...laterDateRevision, sourceEnvelopeId: "3", sourceTimestamp: Date.parse("2026-09-02T10:02:00Z"),
+    evidenceKind: "supplemental", evidenceSubtype: "reply", guestCountChangeEvidence: undefined,
+    checkIn: "2026-09-04", checkOut: "2026-09-07",
+  };
+  const [merged] = mergeReservations([laterDateRevision, oldCountReply]);
+  assert.equal(merged.checkIn, "2026-09-05");
+  assert.deepEqual(merged.guestCountChangeEvidence, composite);
+  assert.deepEqual(cleanerEvidencePayload(oldCountReply, merged.guestCountChangeEvidence).guestCountChangeEvidence, composite);
+});
 
 test("cleaner ledger rows become report-compatible Supabase records", () => {
   for (const targetDate of ["2026-08-24", new Date("2026-08-24T00:00:00.000Z")]) {

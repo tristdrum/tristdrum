@@ -975,6 +975,76 @@ test("Supabase ledger input replaces the volume ledger for planning", async () =
   assert.deepEqual(result.ledger, { authority: "supabase", recordCount: 0 });
 });
 
+function advanceBooking(overrides = {}) {
+  return {
+    sourceEnvelopeId: "database:advance-booking",
+    sourceTimestamp: Date.parse("2026-06-03T17:14:47Z"),
+    unitId: 3, unitLabel: "Unit 3", commonName: "Jasmine", listingName: "Jasmine Studio Stay",
+    confirmationCode: "HMADVANCE", guestName: "Advance Guest", guests: "1 adult",
+    checkIn: "2026-09-04", checkOut: "2026-09-07", evidenceKind: "confirmed",
+    ...overrides,
+  };
+}
+
+test("a confirmed advance booking survives the Gmail lookback and changes checkout-only to turnover", async () => {
+  const checkout = advanceBooking({
+    sourceEnvelopeId: "database:checkout", confirmationCode: "HMCHECKOUT", guestName: "Departing Guest",
+    checkIn: "2026-09-03", checkOut: "2026-09-04", guests: "2 adults",
+  });
+  const result = await runReport({
+    mode: "preview", targetDate: "2026-09-04", storedReservations: [checkout, advanceBooking()],
+    collectMessagesFn: async ({ afterDate }) => {
+      assert.equal(afterDate, "2026-06-06");
+      return { envelopesFound: 0, messages: [] };
+    },
+    fetchWeatherFn: async () => dryWeather,
+    authoritativeLedgerRecords: [], workDir: "/tmp",
+  });
+  assert.equal(result.confidence.ok, true);
+  assert.equal(result.unitReports[2].action, "turnover");
+  assert.deepEqual(result.unitReports[2].arrivals, ["Advance Guest (1 adult)"]);
+  assert.deepEqual(result.reservationEvidence, []);
+  const previous = planDelivery({
+    targetDate: parseISODate("2026-09-04"),
+    unitReports: classifyUnits([checkout], parseISODate("2026-09-04")), weather: dryWeather, ledgerRecords: [],
+  });
+  const updated = planDelivery({
+    targetDate: parseISODate("2026-09-04"),
+    unitReports: classifyUnits(result.reservations, parseISODate("2026-09-04")), weather: dryWeather,
+    ledgerRecords: [{ targetDate: "2026-09-04", messageHash: previous.hash, messageText: previous.message, sentAt: "2026-09-03T11:30:00Z", weather: dryWeather }],
+  });
+  assert.equal(updated.isUpdate, true);
+  assert.equal(updated.duplicate, undefined);
+});
+
+test("fresh cancellation still removes a stored advance booking", async () => {
+  const collected = await collectReservations(parseISODate("2026-09-04"), 90, 80, async () => ({
+    envelopesFound: 1,
+    messages: [{
+      envelope: { id: "fresh-cancellation", date: "2026-09-04T06:00:00Z", subject: "Canceled: Reservation HMADVANCE" },
+      body: "The reservation was canceled.\nCONFIRMATION CODE\nHMADVANCE",
+    }],
+  }), 8, [advanceBooking()]);
+  assert.deepEqual(collected.reservations, []);
+  assert.equal(collected.evidence.length, 1);
+});
+
+test("stored cancellations and newer revisions cannot regress to older email snapshots", () => {
+  const old = advanceBooking({ sourceEnvelopeId: "old-confirmation" });
+  const cancelled = advanceBooking({ evidenceKind: "cancelled", cancelled: true, sourceTimestamp: Date.parse("2026-09-02T10:00:00Z") });
+  assert.deepEqual(mergeReservations([cancelled, old]), []);
+  const newer = advanceBooking({ sourceTimestamp: Date.parse("2026-09-02T10:00:00Z"), checkIn: "2026-09-07", checkOut: "2026-09-10", guests: "2 adults" });
+  const [merged] = mergeReservations([newer, old]);
+  assert.equal(merged.checkIn, "2026-09-07");
+  assert.equal(merged.guests, "2 adults");
+  const [updated] = mergeReservations([newer, {
+    ...old, sourceEnvelopeId: "fresh-update", evidenceKind: "supplemental", evidenceSubtype: "update",
+    sourceTimestamp: Date.parse("2026-09-04T06:00:00Z"), checkIn: "2026-09-08", checkOut: "2026-09-11", guests: "1 adult",
+  }]);
+  assert.equal(updated.checkIn, "2026-09-08");
+  assert.equal(updated.guests, "1 adult");
+});
+
 test("cleaners-chat history participates in duplicate detection", () => {
   const unitReports = classifyUnits(turnoverReservations(), targetDate);
   const message = buildMessage({ targetDate, unitReports, weather: dryWeather });

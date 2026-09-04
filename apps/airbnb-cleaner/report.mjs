@@ -1668,7 +1668,8 @@ export async function collectReservations(
   searchDays,
   maxRead,
   collectMessagesFn = collectAirbnbMessages,
-  futureHorizonDays = 8
+  futureHorizonDays = 8,
+  storedReservations = []
 ) {
   const afterDate = formatISODate(addDays(targetDate, -searchDays));
   const horizonDates = Array.from(
@@ -1706,8 +1707,9 @@ export async function collectReservations(
     if (reservation) parsed.push(reservation);
   }
 
+  const combined = [...storedReservations, ...parsed];
   const confirmedCodes = new Set(
-    parsed
+    combined
       .filter((reservation) => reservation.evidenceKind === "confirmed" && reservation.confirmationCode)
       .map((reservation) => reservation.confirmationCode)
   );
@@ -1724,7 +1726,7 @@ export async function collectReservations(
   ).size;
 
   return {
-    reservations: mergeReservations(parsed),
+    reservations: mergeReservations(combined),
     evidence: parsed,
     envelopesFound: collected.envelopesFound,
     envelopesRead: collected.messages.length,
@@ -1747,6 +1749,7 @@ export async function runReport({
   loadLedgerRecordsFn = loadLedgerRecords,
   authoritativeLedgerRecords = null,
   operationalNotes = [],
+  storedReservations = [],
   appendLedgerFn = appendLedger,
   now = () => new Date(),
   workDir = WORK_DIR,
@@ -1756,7 +1759,7 @@ export async function runReport({
   const targetDate = resolveTargetDate({ target, targetDate: requestedTargetDate, now: now() });
   mkdirSync(workDir, { recursive: true });
 
-  const collected = await collectReservations(targetDate, searchDays, maxRead, collectMessagesFn);
+  const collected = await collectReservations(targetDate, searchDays, maxRead, collectMessagesFn, 8, storedReservations);
   const weather = await fetchWeatherFn(targetDate);
   const unitReports = classifyUnits(collected.reservations, targetDate);
   const ledgerRecords = authoritativeLedgerRecords ?? loadLedgerRecordsFn();

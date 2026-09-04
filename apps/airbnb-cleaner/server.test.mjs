@@ -46,6 +46,7 @@ function successfulResult(mode = "live", targetDate = "2026-08-07") {
 async function withServer(dependencies, callback) {
   const server = createAirbnbCleanerServer({
     loadDatabaseLedger: async () => ({ status: "disabled", records: [] }),
+    loadReservations: async () => ({ status: "loaded", reservations: [] }),
     ...dependencies,
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -145,6 +146,51 @@ test("a cleaner timing-note read failure blocks the report", async () => {
     assert.equal((await response.json()).status, "error");
   });
   assert.equal(reportCalled, false);
+});
+
+test("stored reservations reach the report and appear only as a count in the receipt", async () => {
+  const storedReservations = [{ sourceEnvelopeId: "database:private-booking", guestName: "Private Baseline Guest" }];
+  await withServer({
+    loadReservations: async ({ targetDate }) => {
+      assert.equal(targetDate, "2026-09-04");
+      return { status: "loaded", reservations: storedReservations };
+    },
+    runReport: async (options) => {
+      assert.deepEqual(options.storedReservations, storedReservations);
+      return successfulResult(options.mode, options.targetDate);
+    },
+  }, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/run`, {
+      method: "POST", headers: authHeaders(),
+      body: JSON.stringify({ mode: "live", target: "2026-09-04" }),
+    });
+    assert.equal(response.status, 200);
+    const receipt = await response.json();
+    assert.deepEqual(receipt.reservationBaseline, { status: "loaded", count: 1 });
+    assert.doesNotMatch(JSON.stringify(receipt), /Private Baseline Guest|private-booking/);
+  });
+});
+
+test("live delivery fails closed when required stored reservations cannot be loaded", async () => {
+  for (const loadReservations of [
+    async () => ({ status: "disabled", reservations: [] }),
+    async () => { throw new Error("reservation baseline unavailable"); },
+  ]) {
+    let reportCalled = false;
+    await withServer({
+      sharedLedgerRequired: true,
+      loadDatabaseLedger: async () => ({ status: "loaded", records: [] }),
+      loadReservations,
+      runReport: async () => { reportCalled = true; return successfulResult(); },
+    }, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/run`, {
+        method: "POST", headers: authHeaders(),
+        body: JSON.stringify({ mode: "live", target: "2026-09-04" }),
+      });
+      assert.equal(response.status, 500);
+      assert.equal(reportCalled, false);
+    });
+  }
 });
 
 test("run persists and returns a sanitized receipt", async () => {

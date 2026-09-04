@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   loadCleanerLedgerRecords,
   loadCleanerOperationalNotes,
+  loadCleanerReservations,
   syncCleanerDatabase,
   syncCleanerFailureDatabase,
 } from "./database.mjs";
@@ -117,14 +118,23 @@ async function handleRun(request, response, dependencies) {
       throw new Error("The required Supabase cleaner ledger is not configured.");
     }
     const operationalNotes = await dependencies.loadOperationalNotes({ targetDate });
+    const reservationBaseline = await dependencies.loadReservations({ targetDate });
+    if (mode === "live" && dependencies.sharedLedgerRequired && reservationBaseline.status !== "loaded") {
+      throw new Error("The required Supabase cleaner reservations are not configured.");
+    }
     const result = await dependencies.runReport({
       mode,
       targetDate,
       authoritativeLedgerRecords: databaseLedger.status === "loaded" ? databaseLedger.records : null,
       operationalNotes: operationalNotes.notes,
+      storedReservations: reservationBaseline.reservations,
     });
     const completedAt = dependencies.now().toISOString();
     const receipt = sanitizeRunResult(result, { runId, startedAt, completedAt, finalAttempt });
+    receipt.reservationBaseline = {
+      status: reservationBaseline.status,
+      count: reservationBaseline.reservations.length,
+    };
     receipt.operationalNotes = {
       status: operationalNotes.status,
       count: operationalNotes.notes.length,
@@ -210,6 +220,7 @@ export function createAirbnbCleanerServer(dependencies = {}) {
     syncFailureDatabase: dependencies.syncFailureDatabase ?? syncCleanerFailureDatabase,
     loadDatabaseLedger: dependencies.loadDatabaseLedger ?? loadCleanerLedgerRecords,
     loadOperationalNotes: dependencies.loadOperationalNotes ?? loadCleanerOperationalNotes,
+    loadReservations: dependencies.loadReservations ?? loadCleanerReservations,
     sharedLedgerRequired: dependencies.sharedLedgerRequired
       ?? process.env.AIRBNB_CLEANER_SHARED_LEDGER_REQUIRED === "true",
     now: dependencies.now ?? (() => new Date()),
