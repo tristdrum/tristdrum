@@ -20,3 +20,8 @@ Accepted early check-ins and late check-outs are read from the shared Airbnb
 database and shown under the relevant unit in English and Xhosa. A timing-note
 read failure is recorded in the run receipt but does not suppress the underlying
 confirmed-reservation cleaner plan.
+
+Room plans do not assign workers or extend temporary cover. Agents monitoring
+the group must follow the [cleaning-team authority](../../docs/AIRBNB_CLEANING_TEAM_AUTHORITY.md)
+rules before responding to attendance or shift questions. This also applies to
+ad hoc messages sent outside the scheduled report worker.
