@@ -1,5 +1,7 @@
 # Tristan Drummond
 
+For repository layout, Airbnb operations, validation, and contribution guidance, start with [AGENTS.md](AGENTS.md).
+
 **Calm African technologist · CTO & co-founder at [WorkWeek](https://workweek.africa) · Builder of human-first systems.**
 
 This repository powers [tristdrum.com](https://tristdrum.com) — a black single-page experience that keeps animations intentional, typography confident, and copy grounded in the truth of my work.
