@@ -38,6 +38,9 @@ is deployed, enabled, or healthy now.
 - Preserve cleaner confirmed-reservation checks, the shared delivery ledger,
   stable idempotency, and exact destination readback. Do not revive old Min
   schedules or duplicate the active personal delivery path.
+- Cleaning plans authorize communication of room work, not staffing decisions.
+  Follow [cleaning-team authority](docs/AIRBNB_CLEANING_TEAM_AUTHORITY.md) before
+  responding to an individual about attendance, shifts, or temporary cover.
 - For support, Tristan's conversation mail is the reply route; Jane's mail is
   supplemental evidence. Preserve newer-host/guest vetoes, explicit live gates,
   and the prohibition on automatic retry after an ambiguous SMTP result.
