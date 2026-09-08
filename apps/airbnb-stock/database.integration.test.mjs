@@ -20,6 +20,7 @@ import {
   loadSuppressedStockAlerts,
   reconcileReservationConsumption,
   storeShoppingList,
+  storeStockCountReview,
 } from "./repository.mjs";
 
 const adminUrl = process.env.AIRBNB_INTEGRATION_DATABASE_URL;
@@ -680,6 +681,29 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
       returning id
     `;
     assert.equal(stockAlerts.length, 1);
+    const reviewInput = {
+      householdId,
+      runDate: "2026-09-08",
+      projections: [{
+        countToConfirm: true,
+        sku: "integration_chocolate",
+        displayName: "Integration chocolate",
+        category: "guest_supply",
+        stockUnit: "each",
+      }],
+    };
+    const review = await storeStockCountReview(stock.sql, reviewInput);
+    assert.equal(review.status, "suppressed");
+    const repeatedReview = await storeStockCountReview(stock.sql, reviewInput);
+    assert.equal(repeatedReview.id, review.id);
+    assert.equal(repeatedReview.status, "suppressed");
+    await assert.rejects(storeStockCountReview(stock.sql, {
+      ...reviewInput,
+      householdId: otherHouseholdId,
+    }), { code: "42501" });
+    await assert.rejects(storeStockCountReview(support.sql, reviewInput), { code: "42501" });
+    await assert.rejects(storeStockCountReview(cleaner.sql, reviewInput), { code: "42501" });
+
     const crossServiceAlertUpdate = await support.sql`
       update airbnb.alerts
       set summary = 'Cross-service rewrite'
