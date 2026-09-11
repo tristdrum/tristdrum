@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  latestConversationEvidenceAt,
+  latestConversationImportCursorAt,
   loadDeliveryGuardCandidates,
   loadShadowCandidates,
   loadSuppressedSupportAlerts,
@@ -10,6 +12,71 @@ import {
   storeSupportDraft,
   supportStayLabelMatches,
 } from "./repository.mjs";
+
+const cursorHouseholdId = "22222222-2222-4222-8222-222222222222";
+
+test("import cursor SQL requires matching mailbox, whole-run success, and strictly empty counts", async () => {
+  for (const scope of ["tristan", "jane"]) {
+    const queries = [];
+    const sql = async (strings, ...values) => {
+      queries.push({ query: strings.join("?"), values });
+      return [{ latest: null }];
+    };
+    assert.equal(await latestConversationImportCursorAt(sql, cursorHouseholdId, scope), null);
+    assert.equal(queries.length, 2);
+    const [evidence, scan] = queries;
+    assert.match(evidence.query, /mailbox_scope = \?/);
+    assert.match(evidence.query, /provider = 'gmail'/);
+    assert.match(evidence.query, /evidence_kind = 'conversation'/);
+    assert.deepEqual(evidence.values, [cursorHouseholdId, scope]);
+    assert.match(scan.query, /max\(started_at\)/);
+    assert.doesNotMatch(scan.query, /completed_at|coalesce|emailsFound'/);
+    assert.match(scan.query, /household_id = \?/);
+    assert.match(scan.query, /service = 'support'/);
+    assert.match(scan.query, /and status = 'success'/);
+    assert.match(scan.query, /receipt->>'status' = 'success'/);
+    assert.match(scan.query, /\? = 'tristan' and receipt->'canonicalEmailsFound' = '0'::jsonb/);
+    assert.match(scan.query, /\? = 'jane'\s+and receipt->'supplementalEmailsFound' = '0'::jsonb\s+and receipt->'supplementalMailboxStatus'->>'status' = 'enabled'/);
+    assert.deepEqual(scan.values, [cursorHouseholdId, scope, scope]);
+  }
+});
+
+test("import cursor chooses the latest valid scan or evidence timestamp", async () => {
+  const earlier = "2026-09-11T13:10:00.000Z";
+  const later = "2026-09-11T13:15:00.000Z";
+  for (const [evidence, scan, expected] of [
+    [null, null, null],
+    [null, later, later],
+    [later, null, later],
+    [earlier, later, later],
+    [later, earlier, later],
+    [later, later, later],
+    ["invalid", later, later],
+    [later, "invalid", later],
+    ["invalid", "invalid", null],
+  ]) {
+    const sql = async (strings) => [{
+      latest: strings.join("").includes("airbnb.evidence") ? evidence : scan,
+    }];
+    const cursor = await latestConversationImportCursorAt(sql, cursorHouseholdId, "jane");
+    assert.equal(cursor?.toISOString() ?? null, expected);
+  }
+});
+
+test("evidence helper stays evidence-only and unsupported cursor scopes never query SQL", async () => {
+  const queries = [];
+  const sql = async (strings) => {
+    queries.push(strings.join(""));
+    return [{ latest: null }];
+  };
+  assert.equal(await latestConversationEvidenceAt(sql, cursorHouseholdId, "jane"), null);
+  assert.equal(queries.length, 1);
+  assert.doesNotMatch(queries[0], /job_runs/);
+  for (const scope of ["canonical", "supplemental", "other", "Jane", null]) {
+    await assert.rejects(latestConversationImportCursorAt(sql, cursorHouseholdId, scope), /Unsupported mailbox scope/);
+  }
+  assert.equal(queries.length, 1);
+});
 
 test("booking lifecycle matching requires the same stay dates", () => {
   assert.equal(supportStayLabelMatches("SEP 4 – 6", "2026-09-04", "2026-09-06"), true);
