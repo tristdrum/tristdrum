@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import postgres from "postgres";
 import {
   buildGuestTimeRequest,
   captureGuestTimeRequest,
@@ -9,6 +10,8 @@ import {
   stayStartDate,
   withdrawGuestTimeRequest,
 } from "./operations.mjs";
+import { supportBagDropRequestDecision } from "@tristdrum/airbnb-core";
+import { loadShadowCandidates } from "./repository.mjs";
 
 function fakeSql(results) {
   const calls = [];
@@ -79,6 +82,116 @@ test("an accepted bag drop becomes one bilingual dated cleaner instruction", () 
   const message = cleanerTimingMessage(request);
   assert.match(message, /^Airbnb bag-drop update for /);
   assert.match(message, /\*Xhosa:\*\nUnit 3\n- Ukushiya iibhegi/);
+});
+
+const officeFacts = {
+  officeLuggageStorage: { allowed: true, location: "Office by the car park, through the glass doors" },
+};
+const officeDecision = (date = "2026-08-26", dropTime = null) => supportBagDropRequestDecision(
+  "We will leave our bags in the office.", officeFacts, { date, dropTime },
+);
+
+test("office notes use the actual arrangement date and never manufacture a drop-off time or readiness check", () => {
+  for (const date of ["2026-08-24", "2026-08-26", "2026-08-28"]) {
+    const request = buildGuestTimeRequest({ candidate, decision: officeDecision(date) });
+    assert.equal(request.stayDate, date);
+    assert.equal(request.requestedTime, null);
+    assert.equal(request.effectiveTime, null);
+    assert.equal(request.readinessCheckAt, null);
+    assert.match(request.cleanerNoteEn, /Office by the car park, through the glass doors/);
+    assert.match(request.cleanerNoteEn, /Drop-off time not specified/);
+    assert.match(request.cleanerNoteEn, /no studio entry or checkout extension/);
+    assert.match(request.cleanerNoteXh, /e-ofisini.*iingcango|e-ofisini.*ngeengcango zeglasi/);
+    assert.match(request.cleanerNoteXh, /Ixesha lokushiya iibhegi alichazwanga/);
+    assert.doesNotMatch(cleanerTimingMessage(request), /10:00|00:00|previous guest|undefined|null/);
+  }
+  const timed = buildGuestTimeRequest({ candidate, decision: officeDecision("2026-08-26", "08:30") });
+  assert.equal(timed.effectiveTime, "08:30");
+  assert.equal(timed.readinessCheckAt, null);
+  assert.match(timed.cleanerNoteEn, /Drop-off at 08:30/);
+  assert.match(timed.cleanerNoteXh, /ngo-08:30/);
+  assert.equal(buildGuestTimeRequest({ candidate, decision: officeDecision(null) }), null);
+  assert.equal(buildGuestTimeRequest({ candidate, decision: {
+    ...officeDecision(null), createsOperationalRequest: true,
+  } }), null);
+  for (const requestType of ["early_checkin", "late_checkout", "bag_drop"]) {
+    assert.equal(buildGuestTimeRequest({ candidate, decision: {
+      requestType, action: "accept_conditional", createsOperationalRequest: true,
+      requestedTime: null, effectiveTime: null,
+    } }), null);
+  }
+});
+
+test("office storage preserves instant bilingual notification and existing request dedupe", async () => {
+  const decision = officeDecision();
+  const sql = fakeSql([
+    [{ id: "office-request", status: "accepted", cleanersNotifiedAt: null }],
+    [{ id: "office-request", cleanersNotifiedAt: "2026-08-24T10:00:00Z" }],
+    [{ id: "office-request", status: "cleaners_notified", cleanersNotifiedAt: "2026-08-24T10:00:00Z" }],
+  ]);
+  let sends = 0;
+  const options = {
+    sql, householdId: "household-1", candidate, decision,
+    now: new Date("2026-08-24T10:00:00Z"), env: { AIRBNB_WHATSAPP_CHAT_ID: "cleaners@g.us" },
+    sendGroupMessage: async ({ text, idempotencyKey }) => {
+      sends += 1;
+      assert.match(text, /Wednesday,? 26 August 2026/);
+      assert.match(text, /\*Xhosa:\*/);
+      assert.match(text, /Drop-off time not specified/);
+      assert.equal(idempotencyKey, "airbnb-support:cleaners:time:office-request");
+      return { live: { providerMessageId: "office-provider" }, verification: { found: true } };
+    },
+  };
+  assert.deepEqual(await captureGuestTimeRequest(options), { status: "notified", requestId: "office-request", verified: true });
+  assert.equal((await captureGuestTimeRequest(options)).status, "already_notified");
+  assert.equal(sends, 1);
+  assert.match(sql.calls[0].text, /stay_date = excluded.stay_date/);
+  assert.ok(sql.calls[0].values.some((value) => value?.action === "accept_office_storage"));
+});
+
+test("support maps an untimed request to null while prioritising genuine early-entry follow-ups", async () => {
+  const sql = fakeSql([[{
+    activeTimeRequestType: "bag_drop", activeTimeRequestStayDate: "2026-08-26",
+    activeTimeRequestEffectiveTime: null, activeTimeRequestStatus: "cleaners_notified",
+  }]]);
+  const [result] = await loadShadowCandidates(sql, { householdId: "household-1" });
+  assert.equal(result.activeTimeRequest.effectiveTime, null);
+  assert.match(sql.calls[0].text, /order by \(request.request_type = 'early_checkin'\) desc, request.created_at desc/);
+});
+
+test("the local schema permits nullable times only for explicit office bag drops", {
+  skip: !process.env.AIRBNB_INTEGRATION_DATABASE_URL,
+}, async () => {
+  const url = process.env.AIRBNB_INTEGRATION_DATABASE_URL;
+  assert.ok(["localhost", "127.0.0.1", "::1", "[::1]"].includes(new URL(url).hostname));
+  const sql = postgres(url, { max: 1, prepare: false });
+  try {
+    await sql.begin(async (tx) => {
+      await tx`create temp table office_storage_times_test (like airbnb.guest_time_requests including defaults including constraints) on commit drop`;
+      for (const requestType of ["bag_drop", "early_checkin", "late_checkout"]) {
+        for (const details of [{ action: "accept_office_storage" }, { action: "accept_after_checkout" }, {}, { action: null }]) {
+          for (const times of [[null, null], ["08:30", null], [null, "08:30"], ["08:30", "08:30"]]) {
+            const insert = () => tx.savepoint((savepoint) => savepoint`
+              insert into office_storage_times_test (
+                household_id, thread_id, property_id, source_fingerprint, request_type, stay_date,
+                requested_time, effective_time, cleaner_note_en, cleaner_note_xh, details
+              ) values (
+                gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), 'fixture', ${requestType}, '2026-08-26',
+                ${times[0]}, ${times[1]}, 'Fixture note', 'Fixture note', ${sql.json(details)}
+              )
+            `);
+            if (times.every(Boolean) || (requestType === "bag_drop" && details.action === "accept_office_storage")) {
+              await insert();
+            } else {
+              await assert.rejects(insert, { code: "23514", constraint_name: "guest_time_requests_times_required_check" });
+            }
+          }
+        }
+      }
+    });
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
 });
 
 test("capturing a time request verifies one cleaner notification and skips an existing one", async () => {

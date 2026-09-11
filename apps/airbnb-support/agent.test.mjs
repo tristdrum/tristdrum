@@ -90,6 +90,58 @@ test("stay phase respects the verified local checkout time", () => {
   }), "after_stay");
 });
 
+test("post-stay collection does not become a new check-in permission", async () => {
+  let input;
+  const result = await decideGuestResponse({
+    guestMessage: "Could I arrive at 4:15 pm?",
+    guestName: "Guest",
+    listingName: "Bougainvillea Courtyard Studio",
+    facts: { checkInTime: "15:00", checkOutTime: "10:00", lostPropertyCollection: "Collection requires a confirmed office handoff." },
+    stayLabel: "SEP 2 - 3",
+    latestEventAt: "2026-09-04T08:38:54Z",
+    now: new Date("2026-09-04T08:40:00Z"),
+    conversationContext: [{ direction: "host", text: "Your item is in the office; please arrange collection." }],
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecision({ replyNeeded: true, sendReply: false, alertManagement: true,
+      summary: "Office availability must be confirmed.", draft: null }, (request) => {
+      input = JSON.parse(request.input[1].content[0].text);
+    }),
+  });
+  assert.equal(input.stayPhase, "after_stay");
+  assert.equal(input.timePolicyDecision, null);
+  assert.equal(result.autoReply, false);
+  assert.equal(result.operationalRequest, null);
+});
+
+test("verified Wi-Fi details remain eligible for an ordinary in-stay reply", async () => {
+  const result = await decideGuestResponse({
+    guestMessage: "Please send the Wi-Fi details.", guestName: "Guest",
+    listingName: "Jasmine Studio Stay", stayLabel: "SEP 11 - 12",
+    latestEventAt: "2026-09-11T14:00:00Z",
+    facts: { wifiNetwork: "Fixture network", wifiPassword: "fixture-only", checkInTime: "15:00", checkOutTime: "10:00" },
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecision({ replyNeeded: true, sendReply: true, alertManagement: false,
+      summary: "Provide verified Wi-Fi details.", draft: "Of course! The network is Fixture network and the password is fixture-only." }),
+  });
+  assert.equal(result.autoReply, true);
+  assert.equal(result.alertManagement, false);
+});
+
+test("office permission cannot erase an explicit room checkout restriction", async () => {
+  const result = await decideGuestResponse({
+    guestMessage: "Can I check out at 11am?", guestName: "Guest",
+    listingName: "Jasmine Studio Stay", stayLabel: "SEP 11 - 12",
+    latestEventAt: "2026-09-12T06:00:00Z",
+    facts: { checkInTime: "15:00", checkOutTime: "10:00", officeLuggageStorage: { allowed: true, location: "Office by the car park, through the glass doors" } },
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecision({ replyNeeded: true, sendReply: true, alertManagement: false,
+      roomTimingRequest: null, officeStorageArrangement: null,
+      summary: "The guest asks about checkout.", draft: "Yes, checking out at 11:00 is fine." }),
+  });
+  assert.equal(result.autoReply, false);
+  assert.equal(result.alertManagement, true);
+});
+
 for (const fixture of [
   {
     name: "Monde",
@@ -461,6 +513,226 @@ test("a bag-drop reply creates a separate dated cleaner operation", async () => 
   assert.equal(result.bagDropRequest.createsOperationalRequest, true);
   assert.equal(requests[0].timePolicyDecision.action, "offer_earliest");
   assert.equal(requests[0].bagDropPolicyDecision.action, "accept_after_checkout");
+});
+
+const officeFacts = {
+  checkInTime: "15:00", checkOutTime: "10:00",
+  officeLuggageStorage: {
+    allowed: true,
+    location: "Office by the car park, through the glass doors",
+    policy: "Guests are always welcome; no studio entry or checkout extension. Do not invent staffed hours or lost-property collection availability.",
+  },
+};
+const officeDraft = "Of course, you are welcome to leave belongings in the Office by the car park, through the glass doors. This is luggage storage only and does not grant studio entry or extend checkout.";
+const officeResult = (arrangement, draft = officeDraft) => ({
+  replyNeeded: true, sendReply: true, alertManagement: false,
+  summary: "Office storage arrangement.", draft, officeStorageArrangement: arrangement, roomTimingRequest: null,
+});
+const officeInput = {
+  listingName: "Jasmine Studio Stay", facts: officeFacts,
+  stayLabel: "SEP 10 - 11", latestEventAt: "2026-09-11T08:30:00Z",
+  now: new Date("2026-09-12T08:30:00Z"), env: { OPENAI_API_KEY: "test-key" },
+};
+
+test("full-context office arrangements retain unknown drop times and the message-grounded date after checkout", async () => {
+  let input;
+  const result = await decideGuestResponse({
+    ...officeInput,
+    guestMessage: "That works for today, thank you.",
+    conversationContext: [
+      { direction: "guest", occurredAt: "2026-09-11T07:00:00Z", text: "May I leave belongings in the office until 4pm today?" },
+      { direction: "host", occurredAt: "2026-09-11T07:05:00Z", text: "Of course, office storage is welcome." },
+    ],
+    fetchFn: modelDecision(officeResult({ date: "2026-09-11", dropTime: null }), (request) => {
+      input = JSON.parse(request.input[1].content[0].text);
+      assert.match(request.input[0].content[0].text, /pickup\/collect\/until time is NOT dropTime/);
+      assert.match(request.input[0].content[0].text, /today\/tomorrow from the message that proposed the arrangement/);
+      assert.match(request.input[0].content[0].text, /contextual follow-ups without bag-drop keywords/);
+    }),
+  });
+  assert.equal(input.stayPhase, "after_stay");
+  assert.equal(input.recentConversation.length, 2);
+  assert.equal(result.operationalRequest, null);
+  assert.equal(result.autoReply, true);
+  assert.equal(result.bagDropRequest.action, "accept_office_storage");
+  assert.deepEqual(result.bagDropRequest.officeStorageArrangement, { date: "2026-09-11", dropTime: null });
+  assert.equal(result.bagDropRequest.requestedTime, null);
+  assert.equal(result.bagDropRequest.effectiveTime, null);
+  assert.equal(result.qualityRevisionCount, 0);
+  const schema = SUPPORT_DECISION_SCHEMA.properties.officeStorageArrangement;
+  assert.deepEqual(schema.type, ["object", "null"]);
+  assert.deepEqual(schema.required, ["date", "dropTime"]);
+  assert.deepEqual(schema.properties.date.type, ["string", "null"]);
+  assert.deepEqual(schema.properties.dropTime.type, ["string", "null"]);
+});
+
+test("unknown office dates get one short clarification, never an arrival-date or midnight operation", async () => {
+  const requests = [];
+  const result = await decideGuestResponse({
+    ...officeInput, guestMessage: "Can we leave our bags in the office?",
+    fetchFn: modelDecisionSequence([
+      officeResult({ date: null, dropTime: null }),
+      officeResult({ date: null, dropTime: null }, `${officeDraft} Which day would you like to drop them off?`),
+    ], (request) => requests.push(JSON.parse(request.input[1].content[0].text))),
+  });
+  assert.equal(result.autoReply, true);
+  assert.equal(result.qualityRevisionCount, 1);
+  assert.ok(requests[1].revisionFeedback.some((issue) => /date is unknown/.test(issue)));
+  assert.equal(result.bagDropRequest.createsOperationalRequest, false);
+  assert.equal(result.bagDropRequest.effectiveTime, null);
+  assert.equal(result.bagDropRequest.officeStorageArrangement.date, null);
+});
+
+test("office storage does not require checkout-time verification or inherit the previous-guest condition", async () => {
+  for (const checkOutTime of [null, "11:00"]) {
+    const result = await decideGuestResponse({
+      ...officeInput, facts: { ...officeFacts, checkOutTime },
+      guestMessage: "May I drop my bags in the office tomorrow?",
+      fetchFn: modelDecision(officeResult({ date: "2026-09-12", dropTime: null })),
+    });
+    assert.equal(result.autoReply, true);
+    assert.equal(result.bagDropRequest.createsOperationalRequest, true);
+  }
+  const result = await decideGuestResponse({
+    ...officeInput, guestMessage: "Can we drop bags in the office?",
+    fetchFn: modelDecisionSequence([
+      officeResult({ date: "2026-09-11", dropTime: null }, `${officeDraft} Bag drop starts only after the previous guest leaves.`),
+      officeResult({ date: "2026-09-11", dropTime: null }),
+    ]),
+  });
+  assert.equal(result.autoReply, true);
+  assert.equal(result.qualityRevisionCount, 1);
+});
+
+test("genuine early studio entry remains an independent readiness operation beside office storage", async () => {
+  const result = await decideGuestResponse({
+    ...officeInput, stayLabel: "SEP 12 - 13", latestEventAt: "2026-09-11T08:30:00Z",
+    guestMessage: "Can we check in early at 2pm tomorrow and drop bags in the office before that?",
+    fetchFn: modelDecision({ ...officeResult({ date: "2026-09-12", dropTime: "08:30" },
+      `${officeDraft} You can drop them off at 08:30. We will do our best for a 14:00 early check-in, depending on cleaning.`), roomTimingRequest: "Can we check in early at 2pm tomorrow?" }),
+  });
+  assert.equal(result.autoReply, true);
+  assert.equal(result.operationalRequest.action, "accept_conditional");
+  assert.equal(result.operationalRequest.effectiveTime, "14:00");
+  assert.equal(result.bagDropRequest.action, "accept_office_storage");
+  assert.equal(result.bagDropRequest.effectiveTime, "08:30");
+});
+
+test("office-only until and arrival times do not invoke room checkout or earliest-entry rules", async () => {
+  for (const fixture of [
+    { message: "Can I leave my bags in the office until 4pm?", stayLabel: "SEP 10 - 11", dropTime: null },
+    { message: "Can I arrive at 08:30 to leave bags in the office?", stayLabel: "SEP 11 - 12", dropTime: "08:30" },
+    { message: "Can I arrive at 08:30?", stayLabel: "SEP 11 - 12", dropTime: "08:30",
+      context: [{ direction: "host", occurredAt: "2026-09-10T07:00:00Z", text: "You can leave belongings in the office tomorrow morning; when will you drop them off?" }] },
+  ]) {
+    let calls = 0;
+    const result = await decideGuestResponse({
+      ...officeInput, latestEventAt: "2026-09-11T06:00:00Z", stayLabel: fixture.stayLabel,
+      guestMessage: fixture.message, conversationContext: fixture.context ?? [],
+      fetchFn: modelDecision(officeResult({ date: "2026-09-11", dropTime: fixture.dropTime },
+        `${officeDraft}${fixture.dropTime ? " Your 08:30 drop-off is fine." : ""}`), (request) => {
+        calls += 1;
+        assert.match(request.input[0].content[0].text, /roomTimingRequest from the whole conversation/);
+        assert.match(request.input[0].content[0].text, /provisional text-derived candidate/);
+        assert.deepEqual(JSON.parse(request.input[1].content[0].text).recentConversation, fixture.context ?? []);
+      }),
+    });
+    assert.equal(result.autoReply, true, fixture.message);
+    assert.equal(result.operationalRequest, null);
+    assert.equal(result.bagDropRequest.action, "accept_office_storage");
+    assert.equal(result.bagDropRequest.effectiveTime, fixture.dropTime);
+    assert.equal(calls, 1);
+    assert.doesNotMatch(result.draft, /13:00|10:00|can't offer|cannot offer/);
+  }
+});
+
+test("mixed office storage and actual late studio checkout retain the checkout boundary", async () => {
+  const result = await decideGuestResponse({
+    ...officeInput, latestEventAt: "2026-09-11T06:00:00Z",
+    guestMessage: "Can I leave bags in the office until 4pm and check out of the studio at 12pm?",
+    fetchFn: modelDecision({ ...officeResult({ date: "2026-09-11", dropTime: null },
+      `${officeDraft} I am sorry, but we cannot offer late check-out; standard check-out is by 10:00.`), roomTimingRequest: "Can I check out of the studio at 12pm?" }),
+  });
+  assert.equal(result.autoReply, true);
+  assert.equal(result.operationalRequest.action, "decline");
+  assert.equal(result.bagDropRequest.action, "accept_office_storage");
+  assert.equal(result.bagDropRequest.effectiveTime, null);
+});
+
+test("mixed requests use the actual room time even when an office clock occurs later in the message", async () => {
+  const result = await decideGuestResponse({
+    ...officeInput, stayLabel: "SEP 11 - 12", latestEventAt: "2026-09-11T06:00:00Z",
+    guestMessage: "Can we check in early at 2pm and leave our bags in the office until 4pm?",
+    fetchFn: modelDecision({ ...officeResult({ date: "2026-09-11", dropTime: null },
+      `${officeDraft} We will do our best for a 14:00 early check-in, depending on cleaning.`),
+    roomTimingRequest: "Can we check in early at 2pm?" }),
+  });
+  assert.equal(result.autoReply, true);
+  assert.equal(result.operationalRequest.action, "accept_conditional");
+  assert.equal(result.operationalRequest.effectiveTime, "14:00");
+  assert.equal(result.bagDropRequest.effectiveTime, null);
+});
+
+test("a no-reply acknowledgement of an established office arrangement stays quiet", async () => {
+  const result = await decideGuestResponse({
+    ...officeInput, latestEventAt: "2026-09-11T06:00:00Z", stayLabel: "SEP 11 - 12",
+    guestMessage: "Tomorrow still works, thanks.",
+    conversationContext: [{ direction: "host", occurredAt: "2026-09-11T05:00:00Z",
+      text: "Your office storage is arranged for tomorrow; the drop-off time is not specified." }],
+    fetchFn: modelDecision({ ...officeResult({ date: "2026-09-12", dropTime: null }, null),
+      replyNeeded: false, sendReply: false, summary: "The guest confirms the unchanged office arrangement; no reply is needed." }),
+  });
+  assert.equal(result.replyNeeded, false);
+  assert.equal(result.autoReply, false);
+  assert.equal(result.alertManagement, false);
+  assert.equal(result.operationalRequest, null);
+  assert.equal(result.bagDropRequest, null);
+  assert.equal(result.qualityRevisionCount, 0);
+});
+
+test("office context does not silence a genuine room timing request marked as needing no reply", async () => {
+  const result = await decideGuestResponse({
+    ...officeInput, latestEventAt: "2026-09-11T06:00:00Z", stayLabel: "SEP 11 - 12",
+    guestMessage: "Could we check in early at 2pm as well?",
+    fetchFn: modelDecision({ ...officeResult({ date: "2026-09-12", dropTime: null }, null),
+      replyNeeded: false, sendReply: false, roomTimingRequest: "Could we check in early at 2pm?" }),
+  });
+  assert.equal(result.replyNeeded, true);
+  assert.equal(result.autoReply, false);
+  assert.equal(result.alertManagement, true);
+});
+
+test("an explicitly arranged 10:00 office drop-off is not confused with the studio checkout default", async () => {
+  const result = await decideGuestResponse({
+    ...officeInput, guestMessage: "May I drop my bags in the office tomorrow at 10:00?",
+    fetchFn: modelDecision(officeResult({ date: "2026-09-12", dropTime: "10:00" },
+      `${officeDraft} You can drop your bags from 10:00 as requested.`)),
+  });
+  assert.equal(result.autoReply, true);
+  assert.equal(result.bagDropRequest.effectiveTime, "10:00");
+  assert.equal(result.qualityRevisionCount, 0);
+});
+
+test("office storage permission does not authorize lost-property collection or unverified offices", async () => {
+  const collection = await decideGuestResponse({
+    ...officeInput, guestMessage: "Could I arrive at 4:15 pm to collect my charger?",
+    conversationContext: [{ direction: "host", text: "Your charger is in the office; collection needs a confirmed handoff." }],
+    fetchFn: modelDecision({
+      ...officeResult(null, "We will need to confirm a handoff for your charger before agreeing on a collection time."),
+      alertManagement: true,
+    }),
+  });
+  assert.equal(collection.autoReply, true);
+  assert.equal(collection.operationalRequest, null);
+  assert.equal(collection.bagDropRequest, null);
+  for (const facts of [{}, { officeLuggageStorage: { allowed: false } }, { officeLuggageStorage: { allowed: true } }]) {
+    const result = await decideGuestResponse({
+      ...officeInput, facts, guestMessage: "Tomorrow works.",
+      fetchFn: modelDecision(officeResult({ date: "2026-09-12", dropTime: null })),
+    });
+    assert.equal(result.autoReply, false);
+    assert.equal(result.bagDropRequest, null);
+  }
 });
 
 test("returning to standard check-in creates the cleaner withdrawal operation", async () => {

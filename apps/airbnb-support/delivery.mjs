@@ -15,6 +15,7 @@ import {
   recordAmbiguousDeliveryFailure,
   recordDeliveryGuardFailure,
   recordDeliveryAttempt,
+  revalidateDeliveryAuthority,
 } from "./repository.mjs";
 
 function eventTime(occurredAt, sequence) {
@@ -167,6 +168,7 @@ export async function processDeliveryGuard({
   markSent = markDeliverySent,
   recordAmbiguous = recordAmbiguousDeliveryFailure,
   recordGuardFailure = recordDeliveryGuardFailure,
+  revalidateAuthority = revalidateDeliveryAuthority,
 }) {
   if (!janeMailboxConfigured(env)) {
     return { action: "guard_disabled", reason: "jane_mailbox_unavailable" };
@@ -187,7 +189,7 @@ export async function processDeliveryGuard({
     if (!attempt) return { action: "not_claimed" };
     attemptRecorded = true;
 
-    // Inbox evidence is refreshed first, then Sent mail is the final I/O before SMTP.
+    // Refresh mail, then recheck persisted holds and UI-only host replies before SMTP.
     const snapshot = await collectFreshDeliverySnapshot({
       claimed,
       env,
@@ -202,6 +204,12 @@ export async function processDeliveryGuard({
         now: now(),
       });
       return snapshot.decision;
+    }
+
+    if (!await revalidateAuthority(sql, { householdId, deliveryId })) {
+      const decision = { action: "cancel", reason: "Conversation held or changed during delivery verification." };
+      await applyDecision(sql, { householdId, deliveryId, decision, now: now() });
+      return decision;
     }
 
     smtpStarted = true;

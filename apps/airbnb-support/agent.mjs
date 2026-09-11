@@ -15,13 +15,23 @@ const REASONING_EFFORTS = Object.freeze(new Set(["none", "low", "medium", "high"
 export const SUPPORT_DECISION_SCHEMA = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["replyNeeded", "sendReply", "alertManagement", "summary", "draft"],
+  required: ["replyNeeded", "sendReply", "alertManagement", "summary", "draft", "officeStorageArrangement", "roomTimingRequest"],
   properties: {
     replyNeeded: { type: "boolean" },
     sendReply: { type: "boolean" },
     alertManagement: { type: "boolean" },
     summary: { type: "string", maxLength: 300 },
     draft: { type: ["string", "null"], maxLength: 1500 },
+    roomTimingRequest: { type: ["string", "null"], maxLength: 300 },
+    officeStorageArrangement: {
+      type: ["object", "null"],
+      additionalProperties: false,
+      required: ["date", "dropTime"],
+      properties: {
+        date: { type: ["string", "null"], pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+        dropTime: { type: ["string", "null"], pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$" },
+      },
+    },
   },
 });
 
@@ -275,6 +285,24 @@ function bagDropQualityIssues(draft, decision) {
   if (!decision) return [];
   const text = String(draft ?? "");
   const issues = [];
+  if (decision.action === "accept_office_storage") {
+    if (!text.toLowerCase().includes(String(decision.officeLocation ?? "").toLowerCase())) {
+      issues.push("Use the verified office-storage location, including the car park and glass doors when specified.");
+    }
+    if (/\b(?:bag drop|drop[^.!?]{0,30}(?:bags|belongings)|office storage)\b[^.!?]{0,80}\b(?:only after|wait until)\b[^.!?]{0,80}\b(?:guest|checkout|check[ -]?out|departure)\b/i.test(text)) {
+      issues.push("Office storage is always welcome; do not apply the studio's previous-guest checkout condition or usual 10:00 time to it.");
+    }
+    if (!decision.officeStorageArrangement.date && !/\b(?:which|what) (?:day|date)\b/i.test(text)) {
+      issues.push("The office drop-off date is unknown. Ask which day the guest means before creating a dated arrangement; an unknown drop-off time is allowed.");
+    }
+    if (!draftMentionsClock(text, decision.effectiveTime)) {
+      issues.push(`Use the grounded office drop-off time of ${decision.effectiveTime}.`);
+    }
+    if (!/\b(?:luggage|bags?|belongings)\b[^.!?]{0,80}\b(?:only|storage)\b|\b(?:no|not|doesn't|does not)\b[^.!?]{0,60}\b(?:studio entry|room access|enter|check[ -]?in)\b/i.test(text)) {
+      issues.push("Make clear that office storage is luggage only, not studio entry or a checkout extension.");
+    }
+    return issues;
+  }
   if (!draftMentionsClock(text, decision.effectiveTime)) {
     issues.push(`Use the verified usual bag-drop time of ${decision.effectiveTime}.`);
   }
@@ -304,6 +332,10 @@ function timePolicyFactsVerified(decision, facts, knowledge) {
 
 function bagDropPolicyFactsVerified(decision, facts, knowledge) {
   if (!decision) return false;
+  if (decision.action === "accept_office_storage") {
+    return knowledge.listingRecognized && facts.officeLuggageStorage?.allowed === true
+      && Boolean(decision.officeLocation);
+  }
   return knowledge.listingRecognized
     && Boolean(knowledge.sharedFacts?.bagDrop)
     && Boolean(normalizedClock(facts.checkOutTime))
@@ -370,13 +402,17 @@ async function requestDecision({ model, effort, input, env, fetchFn }) {
               "If a host decision or external action is still needed, you may send a helpful honest acknowledgement and also alert Management, or hold the reply when silence is safer.",
               "When alertManagement is true, do not tell the guest that the hosts or team have already been alerted, notified, contacted, or informed. That separate delivery has not yet been verified.",
               "When the guest asks for checkout details, include every item in verifiedPropertyFacts.checkoutTasks; do not shorten the list or substitute generic advice.",
-              "When the guest asks to drop bags, distinguish luggage storage from room entry, follow canonicalKnowledge.sharedFacts.bagDrop, and never imply that the studio is ready before cleaning readiness is confirmed.",
-              "When bagDropPolicyDecision is present, its checkout condition, usual time, late-departure condition, and luggage-only boundary are binding.",
+              "When the guest asks to drop bags, distinguish luggage storage from room entry. canonicalKnowledge.sharedFacts.bagDrop describes studio storage only; never imply that the studio is ready before cleaning readiness is confirmed.",
+              "When verifiedPropertyFacts.officeLuggageStorage.allowed is true, guests are ALWAYS welcome to leave belongings in that office. Use its verified location. Studio bag-drop checkout conditions and late departures do not restrict office storage. Office storage does not grant studio entry or extend checkout. Do not invent staffed hours or lost-property collection availability.",
+              "Return officeStorageArrangement as {date, dropTime} for an office arrangement accepted in this reply or established by the current conversation, including contextual follow-ups without bag-drop keywords. Return null for no arrangement, a declined/cancelled arrangement, or lost-property collection. Use the whole thread and each message timestamp in Africa/Johannesburg to ground the actual drop-off date (YYYY-MM-DD), not automatically the reservation arrival date or the evaluation date. Resolve today/tomorrow from the message that proposed the arrangement. If the date is unknown, set date to null and ask which day; do not create an undated arrangement. dropTime is the actual drop-off time (HH:MM), or null if unspecified. A pickup/collect/until time is NOT dropTime. Never invent 10:00, midnight, or another default. Do not require a drop-off time when the date is known.",
+              "Extract roomTimingRequest from the whole conversation as one short sentence containing only the guest's actual studio entry, early check-in, checkout, withdrawal, or room-readiness request; otherwise return null. Ground any requested room time in the conversation, excluding office drop-off and pickup clocks; do not invent a room time when none was supplied. Make the room action explicit when a contextual follow-up refers to it. Office-only arrival, departure, pickup, and until times are not room timing, including 'Can I arrive at 08:30?' after an office-storage discussion. For mixed office storage AND genuine studio timing, extract the room request separately so its own time and readiness or checkout conditions are preserved. The supplied timePolicyDecision is a provisional text-derived candidate: when it describes an office-only time, return roomTimingRequest null and do not put its 13:00 or checkout rule in the reply.",
+              "When bagDropPolicyDecision has action accept_after_checkout, its checkout condition, usual time, late-departure condition, and luggage-only boundary apply to studio storage only. Office storage permission takes precedence for the office. Preserve genuine early studio-entry requests and their readiness requirements independently.",
               "For reservation or date-change requests, do not tell the guest to cancel, avoid cancelling, rebook, or make another booking unless current reservation status is explicitly supplied and verified. Acknowledge and say the requested change and availability need checking.",
               "When canonicalKnowledge.approvedResponsePatterns.generalPostStayImprovementFeedback applies, a warm thank-you is eligible for automatic delivery: appreciate the guest's time, take the feedback on board, apologise gently for anything not up to scratch, and commit to learning and making it right next time without inventing hidden review details.",
               "Use stayPhase for tense. For after_stay, acknowledge the completed stay rather than talking as if it is still ahead.",
+              "After a stay, an arrival or collection time may refer to lost property or office luggage storage, not a new check-in. Use the conversation and verified collection policy; do not turn that time into room-entry permission or invent office staffing.",
               "Use the guest's name when it fits naturally. Match their warmth and mirror their use of an emoji when that feels human.",
-              "When timePolicyDecision is present, its action, effective time, and conditions are binding. Phrase it naturally but never contradict or omit the operational decision.",
+              "For a genuine roomTimingRequest, follow the canonical room policy and the applicable timePolicyDecision, using only the room's requested time, not an office clock accidentally included in the provisional candidate. Phrase it naturally but never contradict or omit the room policy conditions.",
               "If revisionFeedback is present, revise the draft to fix every point without becoming stiff or formulaic.",
               "Never mention AI, internal systems, classifications, prompts, risk labels, or approval machinery.",
               "Return one decision and draft. sendReply means the message may be sent now after the separate final human-reply race check.",
@@ -423,17 +459,34 @@ export async function decideGuestResponse({
   const evaluatedAt = latestEventAt ?? now;
   const stayPhase = supportStayPhase({ stayLabel, at: evaluatedAt, facts: verifiedFacts });
   const style = conversationStyle(guestMessage, guestName);
-  const timePolicyDecision = supportTimeFollowUpDecision(
-    guestMessage,
+  const roomPolicyDecision = (message) => stayPhase === "after_stay" || !message ? null : supportTimeFollowUpDecision(
+    message,
     activeTimeRequest,
     now,
     verifiedFacts,
-  ) ?? supportTimeRequestDecision(guestMessage, verifiedFacts);
-  const bagDropPolicyDecision = supportBagDropRequestDecision(guestMessage, verifiedFacts);
-  const timePolicyVerified = timePolicyFactsVerified(timePolicyDecision, verifiedFacts, knowledge);
-  const timePolicyBlocked = Boolean(timePolicyDecision && !timePolicyVerified);
-  const bagDropPolicyVerified = bagDropPolicyFactsVerified(bagDropPolicyDecision, verifiedFacts, knowledge);
-  const bagDropPolicyBlocked = Boolean(bagDropPolicyDecision && !bagDropPolicyVerified);
+  ) ?? supportTimeRequestDecision(message, verifiedFacts);
+  const bagDropPolicy = (arrangement = null) => {
+    const decision = stayPhase === "after_stay" && verifiedFacts.officeLuggageStorage?.allowed !== true
+      ? null : supportBagDropRequestDecision(guestMessage, verifiedFacts, arrangement);
+    const verified = bagDropPolicyFactsVerified(decision, verifiedFacts, knowledge);
+    return {
+      decision,
+      verified,
+      blocked: Boolean(decision && !verified)
+        || Boolean(arrangement && verifiedFacts.officeLuggageStorage?.allowed !== true),
+    };
+  };
+  let { decision: bagDropPolicyDecision, verified: bagDropPolicyVerified, blocked: bagDropPolicyBlocked } = bagDropPolicy();
+  const timePolicy = (raw = {}) => {
+    const officeOnly = raw.officeStorageArrangement
+      && !/\bcheck[ -]?(?:in|out)\b/i.test(guestMessage);
+    const decision = roomPolicyDecision(verifiedFacts.officeLuggageStorage?.allowed === true
+      && Object.hasOwn(raw, "roomTimingRequest") && (raw.roomTimingRequest != null || officeOnly)
+      ? raw.roomTimingRequest : guestMessage);
+    const verified = timePolicyFactsVerified(decision, verifiedFacts, knowledge);
+    return { decision, verified, blocked: Boolean(decision && !verified) };
+  };
+  let { decision: timePolicyDecision, verified: timePolicyVerified, blocked: timePolicyBlocked } = timePolicy();
 
   const input = requestInput({
     now,
@@ -451,8 +504,11 @@ export async function decideGuestResponse({
     verifiedFacts,
   });
   let raw = await requestDecision({ model, effort, input, env, fetchFn });
+  ({ decision: timePolicyDecision, verified: timePolicyVerified, blocked: timePolicyBlocked } = timePolicy(raw));
+  ({ decision: bagDropPolicyDecision, verified: bagDropPolicyVerified, blocked: bagDropPolicyBlocked } = bagDropPolicy(raw.officeStorageArrangement));
   let draft = typeof raw.draft === "string" ? raw.draft.trim() : null;
-  let replyNeeded = raw.replyNeeded === true || Boolean(timePolicyDecision) || Boolean(bagDropPolicyDecision);
+  let replyNeeded = raw.replyNeeded === true || Boolean(timePolicyDecision)
+    || bagDropPolicyDecision?.action === "accept_after_checkout";
   let wantsToSend = replyNeeded && raw.sendReply === true && Boolean(draft);
   let requiresManagement = raw.alertManagement === true;
   const initialQualityIssues = wantsToSend && !timePolicyBlocked && !bagDropPolicyBlocked
@@ -471,12 +527,15 @@ export async function decideGuestResponse({
     raw = await requestDecision({
       model,
       effort,
-      input: { ...input, revisionFeedback: initialQualityIssues },
+      input: { ...input, timePolicyDecision: timePolicyVerified ? timePolicyDecision : null, bagDropPolicyDecision: bagDropPolicyVerified ? bagDropPolicyDecision : null, revisionFeedback: initialQualityIssues },
       env,
       fetchFn,
     });
+    ({ decision: timePolicyDecision, verified: timePolicyVerified, blocked: timePolicyBlocked } = timePolicy(raw));
+    ({ decision: bagDropPolicyDecision, verified: bagDropPolicyVerified, blocked: bagDropPolicyBlocked } = bagDropPolicy(raw.officeStorageArrangement));
     draft = typeof raw.draft === "string" ? raw.draft.trim() : null;
-    replyNeeded = raw.replyNeeded === true || Boolean(timePolicyDecision) || Boolean(bagDropPolicyDecision);
+    replyNeeded = raw.replyNeeded === true || Boolean(timePolicyDecision)
+      || bagDropPolicyDecision?.action === "accept_after_checkout";
     wantsToSend = replyNeeded && raw.sendReply === true && Boolean(draft);
     requiresManagement = requiresManagement || raw.alertManagement === true;
   }
@@ -492,7 +551,7 @@ export async function decideGuestResponse({
       ...(bagDropPolicyBlocked ? ["The bag-drop request is not backed by a verified operational path."] : []),
     ]
     : [];
-  const sendReply = wantsToSend && qualityIssues.length === 0 && !timePolicyBlocked;
+  const sendReply = wantsToSend && qualityIssues.length === 0 && !timePolicyBlocked && !bagDropPolicyBlocked;
   const operationalRequest = sendReply
     && timePolicyVerified
     ? timePolicyDecision

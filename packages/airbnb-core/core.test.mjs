@@ -271,6 +271,41 @@ test("bag drop creates a cleaner operation without granting room access", () => 
   assert.equal(supportBagDropRequestDecision("We no longer need to drop our bags.", {}), null);
 });
 
+test("verified office storage is independent of studio checkout and uses only supplied drop-off details", () => {
+  const facts = {
+    checkOutTime: "11:00",
+    officeLuggageStorage: { allowed: true, location: "Office by the car park, through the glass doors" },
+  };
+  const decision = supportBagDropRequestDecision("Could we leave our bags until 4pm?", facts, {
+    date: "2026-09-11", dropTime: null,
+  });
+  assert.equal(decision.action, "accept_office_storage");
+  assert.equal(decision.requestType, "bag_drop");
+  assert.equal(decision.requestedTime, null);
+  assert.equal(decision.effectiveTime, null);
+  assert.equal(decision.createsOperationalRequest, true);
+  assert.equal(decision.needsCleanerNotification, true);
+  assert.match(decision.reply, /always welcome/);
+  assert.match(decision.reply, /does not grant studio entry or extend checkout/);
+  assert.doesNotMatch(decision.reply, /previous guest|10:00|11:00|16:00|00:00/);
+
+  const contextual = supportBagDropRequestDecision("Tomorrow at 8:30 works.", facts, {
+    date: "2026-09-12", dropTime: "08:30",
+  });
+  assert.equal(contextual.effectiveTime, "08:30");
+  assert.equal(contextual.createsOperationalRequest, true);
+  for (const date of [null, "2026-02-30", "not-a-date"]) {
+    const unknown = supportBagDropRequestDecision("Can we drop bags?", facts, { date, dropTime: null });
+    assert.equal(unknown.officeStorageArrangement.date, null);
+    assert.equal(unknown.effectiveTime, null);
+    assert.equal(unknown.createsOperationalRequest, false);
+    assert.equal(unknown.needsCleanerNotification, false);
+    assert.match(unknown.reply, /which day/i);
+  }
+  assert.equal(supportBagDropRequestDecision("Tomorrow works.", {}, { date: "2026-09-12", dropTime: null }), null);
+  assert.equal(supportBagDropRequestDecision("We no longer need to drop our bags.", facts), null);
+});
+
 test("late checkout policy politely declines every extension and never creates a cleaner note", () => {
   const eleven = supportTimeRequestDecision("Could we have a late checkout at 11am?", {});
   assert.equal(eleven.action, "decline");
@@ -297,6 +332,8 @@ test("late checkout policy politely declines every extension and never creates a
     "a stale runtime exception must not override the standing policy",
   );
   assert.equal(supportTimeRequestDecision("Could we have a late checkout at 1?", {}).requestedTime, "13:00");
+  assert.equal(supportTimeRequestDecision("Could I arrive at 4:15 pm?", {}).requestedTime, "16:15");
+  assert.equal(supportTimeRequestDecision("Could I arrive at 11:30 am?", {}).requestedTime, "11:30");
 
   const standard = supportTimeRequestDecision("Can we check out at 10am?", {});
   assert.equal(standard.action, "standard_time");

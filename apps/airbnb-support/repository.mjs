@@ -103,6 +103,7 @@ export async function ingestConversation(sql, { householdId, email, parsed }) {
                       else airbnb.guest_threads.guest_display_name
                     end,
                     status = case
+                      when airbnb.guest_threads.status = 'closed' then 'closed'
                       when greatest(
                         coalesce(excluded.last_guest_at, '-infinity'::timestamptz),
                         coalesce(excluded.last_host_at, '-infinity'::timestamptz)
@@ -305,6 +306,7 @@ export async function reconcileBookingLifecycle(sql, { householdId, email, lifec
       update airbnb.guest_threads
       set status = 'handled', updated_at = ${email.occurredAt}
       where household_id = ${householdId} and id = ${thread.id}
+        and status <> 'closed'
     `;
     await transaction`
       update airbnb.alerts
@@ -387,7 +389,7 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8, notBef
       where request.household_id = thread.household_id
         and request.thread_id = thread.id
         and request.status not in ('completed', 'cancelled')
-      order by request.created_at desc
+      order by (request.request_type = 'early_checkin') desc, request.created_at desc
       limit 1
     ) active_time_request on true
     left join lateral (
@@ -402,7 +404,6 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8, notBef
         where message.household_id = thread.household_id
           and message.thread_id = thread.id
         order by message.provider_sent_at desc
-        limit 8
       ) context_message
     ) recent_context on true
     left join airbnb.properties property
@@ -437,7 +438,7 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8, notBef
     activeTimeRequest: row.activeTimeRequestType ? {
       requestType: row.activeTimeRequestType,
       stayDate: String(row.activeTimeRequestStayDate),
-      effectiveTime: String(row.activeTimeRequestEffectiveTime).slice(0, 5),
+      effectiveTime: row.activeTimeRequestEffectiveTime == null ? null : String(row.activeTimeRequestEffectiveTime).slice(0, 5),
       status: row.activeTimeRequestStatus,
       readyAt: row.activeTimeRequestReadyAt ?? null,
     } : null,
@@ -512,6 +513,7 @@ export async function storeSupportDraft(sql, {
   await sql`
     update airbnb.guest_threads
     set status = case
+          when status = 'closed' then 'closed'
           when ${terminalThreadStatus} = 'handled'
             and exists (
               select 1
@@ -639,7 +641,27 @@ export async function upsertGuestTimeRequest(sql, {
   now,
 }) {
   const rows = await sql`
-    with superseded as (
+    with matching_office as materialized (
+      select id, status, cleaners_notified_at, readiness_check_at,
+             coalesce((details->>'replacesPrevious')::boolean, false) as replaces_previous
+      from airbnb.guest_time_requests
+      where ${request.requestType} = 'bag_drop' and ${request.action} = 'accept_office_storage'
+        and household_id = ${householdId} and thread_id = ${candidate.id}
+        and property_id = ${candidate.propertyId}
+        and request_type = 'bag_drop' and details->>'action' = 'accept_office_storage'
+        and stay_date = ${request.stayDate}::date
+        and requested_time is not distinct from ${request.requestedTime}::time
+        and effective_time is not distinct from ${request.effectiveTime}::time
+        and (
+          details->>'officeLocation' = ${request.officeLocation ?? null}
+          or (details->>'officeLocation' is null
+            and strpos(lower(cleaner_note_en), lower(${request.officeLocation ?? null})) > 0)
+        )
+        and status not in ('completed', 'cancelled')
+      order by created_at desc
+      limit 1
+      for update
+    ), superseded as (
       update airbnb.guest_time_requests
       set status = 'cancelled',
           details = details || ${sql.json({ supersededByFingerprint: candidate.sourceFingerprint })}
@@ -648,13 +670,14 @@ export async function upsertGuestTimeRequest(sql, {
         and request_type = ${request.requestType}
         and source_fingerprint <> ${candidate.sourceFingerprint}
         and status not in ('completed', 'cancelled')
+        and not exists (select 1 from matching_office)
       returning id
     ), upserted as (
       insert into airbnb.guest_time_requests (
       household_id, thread_id, property_id, reservation_id, source_fingerprint,
       request_type, stay_date, requested_time, effective_time, cleaner_note_en,
       cleaner_note_xh, readiness_check_at, details
-      ) values (
+      ) select
         ${householdId}, ${candidate.id}, ${candidate.propertyId}, ${candidate.reservationId ?? null},
         ${candidate.sourceFingerprint}, ${request.requestType}, ${request.stayDate},
         ${request.requestedTime}, ${request.effectiveTime}, ${request.cleanerNoteEn},
@@ -664,12 +687,14 @@ export async function upsertGuestTimeRequest(sql, {
           guestName: candidate.guestDisplayName,
           unitNumber: request.unitNumber,
           action: request.action,
+          ...(request.officeLocation ? { officeLocation: request.officeLocation } : {}),
         })}::jsonb || jsonb_build_object(
           'replacesPrevious', exists(select 1 from superseded)
         )
-      )
+      where not exists (select 1 from matching_office)
       on conflict (household_id, thread_id, source_fingerprint, request_type)
-      do update set requested_time = excluded.requested_time,
+      do update set stay_date = excluded.stay_date,
+                    requested_time = excluded.requested_time,
                     effective_time = excluded.effective_time,
                     cleaner_note_en = excluded.cleaner_note_en,
                     cleaner_note_xh = excluded.cleaner_note_xh,
@@ -683,6 +708,8 @@ export async function upsertGuestTimeRequest(sql, {
       returning id, status, cleaners_notified_at, readiness_check_at,
                 coalesce((details->>'replacesPrevious')::boolean, false) as replaces_previous
     )
+    select matching_office.*, 0 as superseded_count from matching_office
+    union all
     select upserted.*, (select count(*)::integer from superseded) as superseded_count
     from upserted
   `;
@@ -763,6 +790,7 @@ export async function loadDueReadinessRequests(sql, { householdId, now, limit = 
       on thread.household_id = request.household_id
      and thread.id = request.thread_id
     where request.household_id = ${householdId}
+      and thread.status <> 'closed'
       and request.request_type = 'early_checkin'
       and request.status = 'cleaners_notified'
       and request.stay_date = (${now} at time zone 'Africa/Johannesburg')::date
@@ -984,6 +1012,12 @@ export async function loadDeliveryGuardCandidates(sql, { householdId, now, limit
     from airbnb.reply_deliveries
     where household_id = ${householdId}
       and status = 'approved'
+      and exists (
+        select 1 from airbnb.guest_threads thread
+        where thread.household_id = airbnb.reply_deliveries.household_id
+          and thread.id = airbnb.reply_deliveries.thread_id
+          and thread.status <> 'closed'
+      )
       and coalesce(classification->>'deterministicGuard', '') <> 'initial_inquiry_requires_airbnb_ui'
       and (
         approved_by is not null
@@ -1039,6 +1073,7 @@ export async function loadSuppressedSupportAlerts(sql, { householdId, limit = 24
       where alert.household_id = ${householdId}
         and alert.status = 'suppressed'
         and alert.alert_type in ('guest_escalation', 'guest_overdue')
+        and thread.status <> 'closed'
         and (${notBefore}::timestamptz is null or thread.last_guest_at >= ${notBefore}::timestamptz)
         and (thread.last_host_at is null or thread.last_host_at < thread.last_guest_at)
         and (
@@ -1147,6 +1182,7 @@ export async function claimDeliveryForGuard(sql, { householdId, deliveryId, now 
       where delivery.household_id = ${householdId}
         and delivery.id = ${deliveryId}
         and delivery.status = 'approved'
+        and thread.status <> 'closed'
       for update of delivery, thread
     `;
     const delivery = rows[0];
@@ -1160,6 +1196,21 @@ export async function claimDeliveryForGuard(sql, { householdId, deliveryId, now 
     `;
     return { ...delivery, status: "sending", action: "claimed" };
   });
+}
+
+export async function revalidateDeliveryAuthority(sql, { householdId, deliveryId }) {
+  const rows = await sql`
+    select delivery.id
+    from airbnb.reply_deliveries delivery
+    join airbnb.guest_threads thread
+      on thread.household_id = delivery.household_id and thread.id = delivery.thread_id
+    where delivery.household_id = ${householdId} and delivery.id = ${deliveryId}
+      and delivery.status = 'sending'
+      and thread.status <> 'closed'
+      and thread.source_fingerprint = delivery.source_fingerprint
+      and (thread.last_host_at is null or thread.last_host_at < delivery.source_last_event_at)
+  `;
+  return rows.length === 1;
 }
 
 export async function applyDeliveryGuardDecision(sql, {
@@ -1201,6 +1252,7 @@ export async function applyDeliveryGuardDecision(sql, {
         update airbnb.guest_threads thread
         set status = 'handled'
         where thread.household_id = ${householdId}
+          and thread.status <> 'closed'
           and thread.id = ${rows[0].threadId}
           and thread.source_fingerprint = (
             select delivery.source_fingerprint
@@ -1221,6 +1273,7 @@ export async function applyDeliveryGuardDecision(sql, {
         update airbnb.guest_threads
         set status = 'open'
         where household_id = ${householdId} and id = ${rows[0].threadId}
+          and status <> 'closed'
       `;
     }
     await recordSupportAudit(transaction, {
@@ -1282,6 +1335,7 @@ export async function markDeliverySent(sql, {
       update airbnb.guest_threads thread
       set status = 'handled'
       where thread.household_id = ${householdId}
+        and thread.status <> 'closed'
         and thread.id = ${rows[0].threadId}
         and thread.source_fingerprint = (
           select delivery.source_fingerprint

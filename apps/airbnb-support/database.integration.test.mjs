@@ -8,6 +8,7 @@ import {
 } from "@tristdrum/airbnb-core";
 import { createAirbnbDatabase } from "@tristdrum/airbnb-db";
 import { processDeliveryGuard } from "./delivery.mjs";
+import { captureGuestTimeRequest } from "./operations.mjs";
 import {
   applyDeliveryGuardDecision,
   cancelActiveGuestTimeRequests,
@@ -1126,6 +1127,123 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
       where household_id = ${householdId}
         and id = ${hostActionPromotedCandidate.id}
     `)[0].status, "needs_human");
+    const heldEmail = emailFixture({
+      mailboxScope: "tristan", providerMessageId: `<held-${randomUUID()}@example.test>`,
+      providerThreadId: "9876543299", occurredAt: "2026-08-22T08:00:00Z",
+    });
+    const held = await ingestConversation(database.sql, {
+      householdId, email: heldEmail, parsed: parseAirbnbConversationEmail(heldEmail),
+    });
+    const heldCandidate = (await loadShadowCandidates(database.sql, { householdId, limit: 100 }))
+      .find((candidate) => candidate.providerThreadId === "9876543299");
+    const heldDraft = await storeSupportDraft(database.sql, {
+      householdId, candidate: heldCandidate,
+      classification: { topic: "general", riskTier: "low", replyNeeded: true, summary: "Fixture reply",
+        draft: "Thanks for your message.", autoReply: true, status: "ready", alertManagement: false,
+        decisionSource: "adaptive_agent", decisionVersion: 2 },
+      now: new Date("2026-08-22T08:01:00Z"), shadowMode: false, automaticallyApprove: true,
+    });
+    await admin`update airbnb.guest_threads set status = 'closed' where id = ${heldCandidate.id}`;
+    const newerHeldEmail = emailFixture({
+      ...heldEmail, providerMessageId: `<held-new-${randomUUID()}@example.test>`,
+      providerThreadId: "9876543299", occurredAt: "2026-08-22T08:02:00Z",
+      entries: [{ name: "Guest Fixture", role: "Guest", text: "Could I collect my item later?" }],
+    });
+    await ingestConversation(database.sql, {
+      householdId, email: newerHeldEmail, parsed: parseAirbnbConversationEmail(newerHeldEmail),
+    });
+    assert.equal((await admin`select status from airbnb.guest_threads where id = ${heldCandidate.id}`)[0].status, "closed");
+    assert.equal((await loadShadowCandidates(database.sql, { householdId, limit: 100 }))
+      .some((candidate) => candidate.id === heldCandidate.id), false);
+    assert.equal((await loadDeliveryGuardCandidates(database.sql, { householdId, now: new Date("2026-08-22T08:03:00Z"), limit: 100 }))
+      .some((delivery) => delivery.id === heldDraft.id), false);
+    assert.equal(await claimDeliveryForGuard(database.sql, {
+      householdId, deliveryId: heldDraft.id, now: new Date("2026-08-22T08:03:00Z"),
+    }), null);
+    assert.ok(held);
+    const officeRequest = {
+      requestType: "bag_drop", action: "accept_office_storage", stayDate: "2026-08-23",
+      requestedTime: null, effectiveTime: null, readinessCheckAt: null,
+      cleanerNoteEn: "Office storage; drop-off time not specified.",
+      cleanerNoteXh: "Ukugcina iibhegi e-ofisini; ixesha alichazwanga.",
+    };
+    const untimed = await upsertGuestTimeRequest(database.sql, {
+      householdId, candidate: { ...heldCandidate, sourceFingerprint: "untimed-office" },
+      request: officeRequest, now: new Date("2026-08-22T08:03:00Z"),
+    });
+    const savedOffice = (await admin`select requested_time, effective_time, stay_date, details
+      from airbnb.guest_time_requests where id = ${untimed.id}`)[0];
+    assert.equal(savedOffice.requested_time, null);
+    assert.equal(savedOffice.effective_time, null);
+    assert.equal(savedOffice.stay_date.toISOString().slice(0, 10), "2026-08-23");
+    assert.equal(savedOffice.details.action, "accept_office_storage");
+    await assert.rejects(admin.begin(async (transaction) => {
+      await transaction`update airbnb.guest_time_requests set request_type = 'early_checkin'
+        where id = ${untimed.id}`;
+    }), { code: "23514" });
+
+    const officeNotices = [];
+    const captureOffice = (fingerprint, date = "2026-08-24", dropTime = null,
+      location = "Office by the car park, through the glass doors") => captureGuestTimeRequest({
+      sql: database.sql, householdId,
+      candidate: { ...heldCandidate, sourceFingerprint: fingerprint },
+      decision: {
+        requestType: "bag_drop", action: "accept_office_storage", createsOperationalRequest: true,
+        officeStorageArrangement: { date, dropTime }, officeLocation: location,
+        requestedTime: dropTime, effectiveTime: dropTime,
+      },
+      now: new Date("2026-08-22T08:04:00Z"), env: { AIRBNB_WHATSAPP_CHAT_ID: "fixture-cleaners@g.us" },
+      sendGroupMessage: async (notice) => {
+        officeNotices.push(notice);
+        return { live: { providerMessageId: `office-notice-${officeNotices.length}` }, verification: { found: true } };
+      },
+    });
+    const officeInitial = await captureOffice("office-initial");
+    assert.equal(officeInitial.status, "notified");
+    const officeRepeated = await captureOffice("office-follow-up");
+    assert.equal(officeRepeated.status, "already_notified");
+    assert.equal(officeRepeated.requestId, officeInitial.requestId);
+    assert.equal(officeNotices.length, 1);
+    await admin`update airbnb.guest_time_requests set details = details - 'officeLocation' where id = ${officeInitial.requestId}`;
+    const officeLegacyRepeated = await captureOffice("office-legacy-location-follow-up");
+    assert.equal(officeLegacyRepeated.requestId, officeInitial.requestId);
+    assert.equal(officeLegacyRepeated.status, "already_notified");
+    assert.equal(officeNotices.length, 1);
+    const officeDated = await captureOffice("office-new-date", "2026-08-25");
+    assert.equal(officeDated.status, "notified");
+    assert.notEqual(officeDated.requestId, officeInitial.requestId);
+    assert.match(officeNotices[1].text, /^Updated Airbnb bag-drop/);
+    assert.match(officeNotices[1].text, /25 August 2026/);
+    assert.equal((await captureOffice("office-new-date-follow-up", "2026-08-25")).status, "already_notified");
+    assert.equal(officeNotices.length, 2);
+    const officeTimed = await captureOffice("office-new-time", "2026-08-25", "08:30");
+    assert.equal(officeTimed.status, "notified");
+    assert.equal((await captureOffice("office-new-time-follow-up", "2026-08-25", "08:30")).status, "already_notified");
+    assert.equal(officeNotices.length, 3);
+    const officeMoved = await captureOffice("office-new-location", "2026-08-25", "08:30", "Fixture office beside reception");
+    assert.equal(officeMoved.status, "notified");
+    assert.equal((await captureOffice("office-new-location-follow-up", "2026-08-25", "08:30", "Fixture office beside reception")).status, "already_notified");
+    assert.equal(officeNotices.length, 4);
+    const activeOffices = await admin`select id, requested_time, effective_time, details from airbnb.guest_time_requests
+      where household_id = ${householdId} and thread_id = ${heldCandidate.id}
+        and request_type = 'bag_drop' and status not in ('completed', 'cancelled')`;
+    assert.equal(activeOffices.length, 1);
+    assert.equal(activeOffices[0].id, officeMoved.requestId);
+    assert.equal(activeOffices[0].details.officeLocation, "Fixture office beside reception");
+
+    await admin`insert into public.household_members(household_id, user_id, role)
+      values (${householdId}, ${ownerId}, 'owner') on conflict do nothing`;
+    for (const action of ["cancel", "mark_sent"]) {
+      if (action === "mark_sent") {
+        await admin`update airbnb.reply_deliveries set status = 'ambiguous' where id = ${heldDraft.id}`;
+      }
+      await admin.begin(async (transaction) => {
+        await transaction`select set_config('request.jwt.claim.sub', ${ownerId}, true)`;
+        await transaction.unsafe("set local role authenticated");
+        await transaction`select public.airbnb_review_reply(${heldDraft.id}, ${action})`;
+      });
+      assert.equal((await admin`select status from airbnb.guest_threads where id = ${heldCandidate.id}`)[0].status, "closed");
+    }
   } finally {
     await database?.close();
     await admin.end({ timeout: 5 });

@@ -7,6 +7,7 @@ import {
   canReuseStoredDecision,
   collectWithTransientMailboxRetry,
   earlierOfRecentCursor,
+  mailboxFailureDiagnostic,
   summarizeDeliveryOutcomes,
   transientMailboxError,
 } from "./runner.mjs";
@@ -63,6 +64,23 @@ test("non-transient mailbox failures are never retried", async () => {
     { code: "EAUTH" },
   );
   assert.equal(attempts, 1);
+});
+
+test("authentication failures never retry even when the provider also reports a timeout", () => {
+  assert.equal(transientMailboxError(Object.assign(new Error("Socket timeout during authentication"), {
+    code: "ETIMEOUT", authenticationFailed: true,
+  })), false);
+});
+
+test("mailbox diagnostics retain failure identity without provider text or credentials", () => {
+  const error = Object.assign(new Error("password=do-not-log@example.test"), {
+    code: "IMAP_IMPORT_DEADLINE", responseText: "private provider response",
+  });
+  assert.deepEqual(mailboxFailureDiagnostic(error, "canonical", 1), {
+    mailbox: "canonical", attempt: 1, code: "IMAP_IMPORT_DEADLINE", name: "Error",
+    retryable: true, authenticationFailed: false,
+  });
+  assert.doesNotMatch(JSON.stringify(mailboxFailureDiagnostic(error, "canonical", 1)), /password|private|example/);
 });
 
 test("only successful adaptive decisions from the same runtime mode are cached", () => {

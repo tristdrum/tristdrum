@@ -33,7 +33,9 @@ export const SUPPORT_KNOWLEDGE = deepFreeze({
     "When a fact is missing or contradictory, say that it needs checking instead of choosing the most convenient answer.",
     "Historical examples guide tone and problem-solving, but they do not make a changing property detail current.",
     "Early check-in may be offered from 13:00, but it is always conditional on the previous guest and cleaning being finished.",
-    "Guests are always welcome to drop bags after the previous guest has actually checked out. This is normally from 10:00; if the previous guest leaves late, bag drop starts only after their actual departure.",
+    "For studio storage, guests are always welcome to drop bags after the previous guest has actually checked out. This is normally from 10:00; if the previous guest leaves late, studio bag drop starts only after their actual departure.",
+    "When current officeLuggageStorage facts allow it, guests are ALWAYS welcome to leave belongings in the office at its verified location. Studio checkout and late-departure conditions do not restrict office storage; office storage does not grant studio entry or extend checkout. Do not invent staffed hours or lost-property collection availability.",
+    "Accepted office storage belongs on the actual arrangement date grounded in the conversation, which may differ from arrival. Ask which day if the date is unknown. An unspecified drop-off time stays null; a pickup-until time is not a drop-off time. Never substitute 10:00 or midnight.",
     "Bag drop is luggage storage only. It does not mean the studio is ready and never grants room access before cleaning readiness is confirmed.",
     "When a past guest says they submitted general improvement feedback or a review without naming a concrete issue, reply with sincere thanks, take the feedback on board, apologise gently for anything that was not up to scratch, and commit to learning and making it right next time.",
     "Late check-out requests are politely declined so the studio can be prepared for the next guest.",
@@ -62,7 +64,7 @@ export const SUPPORT_KNOWLEDGE = deepFreeze({
     },
     {
       situation: "A guest asks for room access before 13:00 and offers to drop bags instead.",
-      approach: "Keep early room access subject to the 13:00 readiness policy, but welcome a bag drop after the previous guest's actual checkout, normally from 10:00.",
+      approach: "Keep early room access subject to the 13:00 readiness policy. When verified officeLuggageStorage facts allow office storage, welcome it independently of checkout. Only studio storage waits for the previous guest's actual checkout, normally from 10:00.",
     },
     {
       situation: "A guest reports a problem during the stay.",

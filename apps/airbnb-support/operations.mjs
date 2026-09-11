@@ -64,25 +64,36 @@ function readinessCheckAt(stayDate, effectiveTime) {
 }
 
 export function buildGuestTimeRequest({ candidate, decision }) {
-  if (!decision?.createsOperationalRequest || !decision.requestedTime || !decision.effectiveTime) return null;
+  if (!decision?.createsOperationalRequest) return null;
+  const officeStorage = decision.requestType === "bag_drop" && decision.action === "accept_office_storage";
+  if (!officeStorage && (!decision.requestedTime || !decision.effectiveTime)) return null;
   const property = propertyForListing(candidate.listingName);
-  const stayDate = stayStartDate(candidate.stayLabel, candidate.latestEventAt);
+  const arrangementDate = /^(\d{4})-(\d{2})-(\d{2})$/.exec(decision.officeStorageArrangement?.date ?? "");
+  const stayDate = officeStorage
+    ? arrangementDate && isoDate(Number(arrangementDate[1]), Number(arrangementDate[2]), Number(arrangementDate[3]))
+    : stayStartDate(candidate.stayLabel, candidate.latestEventAt);
   if (!property || !candidate.propertyId || !stayDate) return null;
+  if (officeStorage && !decision.officeLocation) return null;
   const early = decision.requestType === "early_checkin";
   const bagDrop = decision.requestType === "bag_drop";
   return {
     requestType: decision.requestType,
     action: decision.action,
     stayDate,
-    requestedTime: decision.requestedTime,
-    effectiveTime: decision.effectiveTime,
+    requestedTime: decision.requestedTime ?? null,
+    effectiveTime: decision.effectiveTime ?? null,
+    ...(officeStorage ? { officeLocation: decision.officeLocation } : {}),
     unitNumber: property.unitNumber,
-    cleanerNoteEn: bagDrop
+    cleanerNoteEn: officeStorage
+      ? `Office luggage storage: ${decision.officeLocation}. ${decision.effectiveTime ? `Drop-off at ${decision.effectiveTime}.` : "Drop-off time not specified."} Guests are always welcome. Luggage only; no studio entry or checkout extension.`
+      : bagDrop
       ? `Bag drop expected from ${decision.effectiveTime}, but only after the previous guest has actually checked out; if departure is late, wait until they leave. Luggage only; no room access before cleaning is complete.`
       : early
       ? `Early check-in requested for ${decision.effectiveTime}. Please prioritise this unit; the time is not guaranteed yet.`
       : `Late check-out approved for ${decision.effectiveTime}. Please start cleaning after the guest leaves.`,
-    cleanerNoteXh: bagDrop
+    cleanerNoteXh: officeStorage
+      ? `Ukugcina iibhegi e-ofisini ngasepakini yeemoto, ngena ngeengcango zeglasi. ${decision.effectiveTime ? `Ukushiya iibhegi ngo-${decision.effectiveTime}.` : "Ixesha lokushiya iibhegi alichazwanga."} Iindwendwe zamkelekile ngalo lonke ixesha. Ziibhegi kuphela; akukho kungena kwi-studio okanye ukwandiswa kwexesha lokuphuma.`
+      : bagDrop
       ? `Ukushiya iibhegi kulindeleke ukususela ngo-${decision.effectiveTime}, kodwa kuphela emva kokuba undwendwe lwangaphambili luphume ngokupheleleyo; ukuba luphuma kade, linda lude luhambe. Kukushiya iibhegi kuphela; akukho kungena egumbini ngaphambi kokuba ukucoca kugqitywe.`
       : early
       ? `Kucelwe ukungena kwangethuba ngo-${decision.effectiveTime}. Nceda ubeke le unit phambili; ixesha alikaqinisekiswa.`

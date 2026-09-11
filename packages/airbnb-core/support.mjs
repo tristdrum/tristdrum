@@ -47,6 +47,7 @@ function requestedClockMinutes(message, requestType, standardMinutes) {
     });
   }
   for (const match of text.matchAll(/\b([01]?\d|2[0-3]):([0-5]\d)\b/g)) {
+    if (clocks.some((clock) => match.index >= clock.index && match.index < clock.end)) continue;
     clocks.push({
       index: match.index,
       end: match.index + match[0].length,
@@ -110,8 +111,30 @@ function asksForBagDrop(message) {
     .test(text);
 }
 
-export function supportBagDropRequestDecision(message, facts = {}) {
-  if (!asksForBagDrop(message)) return null;
+export function supportBagDropRequestDecision(message, facts = {}, officeStorageArrangement = null) {
+  const office = facts.officeLuggageStorage;
+  if (!asksForBagDrop(message) && !(office?.allowed === true && officeStorageArrangement)) return null;
+  if (office?.allowed === true) {
+    const proposedDate = officeStorageArrangement?.date;
+    const timestamp = /^\d{4}-\d{2}-\d{2}$/.test(proposedDate ?? "")
+      ? Date.parse(`${proposedDate}T12:00:00Z`) : NaN;
+    const date = Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === proposedDate
+      ? proposedDate : null;
+    const dropMinutes = clockMinutes(officeStorageArrangement?.dropTime, null);
+    const dropTime = dropMinutes == null ? null : clockLabel(dropMinutes);
+    return {
+      topic: "bag_drop",
+      requestType: "bag_drop",
+      action: "accept_office_storage",
+      officeStorageArrangement: { date, dropTime },
+      officeLocation: typeof office.location === "string" ? office.location.trim() : null,
+      requestedTime: dropTime,
+      effectiveTime: dropTime,
+      createsOperationalRequest: Boolean(date),
+      needsCleanerNotification: Boolean(date),
+      reply: `Guests are always welcome to leave belongings in the ${office.location || "office"}. This is luggage storage only; it does not grant studio entry or extend checkout.${date ? "" : " Which day would you like to drop them off?"}`,
+    };
+  }
   const standardCheckOut = clockMinutes(facts.checkOutTime, 10 * 60);
   const effectiveTime = clockLabel(standardCheckOut);
   return {

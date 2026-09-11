@@ -217,7 +217,7 @@ export async function loadCleanerOperationalNotes({
       notes: rows.map((row) => ({
         unitId: Number(row.unitNumber),
         requestType: row.requestType,
-        effectiveTime: String(row.effectiveTime).slice(0, 5),
+        effectiveTime: row.effectiveTime == null ? null : String(row.effectiveTime).slice(0, 5),
         english: row.cleanerNoteEn,
         xhosa: row.cleanerNoteXh,
       })),

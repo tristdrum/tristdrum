@@ -68,6 +68,7 @@ export function transientMailboxError(error) {
   const code = String(error?.code ?? "").trim().toUpperCase();
   const name = String(error?.name ?? "").trim().toUpperCase();
   const message = String(error?.message ?? "").trim();
+  if (error?.authenticationFailed === true || ["EAUTH", "AUTHENTICATIONFAILED", "AUTHENTICATION_FAILED"].includes(code)) return false;
   return [
     "IMAP_IMPORT_DEADLINE",
     "ETIMEOUT",
@@ -97,6 +98,18 @@ export async function collectWithTransientMailboxRetry(operation, {
     }
   }
   throw new Error("Airbnb support mailbox retry exhausted unexpectedly.");
+}
+
+export function mailboxFailureDiagnostic(error, mailbox, attempt) {
+  const label = (value) => /^[A-Za-z0-9_]{1,64}$/.test(String(value ?? "")) ? String(value) : null;
+  return {
+    mailbox,
+    attempt,
+    code: label(error?.code),
+    name: label(error?.name),
+    retryable: transientMailboxError(error),
+    authenticationFailed: error?.authenticationFailed === true,
+  };
 }
 
 function optionalInstant(value) {
@@ -190,6 +203,10 @@ export async function runSupport({
   const ownDatabase = database ?? createAirbnbDatabase({ env, postgresFactory: postgres });
   const householdId = await ownDatabase.householdId();
   let started = false;
+  const mailboxFailures = [];
+  let canonicalMailboxRetryCount = 0;
+  let supplementalMailboxRetryCount = 0;
+  let lifecycleMailboxRetryCount = 0;
   try {
     await recordJobStart(ownDatabase.sql, {
       householdId,
@@ -219,9 +236,6 @@ export async function runSupport({
       Number.parseInt(env.AIRBNB_SUPPORT_INITIAL_LOOKBACK_DAYS ?? "90", 10),
       overlapMinutes,
     );
-    let canonicalMailboxRetryCount = 0;
-    let supplementalMailboxRetryCount = 0;
-    let lifecycleMailboxRetryCount = 0;
     const canonicalCollection = collectWithTransientMailboxRetry(
       () => collectMessages({
         since,
@@ -229,7 +243,10 @@ export async function runSupport({
         mailboxScope: "tristan",
         env,
       }),
-      { maxAttempts: mailboxAttempts, onRetry: () => { canonicalMailboxRetryCount += 1; } },
+      { maxAttempts: mailboxAttempts, onRetry: (error, attempt) => {
+        canonicalMailboxRetryCount += 1;
+        mailboxFailures.push(mailboxFailureDiagnostic(error, "canonical", attempt));
+      } },
     );
     const janeSince = janeConfigured
       ? earlierOfRecentCursor(
@@ -247,7 +264,10 @@ export async function runSupport({
           mailboxScope: "jane",
           env,
         }),
-        { maxAttempts: mailboxAttempts, onRetry: () => { supplementalMailboxRetryCount += 1; } },
+        { maxAttempts: mailboxAttempts, onRetry: (error, attempt) => {
+          supplementalMailboxRetryCount += 1;
+          mailboxFailures.push(mailboxFailureDiagnostic(error, "supplemental", attempt));
+        } },
       )
       : Promise.resolve({ messages: [], envelopesFound: 0 });
     // Canonical and lifecycle evidence share Tristan's mailbox. Sequence those
@@ -258,13 +278,26 @@ export async function runSupport({
         maxRead: Number.parseInt(env.AIRBNB_SUPPORT_LIFECYCLE_MAX_EMAILS ?? "100", 10),
         env,
       }),
-      { maxAttempts: mailboxAttempts, onRetry: () => { lifecycleMailboxRetryCount += 1; } },
+      { maxAttempts: mailboxAttempts, onRetry: (error, attempt) => {
+        lifecycleMailboxRetryCount += 1;
+        mailboxFailures.push(mailboxFailureDiagnostic(error, "lifecycle", attempt));
+      } },
     ));
     const [canonicalResult, supplementalResult, lifecycleResult] = await Promise.allSettled([
       canonicalCollection,
       supplementalCollection,
       lifecycleCollection,
     ]);
+    for (const [mailbox, result, retries] of [
+      ["canonical", canonicalResult, canonicalMailboxRetryCount],
+      ["supplemental", supplementalResult, supplementalMailboxRetryCount],
+      ["lifecycle", lifecycleResult, lifecycleMailboxRetryCount],
+    ]) {
+      if (mailbox === "lifecycle" && canonicalResult.status === "rejected") continue;
+      if (result.status === "rejected") {
+        mailboxFailures.push(mailboxFailureDiagnostic(result.reason, mailbox, retries + 1));
+      }
+    }
     if (canonicalResult.status === "rejected") throw canonicalResult.reason;
     if (lifecycleResult.status === "rejected") throw lifecycleResult.reason;
     const collected = canonicalResult.value;
@@ -486,6 +519,7 @@ export async function runSupport({
       canonicalMailboxRetryCount,
       supplementalMailboxRetryCount,
       lifecycleMailboxRetryCount,
+      mailboxFailures,
       handledByHumanCount: ingested.filter((item) => item.latestDirection === "host").length,
       candidateCount: candidates.length,
       draftCount: drafts.length,
@@ -526,7 +560,8 @@ export async function runSupport({
         service: "support",
         runId,
         status: "error",
-        receipt: { schemaVersion: 1, runId, status: "error", error: failure },
+        receipt: { schemaVersion: 1, runId, status: "error", error: failure,
+          canonicalMailboxRetryCount, supplementalMailboxRetryCount, lifecycleMailboxRetryCount, mailboxFailures },
         errorCode: failure.code,
         errorMessage: failure.message,
         completedAt: now().toISOString(),

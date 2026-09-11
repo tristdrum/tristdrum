@@ -16,8 +16,10 @@ failure alerts are sent only to the private destination and count as delivered
 only after exact chat readback. Live failures are mirrored into sanitized
 Supabase job receipts even when plan generation does not complete.
 
-Accepted early check-ins and late check-outs are read from the shared Airbnb
-database and shown under the relevant unit in English and Xhosa. A timing-note
+Accepted early check-ins, late check-outs, and bag drops are read from the shared
+Airbnb database and shown under the relevant unit in English and Xhosa. Office
+storage appears on its actual arrangement date; an unspecified drop-off time
+stays null and is described as unspecified in the bilingual note. A timing-note
 read failure is recorded in the run receipt but does not suppress the underlying
 confirmed-reservation cleaner plan.
 
