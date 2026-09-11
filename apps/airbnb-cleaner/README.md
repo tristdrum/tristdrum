@@ -27,3 +27,18 @@ Room plans do not assign workers or extend temporary cover. Agents monitoring
 the group must follow the [cleaning-team authority](../../docs/AIRBNB_CLEANING_TEAM_AUTHORITY.md)
 rules before responding to attendance or shift questions. This also applies to
 ad hoc messages sent outside the scheduled report worker.
+
+## Deployment Context
+
+The cleaner Dockerfile is app-local: its build context must be
+`apps/airbnb-cleaner`, not the repository root. After the scoped Fly identity and
+app-status checks, deploy from that directory on the configured Mac:
+
+```sh
+/Users/tristdrum/.local/bin/fly-personal deploy --app tristdrum-airbnb-cleaner --remote-only --ha=false --yes
+```
+
+Check that no cleaner run or delivery is in flight before replacing its machine.
+Keep the persistent data volume and shared delivery ledger intact. A successful
+deployment does not authorize a duplicate plan; verify with status and a
+non-sending preview when needed.

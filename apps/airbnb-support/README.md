@@ -33,3 +33,20 @@ Then verify a controlled shadow run and a controlled live run before enabling
 the five-minute live schedule. A healthy Fly machine alone is not a running
 guest-reply service. Report any unresolved infrastructure root cause separately
 from a successful controlled recovery.
+
+## Deployment Context
+
+Support imports the shared packages, so build it from the repository root.
+After the scoped Fly identity and app-status checks, use this command on the
+configured Mac:
+
+```sh
+/Users/tristdrum/.local/bin/fly-personal deploy . --app tristdrum-airbnb-support --config apps/airbnb-support/fly.toml --dockerfile apps/airbnb-support/Dockerfile --remote-only --ha=false --yes
+```
+
+Apply reviewed database migrations before deploying a worker that consumes them.
+Retain the existing single warm machine and verify the effective activation
+cutoff inside the deployed process. During a paused recovery, the initial shadow
+run may spend longer ingesting accumulated mail than an ordinary poll: inspect
+durable ingestion progress before treating it as stuck, and never overlap a
+second invocation. Verify final receipts before enabling the schedule.
