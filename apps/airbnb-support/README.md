@@ -27,13 +27,6 @@ Private Fly worker for Tristan's Airbnb conversation stream.
 
 With the support schedule paused, `AIRBNB_SUPPORT_BACKFILL_CONFIRMATION=RUN_WITH_SUPPORT_SCHEDULE_PAUSED node backfill.mjs` imports historical Airbnb conversation evidence from Tristan and Jane in bounded batches. It writes no guest or WhatsApp messages and is safe to rerun.
 
-Read-only diagnostic evidence reported on 2026-09-11: the supplemental mailbox's
-90-day search matched 1,009 headers with zero eligible conversations; a six-hour
-search matched 7 headers, also with zero eligible conversations. This supports
-avoiding repeated broad empty scans. The earlier 45-second timeout was not
-reproduced and its stage remains unknown, so cursor waste is not a proven sole
-timeout cause. This evidence does not justify changing the deadline or model.
-
 For a recovery, keep both schedules paused while reconciling UI-only host replies,
 explicit holds, and old approved deliveries. Set the activation cutoff to the
 reviewed restart boundary so stale guest messages are not answered in bulk.

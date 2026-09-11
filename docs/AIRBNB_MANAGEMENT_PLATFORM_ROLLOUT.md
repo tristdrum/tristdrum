@@ -366,14 +366,34 @@ After that guarded cutover:
 - Heartbeat `airbnb-cleaner-midday-cutover-check` performs hourly daytime personal
   platform and exact outbound-message audits at 25 minutes past each hour from
   07:25 through 21:25 SAST.
-- The latest support repair reset the clean-run clock at the final ordinary
-  scheduled acceptance on 2026-08-27 15:02:01 SAST. Require 72 clean hours before
-  treating the replacement as stable; the new stability checkpoint is
-  2026-08-30 15:02:01 SAST.
+- Require 72 clean hours before treating a repaired replacement as stable.
+  Derive the current clock from the latest verified recovery audit, not an older
+  cutover date. The August 27 baseline and its August 30 checkpoint are historical
+  and were superseded by later repairs.
 - Do not delete the stopped Min app or rollback data before the seven-day gate.
-  The earliest retirement checkpoint is 2026-09-03 15:02:01 SAST, after seven
-  full clean days from the latest repairs. Extend the heartbeat if verification
-  delays retirement.
+  Require seven full clean days from the latest repair. The September 3 checkpoint
+  from the original cutover is historical, not permission to retire anything.
+  Retirement also requires Tristan's explicit instruction; never retire
+  automatically when a time gate passes.
 - Delete old infrastructure only after schedules, receipts, WhatsApp readback,
   current Gmail reservation evidence, stock observations, and dashboard state
   all remain clean.
+
+## September 11 empty-mailbox cursor repair
+
+- A supplemental mailbox import reached its 45-second deadline at 15:15 SAST,
+  recovered on its one retry, and finished without a decision failure, guest
+  send, guard error, or ambiguity. The stability rule caused a support-only
+  protective pause; cleaner and stock schedules were left active.
+- The supplemental mailbox had no conversation evidence timestamp, so every
+  poll incorrectly repeated the 90-day initial search. A read-only comparison
+  matched 1,009 headers over 90 days versus 7 over six hours, with zero eligible
+  conversations in both. The failed attempt's stage was not recorded and was
+  not reproduced; the cursor defect is not a proven sole timeout cause.
+- PR #66 uses qualifying successful empty scans as conservative progress
+  watermarks while preserving first-import lookback, overlap, failure exclusions,
+  deadlines, and reply safeguards. The support suite passed 168 tests with local
+  database integration. No schema change is required.
+- Record deployed image, controlled shadow/live receipts, and the first ordinary
+  successful poll in `airbnb.audit_events` before starting the next clean-run
+  clock. A paused or unverified recovery does not start a retirement countdown.
