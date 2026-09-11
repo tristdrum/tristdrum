@@ -7,10 +7,11 @@ import {
   cleanerLedgerRecords,
   cleanerReservationRecords,
   loadCleanerLedgerRecords,
+  loadCleanerOperationalNotes,
   loadCleanerReservations,
 } from "./database.mjs";
 import { redactSensitiveText, sanitizeFailure } from "./storage.mjs";
-import { mergeReservations } from "./report.mjs";
+import { buildMessage, mergeReservations } from "./report.mjs";
 
 test("stored reservation revisions preserve dates, counts, cancellation, and source precedence", () => {
   const sourceCutoffAt = new Date("2026-06-03T17:14:47Z");
@@ -201,6 +202,39 @@ test("cleaner ledger is disabled only when the database pair is absent", async (
     targetDate: "2026-08-24",
     env: { AIRBNB_DATABASE_URL: "postgresql://example.invalid/database" },
   }), /configured together/);
+});
+
+test("dated office-storage notes preserve nullable times through cleaner mapping and bilingual plan rendering", async () => {
+  const householdId = "11111111-1111-4111-8111-111111111111";
+  const request = {
+    stayDate: "2026-09-11",
+    cleanerNoteEn: "Office luggage storage: Office by the car park, through the glass doors. Drop-off time not specified.",
+    cleanerNoteXh: "Ukugcina iibhegi e-ofisini ngasepakini yeemoto, ngena ngeengcango zeglasi. Ixesha lokushiya iibhegi alichazwanga.",
+  };
+  let ended = false;
+  const sql = async (strings, ...values) => {
+    assert.match(strings.join("?"), /request.stay_date = \?/);
+    assert.match(strings.join("?"), /request.status <> 'cancelled'/);
+    assert.deepEqual(values, [householdId, request.stayDate]);
+    return [{ unitNumber: 3, requestType: "bag_drop", effectiveTime: null,
+      cleanerNoteEn: request.cleanerNoteEn, cleanerNoteXh: request.cleanerNoteXh }];
+  };
+  sql.end = async () => { ended = true; };
+  const result = await loadCleanerOperationalNotes({
+    targetDate: request.stayDate,
+    env: { AIRBNB_DATABASE_URL: "postgresql://example.invalid/database", AIRBNB_HOUSEHOLD_ID: householdId },
+    postgresFactory: () => sql,
+  });
+  assert.equal(ended, true);
+  assert.equal(result.notes[0].effectiveTime, null);
+  const message = buildMessage({
+    targetDate: new Date(`${request.stayDate}T12:00:00+02:00`),
+    unitReports: [{ unit: { id: 3, label: "Unit 3" }, action: "vacant", arrivals: [] }],
+    weather: { available: false }, operationalNotes: result.notes,
+  });
+  assert.match(message, /Drop-off time not specified/);
+  assert.match(message, /Ixesha lokushiya iibhegi alichazwanga/);
+  assert.doesNotMatch(message, /10:00|00:00|undefined|null/);
 });
 
 test("accepted guest-count evidence records its composite provenance and real sender", () => {

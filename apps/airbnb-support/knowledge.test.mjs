@@ -40,6 +40,16 @@ test("support knowledge leaves an unknown listing unresolved", () => {
   assert.match(knowledge.policies.join(" "), /missing or contradictory/i);
 });
 
+test("office permission overrides only studio storage conditions without inventing collection or timing facts", () => {
+  const text = SUPPORT_KNOWLEDGE.policies.join(" ");
+  assert.match(text, /ALWAYS welcome.*office.*verified location/);
+  assert.match(text, /Studio checkout and late-departure conditions do not restrict office storage/);
+  assert.match(text, /does not grant studio entry or extend checkout/);
+  assert.match(text, /Do not invent staffed hours or lost-property collection availability/);
+  assert.match(text, /Ask which day if the date is unknown/);
+  assert.match(text, /drop-off time stays null.*pickup-until time is not a drop-off time/);
+});
+
 test("support knowledge records real time conflicts but accepts equivalent formats", () => {
   const conflict = supportKnowledgeForListing({
     listingName: "The Spekboom Studio",
