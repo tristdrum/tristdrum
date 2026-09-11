@@ -1126,6 +1126,40 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
       where household_id = ${householdId}
         and id = ${hostActionPromotedCandidate.id}
     `)[0].status, "needs_human");
+    const heldEmail = emailFixture({
+      mailboxScope: "tristan", providerMessageId: `<held-${randomUUID()}@example.test>`,
+      providerThreadId: "9876543299", occurredAt: "2026-08-22T08:00:00Z",
+    });
+    const held = await ingestConversation(database.sql, {
+      householdId, email: heldEmail, parsed: parseAirbnbConversationEmail(heldEmail),
+    });
+    const heldCandidate = (await loadShadowCandidates(database.sql, { householdId, limit: 100 }))
+      .find((candidate) => candidate.providerThreadId === "9876543299");
+    const heldDraft = await storeSupportDraft(database.sql, {
+      householdId, candidate: heldCandidate,
+      classification: { topic: "general", riskTier: "low", replyNeeded: true, summary: "Fixture reply",
+        draft: "Thanks for your message.", autoReply: true, status: "ready", alertManagement: false,
+        decisionSource: "adaptive_agent", decisionVersion: 2 },
+      now: new Date("2026-08-22T08:01:00Z"), shadowMode: false, automaticallyApprove: true,
+    });
+    await admin`update airbnb.guest_threads set status = 'closed' where id = ${heldCandidate.id}`;
+    const newerHeldEmail = emailFixture({
+      ...heldEmail, providerMessageId: `<held-new-${randomUUID()}@example.test>`,
+      providerThreadId: "9876543299", occurredAt: "2026-08-22T08:02:00Z",
+      entries: [{ name: "Guest Fixture", role: "Guest", text: "Could I collect my item later?" }],
+    });
+    await ingestConversation(database.sql, {
+      householdId, email: newerHeldEmail, parsed: parseAirbnbConversationEmail(newerHeldEmail),
+    });
+    assert.equal((await admin`select status from airbnb.guest_threads where id = ${heldCandidate.id}`)[0].status, "closed");
+    assert.equal((await loadShadowCandidates(database.sql, { householdId, limit: 100 }))
+      .some((candidate) => candidate.id === heldCandidate.id), false);
+    assert.equal((await loadDeliveryGuardCandidates(database.sql, { householdId, now: new Date("2026-08-22T08:03:00Z"), limit: 100 }))
+      .some((delivery) => delivery.id === heldDraft.id), false);
+    assert.equal(await claimDeliveryForGuard(database.sql, {
+      householdId, deliveryId: heldDraft.id, now: new Date("2026-08-22T08:03:00Z"),
+    }), null);
+    assert.ok(held);
   } finally {
     await database?.close();
     await admin.end({ timeout: 5 });

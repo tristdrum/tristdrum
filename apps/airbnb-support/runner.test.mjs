@@ -65,6 +65,12 @@ test("non-transient mailbox failures are never retried", async () => {
   assert.equal(attempts, 1);
 });
 
+test("authentication failures never retry even when the provider also reports a timeout", () => {
+  assert.equal(transientMailboxError(Object.assign(new Error("Socket timeout during authentication"), {
+    code: "ETIMEOUT", authenticationFailed: true,
+  })), false);
+});
+
 test("only successful adaptive decisions from the same runtime mode are cached", () => {
   assert.equal(canReuseStoredDecision(liveDecision, "live"), true);
   assert.equal(canReuseStoredDecision({ ...liveDecision, shadowMode: true }, "shadow"), true);

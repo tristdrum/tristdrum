@@ -90,6 +90,43 @@ test("stay phase respects the verified local checkout time", () => {
   }), "after_stay");
 });
 
+test("post-stay collection does not become a new check-in permission", async () => {
+  let input;
+  const result = await decideGuestResponse({
+    guestMessage: "Could I arrive at 4:15 pm?",
+    guestName: "Guest",
+    listingName: "Bougainvillea Courtyard Studio",
+    facts: { checkInTime: "15:00", checkOutTime: "10:00", lostPropertyCollection: "Collection requires a confirmed office handoff." },
+    stayLabel: "SEP 2 - 3",
+    latestEventAt: "2026-09-04T08:38:54Z",
+    now: new Date("2026-09-04T08:40:00Z"),
+    conversationContext: [{ direction: "host", text: "Your item is in the office; please arrange collection." }],
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecision({ replyNeeded: true, sendReply: false, alertManagement: true,
+      summary: "Office availability must be confirmed.", draft: null }, (request) => {
+      input = JSON.parse(request.input[1].content[0].text);
+    }),
+  });
+  assert.equal(input.stayPhase, "after_stay");
+  assert.equal(input.timePolicyDecision, null);
+  assert.equal(result.autoReply, false);
+  assert.equal(result.operationalRequest, null);
+});
+
+test("verified Wi-Fi details remain eligible for an ordinary in-stay reply", async () => {
+  const result = await decideGuestResponse({
+    guestMessage: "Please send the Wi-Fi details.", guestName: "Guest",
+    listingName: "Jasmine Studio Stay", stayLabel: "SEP 11 - 12",
+    latestEventAt: "2026-09-11T14:00:00Z",
+    facts: { wifiNetwork: "Fixture network", wifiPassword: "fixture-only", checkInTime: "15:00", checkOutTime: "10:00" },
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecision({ replyNeeded: true, sendReply: true, alertManagement: false,
+      summary: "Provide verified Wi-Fi details.", draft: "Of course! The network is Fixture network and the password is fixture-only." }),
+  });
+  assert.equal(result.autoReply, true);
+  assert.equal(result.alertManagement, false);
+});
+
 for (const fixture of [
   {
     name: "Monde",
