@@ -1160,6 +1160,19 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
       householdId, deliveryId: heldDraft.id, now: new Date("2026-08-22T08:03:00Z"),
     }), null);
     assert.ok(held);
+    await admin`insert into public.household_members(household_id, user_id, role)
+      values (${householdId}, ${ownerId}, 'owner') on conflict do nothing`;
+    for (const action of ["cancel", "mark_sent"]) {
+      if (action === "mark_sent") {
+        await admin`update airbnb.reply_deliveries set status = 'ambiguous' where id = ${heldDraft.id}`;
+      }
+      await admin.begin(async (transaction) => {
+        await transaction`select set_config('request.jwt.claim.sub', ${ownerId}, true)`;
+        await transaction.unsafe("set local role authenticated");
+        await transaction`select public.airbnb_review_reply(${heldDraft.id}, ${action})`;
+      });
+      assert.equal((await admin`select status from airbnb.guest_threads where id = ${heldCandidate.id}`)[0].status, "closed");
+    }
   } finally {
     await database?.close();
     await admin.end({ timeout: 5 });

@@ -103,6 +103,7 @@ export async function ingestConversation(sql, { householdId, email, parsed }) {
                       else airbnb.guest_threads.guest_display_name
                     end,
                     status = case
+                      when airbnb.guest_threads.status = 'closed' then 'closed'
                       when greatest(
                         coalesce(excluded.last_guest_at, '-infinity'::timestamptz),
                         coalesce(excluded.last_host_at, '-infinity'::timestamptz)
@@ -305,6 +306,7 @@ export async function reconcileBookingLifecycle(sql, { householdId, email, lifec
       update airbnb.guest_threads
       set status = 'handled', updated_at = ${email.occurredAt}
       where household_id = ${householdId} and id = ${thread.id}
+        and status <> 'closed'
     `;
     await transaction`
       update airbnb.alerts
@@ -402,7 +404,6 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8, notBef
         where message.household_id = thread.household_id
           and message.thread_id = thread.id
         order by message.provider_sent_at desc
-        limit 8
       ) context_message
     ) recent_context on true
     left join airbnb.properties property
@@ -512,6 +513,7 @@ export async function storeSupportDraft(sql, {
   await sql`
     update airbnb.guest_threads
     set status = case
+          when status = 'closed' then 'closed'
           when ${terminalThreadStatus} = 'handled'
             and exists (
               select 1
@@ -763,6 +765,7 @@ export async function loadDueReadinessRequests(sql, { householdId, now, limit = 
       on thread.household_id = request.household_id
      and thread.id = request.thread_id
     where request.household_id = ${householdId}
+      and thread.status <> 'closed'
       and request.request_type = 'early_checkin'
       and request.status = 'cleaners_notified'
       and request.stay_date = (${now} at time zone 'Africa/Johannesburg')::date
@@ -984,6 +987,12 @@ export async function loadDeliveryGuardCandidates(sql, { householdId, now, limit
     from airbnb.reply_deliveries
     where household_id = ${householdId}
       and status = 'approved'
+      and exists (
+        select 1 from airbnb.guest_threads thread
+        where thread.household_id = airbnb.reply_deliveries.household_id
+          and thread.id = airbnb.reply_deliveries.thread_id
+          and thread.status <> 'closed'
+      )
       and coalesce(classification->>'deterministicGuard', '') <> 'initial_inquiry_requires_airbnb_ui'
       and (
         approved_by is not null
@@ -1039,6 +1048,7 @@ export async function loadSuppressedSupportAlerts(sql, { householdId, limit = 24
       where alert.household_id = ${householdId}
         and alert.status = 'suppressed'
         and alert.alert_type in ('guest_escalation', 'guest_overdue')
+        and thread.status <> 'closed'
         and (${notBefore}::timestamptz is null or thread.last_guest_at >= ${notBefore}::timestamptz)
         and (thread.last_host_at is null or thread.last_host_at < thread.last_guest_at)
         and (
@@ -1147,6 +1157,7 @@ export async function claimDeliveryForGuard(sql, { householdId, deliveryId, now 
       where delivery.household_id = ${householdId}
         and delivery.id = ${deliveryId}
         and delivery.status = 'approved'
+        and thread.status <> 'closed'
       for update of delivery, thread
     `;
     const delivery = rows[0];
@@ -1160,6 +1171,21 @@ export async function claimDeliveryForGuard(sql, { householdId, deliveryId, now 
     `;
     return { ...delivery, status: "sending", action: "claimed" };
   });
+}
+
+export async function revalidateDeliveryAuthority(sql, { householdId, deliveryId }) {
+  const rows = await sql`
+    select delivery.id
+    from airbnb.reply_deliveries delivery
+    join airbnb.guest_threads thread
+      on thread.household_id = delivery.household_id and thread.id = delivery.thread_id
+    where delivery.household_id = ${householdId} and delivery.id = ${deliveryId}
+      and delivery.status = 'sending'
+      and thread.status <> 'closed'
+      and thread.source_fingerprint = delivery.source_fingerprint
+      and (thread.last_host_at is null or thread.last_host_at < delivery.source_last_event_at)
+  `;
+  return rows.length === 1;
 }
 
 export async function applyDeliveryGuardDecision(sql, {
@@ -1201,6 +1227,7 @@ export async function applyDeliveryGuardDecision(sql, {
         update airbnb.guest_threads thread
         set status = 'handled'
         where thread.household_id = ${householdId}
+          and thread.status <> 'closed'
           and thread.id = ${rows[0].threadId}
           and thread.source_fingerprint = (
             select delivery.source_fingerprint
@@ -1221,6 +1248,7 @@ export async function applyDeliveryGuardDecision(sql, {
         update airbnb.guest_threads
         set status = 'open'
         where household_id = ${householdId} and id = ${rows[0].threadId}
+          and status <> 'closed'
       `;
     }
     await recordSupportAudit(transaction, {
@@ -1282,6 +1310,7 @@ export async function markDeliverySent(sql, {
       update airbnb.guest_threads thread
       set status = 'handled'
       where thread.household_id = ${householdId}
+        and thread.status <> 'closed'
         and thread.id = ${rows[0].threadId}
         and thread.source_fingerprint = (
           select delivery.source_fingerprint

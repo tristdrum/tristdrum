@@ -297,6 +297,8 @@ test("late checkout policy politely declines every extension and never creates a
     "a stale runtime exception must not override the standing policy",
   );
   assert.equal(supportTimeRequestDecision("Could we have a late checkout at 1?", {}).requestedTime, "13:00");
+  assert.equal(supportTimeRequestDecision("Could I arrive at 4:15 pm?", {}).requestedTime, "16:15");
+  assert.equal(supportTimeRequestDecision("Could I arrive at 11:30 am?", {}).requestedTime, "11:30");
 
   const standard = supportTimeRequestDecision("Can we check out at 10am?", {});
   assert.equal(standard.action, "standard_time");

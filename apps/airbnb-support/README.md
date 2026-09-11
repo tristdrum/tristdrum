@@ -4,14 +4,16 @@ Private Fly worker for Tristan's Airbnb conversation stream.
 
 - Every Airbnb `Host` event is treated as a human reply; the worker never tries to infer whether Tristan or Jane typed it.
 - OpenAI Responses calls use `gpt-5.6-sol`, xhigh reasoning, strict JSON schema, `store: false`, and no tools.
-- One adaptive model decision receives the complete recent conversation, stay phase, guest and listing identity, current property facts, hosting knowledge, and any active timing request. It decides whether a reply is needed, whether it can be sent now, whether Management should be alerted, and what the natural reply should say. There is no topic classifier or reply allowlist.
+- One adaptive model decision receives all stored conversation messages, stay phase, guest and listing identity, current property facts, hosting knowledge, and any active timing request. It decides whether a reply is needed, whether it can be sent now, whether Management should be alerted, and what the natural reply should say. There is no topic classifier or reply allowlist. Stored context cannot replace missing Airbnb-only host messages: reconcile those explicitly before restarting after a context incident.
+- A `closed` support thread is an explicit conversational hold. Mail ingestion preserves it, queued delivery cannot claim it, and it cannot trigger a readiness prompt. Reopen only on the owner's instruction; this hold does not alter Airbnb's native scheduled feedback messages.
+- Post-stay collection or office-storage questions do not inherit early-check-in or late-checkout rules. Use current collection facts and the conversation instead of granting new room entry.
 - Post-stay replies are checked for contradictory future tense and clear name/emoji tone misses. The same model gets one natural revision attempt; a still-inconsistent draft is held and alerted instead of being sent.
 - The small canonical knowledge module holds stable hosting policy and anonymized precedents. Current property facts remain the source for Wi-Fi, access, directions, parking, and other details that can change.
 - Early check-in is conditional from 13:00 and creates one durable cleaner note, one verified cleaner notification, and an early-arrival readiness check one hour beforehand. Late check-out requests are politely declined.
 - Bag drop is always welcome after the previous guest has actually checked out, normally from 10:00 and later if that guest departs late. It is luggage storage only and does not grant room access before cleaning readiness is confirmed. An accepted arrangement creates one durable bilingual cleaner note, one verified cleaning-team notification when it becomes known, and inclusion in that stay date's cleaner plan.
 - General post-stay improvement feedback without a named actionable issue is eligible for an automatic warm thank-you, gentle apology, and commitment to learn. Specific safety, maintenance, refund, reservation, or urgent issues still require the relevant grounded response and Management action.
 - A cleaner must explicitly say the named unit is ready before the guest is told it is ready, and that message is never queued before 13:00. Without a cleaner response, the worker stays quiet unless the guest follows up.
-- Tristan and Jane Gmail sources are fetched concurrently with a 30-second deadline. OpenAI requests default to 25 seconds and live delivery is limited to one guarded reply per run, keeping work inside the scheduler's 180-second budget.
+- Tristan and Jane Gmail imports have a 45-second deadline per attempt and one fresh-client retry for transient failures. Canonical and lifecycle imports for Tristan are sequenced. Permanent authentication failures are not retried. Every receipt retains retry counters and credential-free mailbox failure identities, including exhausted failures. OpenAI requests default to 25 seconds and live delivery is limited to one guarded reply per run.
 - Tristan's `express@airbnb.com` copy is always the SMTP thread target. Jane's trusted Airbnb copies are supplemental veto evidence only, so a newer host or guest event can stop delivery without rerouting the reply through Jane's mailbox.
 - Trusted initial inquiry notices from `automated@airbnb.com` are ingested even before an SMTP-capable thread copy exists. The agent drafts the response and alerts Management, but cannot email the guest until Airbnb supplies the matching `express@airbnb.com` route; both copies converge into one conversation and delivery.
 - An ambiguous SMTP result never retries automatically. It raises one Management alert and must be marked sent, explicitly retried, or cancelled from the dashboard after Sent mail is checked.
@@ -22,3 +24,11 @@ Private Fly worker for Tristan's Airbnb conversation stream.
 - An OpenAI failure creates a private human-review decision and no guest send. Keep the schedule dormant whenever the Tristan/Jane host-reply round-trip evidence is incomplete.
 
 With the support schedule paused, `AIRBNB_SUPPORT_BACKFILL_CONFIRMATION=RUN_WITH_SUPPORT_SCHEDULE_PAUSED node backfill.mjs` imports historical Airbnb conversation evidence from Tristan and Jane in bounded batches. It writes no guest or WhatsApp messages and is safe to rerun.
+
+For a recovery, keep both schedules paused while reconciling UI-only host replies,
+explicit holds, and old approved deliveries. Set the activation cutoff to the
+reviewed restart boundary so stale guest messages are not answered in bulk.
+Then verify a controlled shadow run and a controlled live run before enabling
+the five-minute live schedule. A healthy Fly machine alone is not a running
+guest-reply service. Report any unresolved infrastructure root cause separately
+from a successful controlled recovery.

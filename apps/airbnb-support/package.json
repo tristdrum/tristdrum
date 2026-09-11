@@ -15,8 +15,8 @@
     "@tristdrum/airbnb-db": "file:../../packages/airbnb-db",
     "html-to-text": "10.0.1",
     "imapflow": "1.6.5",
-    "mailparser": "3.9.15",
-    "nodemailer": "9.0.5",
+    "mailparser": "3.9.24",
+    "nodemailer": "9.1.1",
     "postgres": "3.4.7"
   },
   "overrides": {

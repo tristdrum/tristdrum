@@ -74,6 +74,10 @@ function harness(currentEmail, overrides = {}) {
       markSent: async (_sql, value) => calls.push(["sent", value.providerMessageId]),
       recordAmbiguous: async () => calls.push(["ambiguous"]),
       recordGuardFailure: async (_sql, value) => calls.push(["guard-failed", value.attemptRecorded]),
+      revalidateAuthority: async () => {
+        calls.push(["control-check"]);
+        return true;
+      },
       sendReply: async (value) => {
         calls.push(["send", value]);
         return { messageId: value.messageId };
@@ -126,6 +130,7 @@ test("stable canonical thread sends exactly once without the automated footer", 
     "collect-jane",
     "sent-check",
     "sent-check",
+    "control-check",
     "send",
     "sent",
   ]);
@@ -274,6 +279,15 @@ test("an ambiguous SMTP result is terminal until manual Sent reconciliation", as
   const retryResult = await processDeliveryGuard(retry.options);
   assert.equal(retryResult.action, "not_claimed");
   assert.equal(retry.calls.some(([name]) => name === "send"), false);
+});
+
+test("a hold or UI-only host reply during mail verification prevents SMTP", async () => {
+  const currentEmail = conversationEmail([{ name: "Guest Alpha", role: "Guest", text: "Hello" }]);
+  const { calls, options } = harness(currentEmail, { revalidateAuthority: async () => false });
+  const result = await processDeliveryGuard(options);
+  assert.equal(result.action, "cancel");
+  assert.equal(calls.some(([name]) => name === "send"), false);
+  assert.match(result.reason, /held or changed/);
 });
 
 test("a mailbox guard failure returns the delivery to a safe pre-SMTP retry", async () => {

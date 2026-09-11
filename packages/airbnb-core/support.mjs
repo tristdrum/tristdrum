@@ -47,6 +47,7 @@ function requestedClockMinutes(message, requestType, standardMinutes) {
     });
   }
   for (const match of text.matchAll(/\b([01]?\d|2[0-3]):([0-5]\d)\b/g)) {
+    if (clocks.some((clock) => match.index >= clock.index && match.index < clock.end)) continue;
     clocks.push({
       index: match.index,
       end: match.index + match[0].length,

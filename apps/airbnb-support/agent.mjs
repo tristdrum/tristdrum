@@ -375,6 +375,7 @@ async function requestDecision({ model, effort, input, env, fetchFn }) {
               "For reservation or date-change requests, do not tell the guest to cancel, avoid cancelling, rebook, or make another booking unless current reservation status is explicitly supplied and verified. Acknowledge and say the requested change and availability need checking.",
               "When canonicalKnowledge.approvedResponsePatterns.generalPostStayImprovementFeedback applies, a warm thank-you is eligible for automatic delivery: appreciate the guest's time, take the feedback on board, apologise gently for anything not up to scratch, and commit to learning and making it right next time without inventing hidden review details.",
               "Use stayPhase for tense. For after_stay, acknowledge the completed stay rather than talking as if it is still ahead.",
+              "After a stay, an arrival or collection time may refer to lost property or office luggage storage, not a new check-in. Use the conversation and verified collection policy; do not turn that time into room-entry permission or invent office staffing.",
               "Use the guest's name when it fits naturally. Match their warmth and mirror their use of an emoji when that feels human.",
               "When timePolicyDecision is present, its action, effective time, and conditions are binding. Phrase it naturally but never contradict or omit the operational decision.",
               "If revisionFeedback is present, revise the draft to fix every point without becoming stiff or formulaic.",
@@ -423,13 +424,15 @@ export async function decideGuestResponse({
   const evaluatedAt = latestEventAt ?? now;
   const stayPhase = supportStayPhase({ stayLabel, at: evaluatedAt, facts: verifiedFacts });
   const style = conversationStyle(guestMessage, guestName);
-  const timePolicyDecision = supportTimeFollowUpDecision(
+  const timePolicyDecision = stayPhase === "after_stay" ? null : supportTimeFollowUpDecision(
     guestMessage,
     activeTimeRequest,
     now,
     verifiedFacts,
   ) ?? supportTimeRequestDecision(guestMessage, verifiedFacts);
-  const bagDropPolicyDecision = supportBagDropRequestDecision(guestMessage, verifiedFacts);
+  const bagDropPolicyDecision = stayPhase === "after_stay"
+    ? null
+    : supportBagDropRequestDecision(guestMessage, verifiedFacts);
   const timePolicyVerified = timePolicyFactsVerified(timePolicyDecision, verifiedFacts, knowledge);
   const timePolicyBlocked = Boolean(timePolicyDecision && !timePolicyVerified);
   const bagDropPolicyVerified = bagDropPolicyFactsVerified(bagDropPolicyDecision, verifiedFacts, knowledge);
