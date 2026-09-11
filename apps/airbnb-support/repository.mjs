@@ -1487,3 +1487,29 @@ export async function latestConversationEvidenceAt(sql, householdId, mailboxScop
   `;
   return rows[0]?.latest ? new Date(rows[0].latest) : null;
 }
+
+export async function latestConversationImportCursorAt(sql, householdId, mailboxScope = "tristan") {
+  const evidenceAt = await latestConversationEvidenceAt(sql, householdId, mailboxScope);
+  // An empty scan has no evidence timestamp. Only a successful whole run can
+  // supply its conservative start watermark; nonempty imports may be capped.
+  const rows = await sql`
+    select max(started_at) as latest
+    from airbnb.job_runs
+    where household_id = ${householdId}
+      and service = 'support'
+      and status = 'success'
+      and receipt->>'status' = 'success'
+      and (
+        (${mailboxScope} = 'tristan' and receipt->'canonicalEmailsFound' = '0'::jsonb)
+        or (
+          ${mailboxScope} = 'jane'
+          and receipt->'supplementalEmailsFound' = '0'::jsonb
+          and receipt->'supplementalMailboxStatus'->>'status' = 'enabled'
+        )
+      )
+  `;
+  const emptyScanAt = rows[0]?.latest ? new Date(rows[0].latest) : null;
+  return [evidenceAt, emptyScanAt]
+    .filter((date) => date && Number.isFinite(date.getTime()))
+    .sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
+}

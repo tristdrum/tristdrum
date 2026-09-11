@@ -19,15 +19,13 @@ const liveDecision = {
   shadowMode: false,
 };
 
-test("empty Jane mailbox resumes from a successful scan instead of repeating first import", async () => {
-  const startedAt = new Date("2026-09-11T13:20:00.000Z");
-  const lastEmptyScanStartedAt = new Date("2026-09-11T13:15:00.000Z");
-  const imports = [];
+function emptyMailboxDatabase({ evidence = {}, scans = {} } = {}) {
   const receipts = [];
   const sql = async (strings, ...values) => {
     const query = strings.join("?");
-    if (/select max\(occurred_at\)/.test(query)) return [{ latest: null }];
-    if (/select max\(started_at\)/.test(query)) return [{ latest: lastEmptyScanStartedAt }];
+    const scope = values.includes("jane") ? "jane" : "tristan";
+    if (/select max\(occurred_at\)/.test(query)) return [{ latest: evidence[scope] ?? null }];
+    if (/select max\(started_at\)/.test(query)) return [{ latest: scans[scope] ?? null }];
     if (query.includes("update airbnb.job_runs")) {
       receipts.push(...values.filter((value) => value?.schemaVersion === 1));
     }
@@ -35,13 +33,22 @@ test("empty Jane mailbox resumes from a successful scan instead of repeating fir
   };
   sql.begin = async (callback) => callback(sql);
   sql.json = (value) => value;
+  return { sql, receipts, householdId: async () => "22222222-2222-4222-8222-222222222222" };
+}
+
+const configuredJane = {
+  AIRBNB_SUPPORT_JANE_GMAIL_USER: "jane@example.invalid",
+  AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD: "local-test-only",
+};
+
+test("empty Jane mailbox resumes from a successful scan instead of repeating first import", async () => {
+  const startedAt = new Date("2026-09-11T13:20:00.000Z");
+  const database = emptyMailboxDatabase({ scans: { jane: "2026-09-11T13:15:00.000Z" } });
+  const imports = [];
   const receipt = await runSupport({
     now: () => startedAt,
-    database: { sql, householdId: async () => "22222222-2222-4222-8222-222222222222" },
-    env: {
-      AIRBNB_SUPPORT_JANE_GMAIL_USER: "jane@example.invalid",
-      AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD: "local-test-only",
-    },
+    database,
+    env: configuredJane,
     collectMessages: async ({ mailboxScope, since }) => {
       imports.push({ mailboxScope, since: since.toISOString() });
       return { messages: [], envelopesFound: 0 };
@@ -51,8 +58,45 @@ test("empty Jane mailbox resumes from a successful scan instead of repeating fir
   });
 
   assert.equal(imports.find((item) => item.mailboxScope === "jane").since, "2026-09-11T07:15:00.000Z");
+  assert.equal(imports.find((item) => item.mailboxScope === "tristan").since, "2026-06-13T13:20:00.000Z");
   assert.equal(receipt.supplementalSearchSince, "2026-09-11T07:15:00.000Z");
-  assert.equal(receipts[0].supplementalSearchSince, receipt.supplementalSearchSince);
+  assert.equal(database.receipts[0].supplementalSearchSince, receipt.supplementalSearchSince);
+});
+
+test("selected Jane searchSince survives a failed whole run with unchanged two-attempt retry", async () => {
+  const database = emptyMailboxDatabase({ scans: { jane: "2026-09-11T13:15:00.000Z" } });
+  let canonicalAttempts = 0;
+  await assert.rejects(runSupport({
+    now: () => new Date("2026-09-11T13:20:00.000Z"),
+    database,
+    env: configuredJane,
+    collectMessages: async ({ mailboxScope }) => {
+      if (mailboxScope === "jane") return { messages: [], envelopesFound: 0 };
+      canonicalAttempts += 1;
+      throw Object.assign(new Error("Local timeout fixture"), { code: "IMAP_IMPORT_DEADLINE" });
+    },
+    collectLifecycleMessages: async () => assert.fail("Canonical failure must skip lifecycle import."),
+  }), { code: "IMAP_IMPORT_DEADLINE" });
+  assert.equal(canonicalAttempts, 2);
+  assert.equal(database.receipts[0].status, "error");
+  assert.equal(database.receipts[0].supplementalSearchSince, "2026-09-11T07:15:00.000Z");
+  assert.doesNotMatch(JSON.stringify(database.receipts[0]), /jane@example|local-test-only/);
+});
+
+test("disabled Jane does not scan and records a null searchSince", async () => {
+  const database = emptyMailboxDatabase();
+  const receipt = await runSupport({
+    database,
+    env: {},
+    collectMessages: async ({ mailboxScope }) => {
+      assert.equal(mailboxScope, "tristan");
+      return { messages: [], envelopesFound: 0 };
+    },
+    collectLifecycleMessages: async () => ({ messages: [], envelopesFound: 0 }),
+  });
+  assert.deepEqual(receipt.supplementalMailboxStatus, { status: "disabled" });
+  assert.equal(receipt.supplementalSearchSince, null);
+  assert.equal(database.receipts[0].supplementalSearchSince, null);
 });
 
 test("support cursor overlap bounds repeated Gmail work without weakening first import", () => {

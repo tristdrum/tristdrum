@@ -26,7 +26,7 @@ import {
 import {
   ingestConversation,
   ingestSupplementalConversation,
-  latestConversationEvidenceAt,
+  latestConversationImportCursorAt,
   latestSupportRun,
   loadDeliveryGuardCandidates,
   loadShadowCandidates,
@@ -207,6 +207,7 @@ export async function runSupport({
   let canonicalMailboxRetryCount = 0;
   let supplementalMailboxRetryCount = 0;
   let lifecycleMailboxRetryCount = 0;
+  let supplementalSearchSince = null;
   try {
     await recordJobStart(ownDatabase.sql, {
       householdId,
@@ -221,9 +222,9 @@ export async function runSupport({
     const janePasswordConfigured = Boolean(String(env.AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD ?? "").trim());
     const janeConfigured = janeUserConfigured && janePasswordConfigured;
     const [cursor, janeCursor] = await Promise.all([
-      latestConversationEvidenceAt(ownDatabase.sql, householdId, "tristan"),
+      latestConversationImportCursorAt(ownDatabase.sql, householdId, "tristan"),
       janeConfigured
-        ? latestConversationEvidenceAt(ownDatabase.sql, householdId, "jane")
+        ? latestConversationImportCursorAt(ownDatabase.sql, householdId, "jane")
         : Promise.resolve(null),
     ]);
     const overlapMinutes = env.AIRBNB_SUPPORT_GMAIL_OVERLAP_MINUTES
@@ -256,6 +257,7 @@ export async function runSupport({
         overlapMinutes,
       )
       : null;
+    supplementalSearchSince = janeSince?.toISOString() ?? null;
     const supplementalCollection = janeConfigured
       ? collectWithTransientMailboxRetry(
         () => collectMessages({
@@ -502,6 +504,7 @@ export async function runSupport({
       completedAt: now().toISOString(),
       cursorAt: cursor?.toISOString() ?? null,
       searchSince: since.toISOString(),
+      supplementalSearchSince,
       emailsFound: collected.envelopesFound + supplemental.envelopesFound,
       canonicalEmailsFound: collected.envelopesFound,
       supplementalEmailsFound: supplemental.envelopesFound,
@@ -560,7 +563,7 @@ export async function runSupport({
         service: "support",
         runId,
         status: "error",
-        receipt: { schemaVersion: 1, runId, status: "error", error: failure,
+        receipt: { schemaVersion: 1, runId, status: "error", error: failure, supplementalSearchSince,
           canonicalMailboxRetryCount, supplementalMailboxRetryCount, lifecycleMailboxRetryCount, mailboxFailures },
         errorCode: failure.code,
         errorMessage: failure.message,

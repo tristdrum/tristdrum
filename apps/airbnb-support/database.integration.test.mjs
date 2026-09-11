@@ -15,6 +15,8 @@ import {
   claimDeliveryForGuard,
   ingestConversation,
   ingestSupplementalConversation,
+  latestConversationEvidenceAt,
+  latestConversationImportCursorAt,
   loadDeliveryGuardCandidates,
   loadSuppressedSupportAlerts,
   loadShadowCandidates,
@@ -32,6 +34,7 @@ import {
   storeShadowDraft,
   upsertGuestTimeRequest,
 } from "./repository.mjs";
+import { earlierOfRecentCursor } from "./runner.mjs";
 
 const adminUrl = process.env.AIRBNB_INTEGRATION_DATABASE_URL;
 const householdId = randomUUID();
@@ -79,6 +82,107 @@ function emailFixture({
   };
 }
 
+test("empty mailbox import cursor uses only qualifying durable receipts", { skip: !adminUrl }, async (t) => {
+  const admin = postgres(adminUrl, { max: 1, prepare: false });
+  const rollback = new Error("Roll back local cursor fixtures");
+  const id = randomUUID();
+  const otherId = randomUUID();
+  const userId = randomUUID();
+  const now = new Date("2026-09-11T13:20:00.000Z");
+  const scanAt = "2026-09-11T13:15:00.000Z";
+  const emptyReceipt = {
+    status: "success",
+    canonicalEmailsFound: 0,
+    supplementalEmailsFound: 0,
+    supplementalMailboxStatus: { status: "enabled" },
+  };
+  const insertRun = (sql, { receipt = emptyReceipt, status = "success", service = "support", household = id, startedAt = scanAt } = {}) => sql`
+    insert into airbnb.job_runs (household_id, service, job_name, run_id, status, receipt, started_at, completed_at)
+    values (${household}, ${service}, 'shadow-poll', ${randomUUID()}, ${status}, ${sql.json(receipt)},
+            ${startedAt}, '2026-09-11T13:19:59Z')
+  `;
+  try {
+    await assert.rejects(admin.begin(async (sql) => {
+      await sql`insert into auth.users (id, email) values (${userId}, ${`cursor-${userId}@example.invalid`})`;
+      await sql`insert into public.households (id, name, created_by)
+        values (${id}, 'Cursor Fixture', ${userId}), (${otherId}, 'Other Cursor Fixture', ${userId})`;
+
+      await t.test("first import without evidence or a valid empty scan still covers 90 days", async () => {
+        for (const scope of ["tristan", "jane"]) {
+          const cursor = await latestConversationImportCursorAt(sql, id, scope);
+          assert.equal(cursor, null);
+          assert.equal(earlierOfRecentCursor(now, cursor, 90).toISOString(), "2026-06-13T13:20:00.000Z");
+        }
+      });
+
+      for (const [name, row, expected = []] of [
+        ["empty success uses started_at, not completed_at", {}, ["tristan", "jane"]],
+        ["recovered retry remains a valid empty success", { receipt: { ...emptyReceipt, supplementalMailboxRetryCount: 1,
+          mailboxFailures: [{ mailbox: "supplemental", attempt: 1, code: "IMAP_IMPORT_DEADLINE" }] } }, ["tristan", "jane"]],
+        ["failed whole run excludes even successful mailbox fields", { status: "error" }],
+        ["unfinished whole run", { status: "started" }],
+        ["cancelled whole run", { status: "cancelled" }],
+        ["error receipt despite successful job status", { receipt: { ...emptyReceipt, status: "error" } }],
+        ["legacy receipt missing counts and status", { receipt: {} }],
+        ["legacy receipt missing status", { receipt: { canonicalEmailsFound: 0, supplementalEmailsFound: 0,
+          supplementalMailboxStatus: { status: "enabled" } } }],
+        ["missing canonical count does not borrow Jane's success", { receipt: { status: "success",
+          supplementalEmailsFound: 0, supplementalMailboxStatus: { status: "enabled" } } }, ["jane"]],
+        ["missing supplemental count does not borrow Tristan's success", { receipt: { status: "success",
+          canonicalEmailsFound: 0, supplementalMailboxStatus: { status: "enabled" } } }, ["tristan"]],
+        ...["error", "disabled"].map((status) => [`Jane ${status} is excluded without discarding Tristan's empty success`,
+          { receipt: { ...emptyReceipt, supplementalMailboxStatus: { status } } }, ["tristan"]]),
+        ["legacy missing Jane status", { receipt: { status: "success", canonicalEmailsFound: 0, supplementalEmailsFound: 0 } }, ["tristan"]],
+        ...["0", null, false, [0], 1, 500].map((count) => [`nonempty, capped, or malformed count ${JSON.stringify(count)}`,
+          { receipt: { ...emptyReceipt, canonicalEmailsFound: count, supplementalEmailsFound: count } }]),
+        ["other service cannot advance support cursors", { service: "stock" }],
+        ["other household cannot advance these cursors", { household: otherId }],
+      ]) {
+        await t.test(name, async () => {
+          await assert.rejects(sql.savepoint(async (transaction) => {
+            await insertRun(transaction, row);
+            for (const scope of ["tristan", "jane"]) {
+              const cursor = await latestConversationImportCursorAt(transaction, id, scope);
+              assert.equal(cursor?.toISOString() ?? null, expected.includes(scope) ? scanAt : null);
+              assert.equal(earlierOfRecentCursor(now, cursor, 90).toISOString(), expected.includes(scope)
+                ? "2026-09-11T07:15:00.000Z" : "2026-06-13T13:20:00.000Z");
+              assert.equal(await latestConversationEvidenceAt(transaction, id, scope), null);
+            }
+            throw rollback;
+          }), (error) => error === rollback);
+        });
+      }
+
+      await t.test("mixed mailbox history keeps the latest qualifying scan and lets later actual evidence win", async () => {
+        await insertRun(sql, { receipt: { ...emptyReceipt, supplementalEmailsFound: 500 } });
+        await insertRun(sql, { startedAt: "2026-09-11T13:10:00.000Z", receipt: { ...emptyReceipt, canonicalEmailsFound: 500 } });
+        await insertRun(sql, { startedAt: "2026-09-11T13:18:00.000Z", status: "error" });
+        await insertRun(sql, { startedAt: "2026-09-11T13:19:00.000Z", receipt: { ...emptyReceipt,
+          canonicalEmailsFound: 500, supplementalMailboxStatus: { status: "disabled" } } });
+        assert.equal((await latestConversationImportCursorAt(sql, id, "tristan")).toISOString(), scanAt);
+        assert.equal((await latestConversationImportCursorAt(sql, id, "jane")).toISOString(), "2026-09-11T13:10:00.000Z");
+        for (const [scope, occurredAt, provider, kind] of [
+          ["tristan", "2026-09-11T13:00:00.000Z", "gmail", "conversation"],
+          ["jane", "2026-09-11T13:17:00.000Z", "gmail", "conversation"],
+          ["jane", "2026-09-11T13:19:00.000Z", "gmail", "supplemental"],
+          ["jane", "2026-09-11T13:19:00.000Z", "manual", "conversation"],
+        ]) {
+          await sql`insert into airbnb.evidence (household_id, mailbox_scope, provider, provider_message_id,
+            evidence_kind, occurred_at, content_hash)
+            values (${id}, ${scope}, ${provider}, ${randomUUID()}, ${kind}, ${occurredAt}, 'cursor-fixture')`;
+        }
+        assert.equal((await latestConversationImportCursorAt(sql, id, "tristan")).toISOString(), scanAt);
+        const janeCursor = await latestConversationImportCursorAt(sql, id, "jane");
+        assert.equal(janeCursor.toISOString(), "2026-09-11T13:17:00.000Z");
+        assert.equal(earlierOfRecentCursor(now, janeCursor, 90).toISOString(), "2026-09-11T07:17:00.000Z");
+      });
+      throw rollback;
+    }), (error) => error === rollback);
+  } finally {
+    await admin.end({ timeout: 5 });
+  }
+});
+
 test("support repository keeps Jane supplemental, stages alerts once, and guards delivery atomically", {
   skip: !adminUrl,
 }, async () => {
@@ -121,6 +225,7 @@ test("support repository keeps Jane supplemental, stages alerts once, and guards
       url: roleUrl(adminUrl),
       env: { AIRBNB_HOUSEHOLD_ID: householdId, AIRBNB_SERVICE_NAME: "airbnb-support-integration" },
     });
+    assert.equal(await latestConversationImportCursorAt(database.sql, householdId, "jane"), null);
 
     const canonicalEmail = emailFixture({
       mailboxScope: "tristan",
