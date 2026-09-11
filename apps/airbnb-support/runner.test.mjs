@@ -8,6 +8,7 @@ import {
   collectWithTransientMailboxRetry,
   earlierOfRecentCursor,
   mailboxFailureDiagnostic,
+  runSupport,
   summarizeDeliveryOutcomes,
   transientMailboxError,
 } from "./runner.mjs";
@@ -17,6 +18,42 @@ const liveDecision = {
   decisionVersion: 2,
   shadowMode: false,
 };
+
+test("empty Jane mailbox resumes from a successful scan instead of repeating first import", async () => {
+  const startedAt = new Date("2026-09-11T13:20:00.000Z");
+  const lastEmptyScanStartedAt = new Date("2026-09-11T13:15:00.000Z");
+  const imports = [];
+  const receipts = [];
+  const sql = async (strings, ...values) => {
+    const query = strings.join("?");
+    if (/select max\(occurred_at\)/.test(query)) return [{ latest: null }];
+    if (/select max\(started_at\)/.test(query)) return [{ latest: lastEmptyScanStartedAt }];
+    if (query.includes("update airbnb.job_runs")) {
+      receipts.push(...values.filter((value) => value?.schemaVersion === 1));
+    }
+    return [];
+  };
+  sql.begin = async (callback) => callback(sql);
+  sql.json = (value) => value;
+  const receipt = await runSupport({
+    now: () => startedAt,
+    database: { sql, householdId: async () => "22222222-2222-4222-8222-222222222222" },
+    env: {
+      AIRBNB_SUPPORT_JANE_GMAIL_USER: "jane@example.invalid",
+      AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD: "local-test-only",
+    },
+    collectMessages: async ({ mailboxScope, since }) => {
+      imports.push({ mailboxScope, since: since.toISOString() });
+      return { messages: [], envelopesFound: 0 };
+    },
+    collectLifecycleMessages: async () => ({ messages: [], envelopesFound: 0 }),
+    decide: async () => assert.fail("An empty mailbox must not invoke the model."),
+  });
+
+  assert.equal(imports.find((item) => item.mailboxScope === "jane").since, "2026-09-11T07:15:00.000Z");
+  assert.equal(receipt.supplementalSearchSince, "2026-09-11T07:15:00.000Z");
+  assert.equal(receipts[0].supplementalSearchSince, receipt.supplementalSearchSince);
+});
 
 test("support cursor overlap bounds repeated Gmail work without weakening first import", () => {
   const now = new Date("2026-08-28T18:25:00.000Z");
