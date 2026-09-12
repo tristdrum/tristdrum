@@ -171,14 +171,14 @@ test("canonical collector includes trusted initial inquiry notices", async () =>
   assert.equal(result.messages[0].providerMessageId, "<initial-inquiry@example.test>");
 });
 
-test("mailbox searches may return false when there are no matches", async () => {
+test("successful empty mailbox searches return no messages", async () => {
   let released = false;
   let loggedOut = false;
   const client = {
     usable: true,
     async connect() {},
     async getMailboxLock() { return { release() { released = true; } }; },
-    async search() { return false; },
+    async search() { return []; },
     async *fetch() { throw new Error("an empty search must not fetch"); },
     async logout() { loggedOut = true; },
     close() {},
@@ -195,6 +195,44 @@ test("mailbox searches may return false when there are no matches", async () => 
   assert.equal(released, true);
   assert.equal(loggedOut, true);
 });
+
+for (const [name, run, failAt] of [
+  ["canonical express import", collectConversationMessages, 1],
+  ["canonical inquiry import", collectConversationMessages, 2],
+  ["Jane import", (options) => collectConversationMessages({ ...options, mailboxScope: "jane" }), 1],
+  ["lifecycle import", collectBookingLifecycleMessages, 1],
+  ["Sent Message-ID guard", (options) => findSentMessageIds({ ...options, messageIds: ["<reply@example.test>"] }), 1],
+  ["Sent thread Message-ID guard", (options) => findSentThreadEvidence({ ...options, messageIds: ["<reply@example.test>"], referenceIds: ["<anchor@example.test>"] }), 1],
+  ["Sent thread human-reply guard", (options) => findSentThreadEvidence({ ...options, messageIds: ["<reply@example.test>"], referenceIds: ["<anchor@example.test>"] }), 2],
+]) {
+  test(`${name} rejects failed searches instead of assuming no matches`, async () => {
+    let searches = 0;
+    let released = false;
+    let loggedOut = false;
+    const client = {
+      usable: true,
+      async connect() {},
+      async getMailboxLock() { return { release() { released = true; } }; },
+      async search() { return ++searches === failAt ? false : []; },
+      async *fetch() { assert.fail("Failed or empty searches must not fetch."); },
+      async logout() { loggedOut = true; },
+      close() {},
+    };
+    await assert.rejects(run({
+      since: new Date("2026-09-12T00:00:00Z"),
+      env: {
+        AIRBNB_SUPPORT_GMAIL_USER: "tristan@example.test",
+        AIRBNB_SUPPORT_GMAIL_APP_PASSWORD: "test-only",
+        AIRBNB_SUPPORT_JANE_GMAIL_USER: "jane@example.test",
+        AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD: "test-only",
+      },
+      createClient: () => client,
+    }), { code: "IMAP_SEARCH_FAILED" });
+    assert.equal(searches, failAt);
+    assert.equal(released, true);
+    assert.equal(loggedOut, true);
+  });
+}
 
 test("historical collection pages forward by UID without rereading newer mail", async () => {
   const client = {

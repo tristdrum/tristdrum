@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { collectBookingLifecycleMessages, collectConversationMessages } from "./gmail.mjs";
 
 import {
   actionableOperationalRequests,
@@ -40,6 +41,51 @@ const configuredJane = {
   AIRBNB_SUPPORT_JANE_GMAIL_USER: "jane@example.invalid",
   AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD: "local-test-only",
 };
+
+for (const mailbox of ["canonical", "supplemental", "lifecycle"]) {
+  test(`${mailbox} SEARCH failure cannot become a successful empty mailbox watermark`, async () => {
+    const database = emptyMailboxDatabase();
+    let failedSearches = 0;
+    const createClient = () => ({
+      usable: true,
+      async connect() {},
+      async getMailboxLock() { return { release() {} }; },
+      async search() { failedSearches += 1; return false; },
+      async logout() {},
+      close() {},
+    });
+    const run = runSupport({
+      database,
+      env: {
+        ...configuredJane,
+        AIRBNB_SUPPORT_GMAIL_USER: "tristan@example.test",
+        AIRBNB_SUPPORT_GMAIL_APP_PASSWORD: "test-only",
+      },
+      collectMessages: async (options) => {
+        if ((mailbox === "canonical" && options.mailboxScope === "tristan")
+          || (mailbox === "supplemental" && options.mailboxScope === "jane")) {
+          return collectConversationMessages({ ...options, createClient });
+        }
+        return { messages: [], envelopesFound: 0 };
+      },
+      collectLifecycleMessages: async (options) => mailbox === "lifecycle"
+        ? collectBookingLifecycleMessages({ ...options, createClient })
+        : { messages: [], envelopesFound: 0 },
+      decide: async () => assert.fail("No guest decision is needed for this fixture."),
+    });
+    if (mailbox === "supplemental") {
+      const receipt = await run;
+      assert.equal(receipt.supplementalMailboxStatus.status, "error");
+      assert.equal(receipt.autonomousRepliesEnabled, false);
+    } else {
+      await assert.rejects(run, { code: "IMAP_SEARCH_FAILED" });
+      assert.equal(database.receipts[0].status, "error");
+    }
+    assert.equal(failedSearches, 1, "an unclassified SEARCH failure is not automatically retried");
+    assert.ok(database.receipts[0].mailboxFailures.some((failure) =>
+      failure.mailbox === mailbox && failure.code === "IMAP_SEARCH_FAILED"));
+  });
+}
 
 test("empty Jane mailbox resumes from a successful scan instead of repeating first import", async () => {
   const startedAt = new Date("2026-09-11T13:20:00.000Z");

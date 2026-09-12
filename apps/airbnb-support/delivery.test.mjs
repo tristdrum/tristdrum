@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parseAirbnbConversationEmail } from "@tristdrum/airbnb-core";
 import { eventsAddedAfterDraft, processDeliveryGuard } from "./delivery.mjs";
+import { collectConversationMessages, findSentThreadEvidence } from "./gmail.mjs";
 
 const householdId = "22222222-2222-4222-8222-222222222222";
 const deliveryId = "33333333-3333-4333-8333-333333333333";
@@ -85,6 +86,39 @@ function harness(currentEmail, overrides = {}) {
       ...overrides,
     },
   };
+}
+
+for (const failedGuard of ["jane-conversation", "tristan-sent", "jane-sent"]) {
+  test(`a failed ${failedGuard} SEARCH stops SMTP despite an unchanged canonical thread`, async () => {
+    const currentEmail = conversationEmail([{ name: "Guest Alpha", role: "Guest", text: "Hello" }]);
+    const createClient = () => ({
+      usable: true,
+      async connect() {},
+      async getMailboxLock() { return { release() {} }; },
+      async search() { return false; },
+      async logout() {},
+      close() {},
+    });
+    const setup = harness(currentEmail, {
+      env: {
+        AIRBNB_SUPPORT_GMAIL_USER: "tristan@example.test",
+        AIRBNB_SUPPORT_GMAIL_APP_PASSWORD: "test-only",
+        AIRBNB_SUPPORT_JANE_GMAIL_USER: "jane@example.test",
+        AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD: "test-only",
+      },
+      collectMessages: async (options) => failedGuard === "jane-conversation" && options.mailboxScope === "jane"
+        ? collectConversationMessages({ ...options, createClient })
+        : { messages: [currentEmail], envelopesFound: 1 },
+      reconcileSent: async (options) => failedGuard === `${options.mailboxScope}-sent`
+        ? findSentThreadEvidence({ ...options, createClient })
+        : [],
+    });
+    assert.deepEqual(await processDeliveryGuard(setup.options), {
+      action: "guard_error", retrySafeBeforeSmtp: true,
+    });
+    assert.equal(setup.calls.some(([name]) => name === "send" || name === "sent" || name === "ambiguous"), false);
+    assert.equal(setup.calls.some(([name]) => name === "guard-failed"), true);
+  });
 }
 
 test("event comparison ignores the source snapshot and detects only appended actors", () => {
