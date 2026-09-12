@@ -7,6 +7,7 @@ import {
   cleanerReadyConfirmation,
   cleanerTimingMessage,
   cleanerTimingWithdrawalMessage,
+  processTimeRequestReadiness,
   stayStartDate,
   withdrawGuestTimeRequest,
 } from "./operations.mjs";
@@ -59,6 +60,34 @@ test("an accepted early check-in becomes one bilingual cleaner instruction", () 
   assert.match(message, /Unit 3\n- Early check-in requested for 13:00/);
   assert.match(message, /\*Xhosa:\*\nUnit 3\n- Kucelwe ukungena kwangethuba/);
   assert.match(cleanerTimingMessage(request, { isUpdate: true }), /^Updated Airbnb timing for /);
+});
+
+test("day-of readiness prompts are bilingual for every unit and retain the reply cue and dedupe key", async () => {
+  for (const unitNumber of [1, 2, 3]) {
+    const sql = fakeSql([
+      [{ id: `request-${unitNumber}`, unitNumber, effectiveTime: "13:00:00" }],
+      [{ id: `request-${unitNumber}`, status: "awaiting_ready" }],
+      [],
+      [],
+    ]);
+    const sends = [];
+    const result = await processTimeRequestReadiness({
+      sql,
+      householdId: "household-1",
+      now: new Date("2026-09-13T10:00:00Z"),
+      env: { AIRBNB_WHATSAPP_CHAT_ID: "cleaning-team@g.us" },
+      sendGroupMessage: async (message) => { sends.push(message); },
+      readGroupMessages: async () => assert.fail("No existing prompt is awaiting a reply."),
+    });
+    assert.equal(sends.length, 1);
+    assert.equal(sends[0].chatId, "cleaning-team@g.us");
+    assert.equal(sends[0].idempotencyKey, `airbnb-support:cleaners:ready-check:request-${unitNumber}`);
+    assert.ok(sends[0].text.includes(`Unit ${unitNumber}: is the studio ready for the 13:00 early check-in?`));
+    assert.ok(sends[0].text.includes(`*IsiXhosa:*\nIyunithi ${unitNumber}: ingaba istudiyo silungile`));
+    assert.ok(sends[0].text.includes("kwangethuba ngo-13:00?"));
+    assert.ok(sends[0].text.includes(`Nceda uphendule uthi “Unit ${unitNumber} ready” xa silungile.`));
+    assert.deepEqual(result, { promptedCount: 1, readyCount: 0, repliesQueuedCount: 0 });
+  }
 });
 
 test("an accepted bag drop becomes one bilingual dated cleaner instruction", () => {
