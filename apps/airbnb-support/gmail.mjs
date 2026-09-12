@@ -44,9 +44,13 @@ function positiveInteger(value, fallback) {
 }
 
 function searchUids(value) {
-  return Array.isArray(value)
-    ? value.map(Number).filter((uid) => Number.isFinite(uid) && uid > 0)
-    : [];
+  // ImapFlow returns false for a failed SEARCH; only [] proves no matches.
+  if (!Array.isArray(value)) {
+    throw Object.assign(new Error("Airbnb support IMAP search failed."), {
+      code: "IMAP_SEARCH_FAILED",
+    });
+  }
+  return value.map(Number).filter((uid) => Number.isFinite(uid) && uid > 0);
 }
 
 function observeClientErrors(client) {
