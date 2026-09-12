@@ -223,9 +223,14 @@ export function cleanerReadyConfirmation(message, request) {
 }
 
 function readinessPrompt(request) {
+  const time = String(request.effectiveTime).slice(0, 5);
   return [
-    `Unit ${request.unitNumber}: is the studio ready for the ${String(request.effectiveTime).slice(0, 5)} early check-in?`,
+    `Unit ${request.unitNumber}: is the studio ready for the ${time} early check-in?`,
     `Please reply “Unit ${request.unitNumber} ready” when it is ready.`,
+    "",
+    "*IsiXhosa:*",
+    `Iyunithi ${request.unitNumber}: ingaba istudiyo silungile ukuze undwendwe lungene kwangethuba ngo-${time}?`,
+    `Nceda uphendule uthi “Unit ${request.unitNumber} ready” xa silungile.`,
   ].join("\n");
 }
 
