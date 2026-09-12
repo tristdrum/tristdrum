@@ -36,6 +36,68 @@ function modelDecisionSequence(values, inspect = () => {}) {
   };
 }
 
+test("accepting a host counteroffer creates the accepted room-timing operation, independently of office policy", async () => {
+  for (const officeAllowed of [false, true]) {
+    const context = [
+      { direction: "guest", text: "Could I check in at 11:00 or 12:00 tomorrow?" },
+      { direction: "host", text: "The earliest possible early check-in is 13:00, subject to cleaning. Would 13:00 work?" },
+      { direction: "guest", text: "Thank you, I am willing to take that." },
+    ];
+    let calls = 0;
+    const result = await decideGuestResponse({
+      guestMessage: context[2].text,
+      guestName: "Guest",
+      listingName: "Jasmine Studio Stay",
+      facts: { checkInTime: "15:00", checkOutTime: "10:00", earliestCheckInTime: "13:00",
+        ...(officeAllowed ? { officeLuggageStorage: { allowed: true, location: "Office" } } : {}) },
+      stayLabel: "Sep 13 - 15, 2026",
+      latestEventAt: "2026-09-12T09:28:00Z",
+      now: new Date("2026-09-12T09:35:00Z"),
+      conversationContext: context,
+      env: { OPENAI_API_KEY: "test-key" },
+      fetchFn: modelDecision({
+        replyNeeded: true, sendReply: true, alertManagement: false,
+        summary: "Guest accepted the host's conditional 13:00 offer.",
+        draft: "We will aim for 13:00 tomorrow, subject to the cleaning team confirming the studio is ready.",
+        officeStorageArrangement: null,
+        roomTimingRequest: "The guest accepts early check-in at 13:00 tomorrow, subject to cleaning readiness.",
+      }, (request) => {
+        calls += 1;
+        assert.match(request.input[0].content[0].text, /accepts a host's timing offer/);
+        assert.deepEqual(JSON.parse(request.input[1].content[0].text).recentConversation, context);
+      }),
+    });
+    assert.equal(calls, 1);
+    assert.equal(result.autoReply, true);
+    assert.equal(result.operationalRequest.action, "accept_conditional");
+    assert.equal(result.operationalRequest.effectiveTime, "13:00");
+    assert.equal(result.operationalRequest.createsOperationalRequest, true);
+    assert.deepEqual(result.qualityIssues, []);
+  }
+});
+
+test("courtesy after an unchanged active early-arrival arrangement creates no new operation", async () => {
+  const result = await decideGuestResponse({
+    guestMessage: "Thank you!",
+    guestName: "Guest",
+    listingName: "Jasmine Studio Stay",
+    facts: { checkInTime: "15:00", checkOutTime: "10:00", earliestCheckInTime: "13:00" },
+    stayLabel: "Sep 13 - 15, 2026",
+    latestEventAt: "2026-09-12T09:28:00Z",
+    now: new Date("2026-09-12T09:35:00Z"),
+    activeTimeRequest: { requestType: "early_checkin", effectiveTime: "13:00", status: "cleaners_notified", stayDate: "2026-09-13" },
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecision({
+      replyNeeded: false, sendReply: false, alertManagement: false,
+      summary: "Courtesy after an already recorded arrangement.", draft: null,
+      officeStorageArrangement: null, roomTimingRequest: null,
+    }),
+  });
+  assert.equal(result.replyNeeded, false);
+  assert.equal(result.autoReply, false);
+  assert.equal(result.operationalRequest, null);
+});
+
 test("adaptive support uses GPT-5.6 Sol at xhigh reasoning with a minimal decision contract", async () => {
   let request;
   const result = await decideGuestResponse({
