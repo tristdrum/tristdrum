@@ -98,6 +98,51 @@ test("courtesy after an unchanged active early-arrival arrangement creates no ne
   assert.equal(result.operationalRequest, null);
 });
 
+test("an unparseable room paraphrase cannot erase the original late-checkout guard", async () => {
+  const result = await decideGuestResponse({
+    guestMessage: "Could we check out at 12pm?",
+    guestName: "Guest",
+    listingName: "Jasmine Studio Stay",
+    facts: { checkInTime: "15:00", checkOutTime: "10:00", earliestCheckInTime: "13:00" },
+    stayLabel: "Sep 11 - 12, 2026",
+    latestEventAt: "2026-09-12T07:00:00Z",
+    now: new Date("2026-09-12T07:01:00Z"),
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecision({
+      replyNeeded: true, sendReply: true, alertManagement: false,
+      summary: "Checkout request.", draft: "Yes, no problem, you can check out at 12:00.",
+      officeStorageArrangement: null,
+      roomTimingRequest: "The guest requests checkout at 12:00.",
+    }),
+  });
+  assert.equal(result.autoReply, false);
+  assert.equal(result.alertManagement, true);
+  assert.equal(result.operationalRequest, null);
+  assert.ok(result.qualityIssues.some((issue) => /decline|accepted/i.test(issue)));
+});
+
+test("an unparseable contextual room request is held even if the model asks to stay silent", async () => {
+  const result = await decideGuestResponse({
+    guestMessage: "That works for me.",
+    guestName: "Guest",
+    listingName: "Jasmine Studio Stay",
+    facts: { checkInTime: "15:00", checkOutTime: "10:00" },
+    stayLabel: "Sep 13 - 15, 2026",
+    latestEventAt: "2026-09-12T09:28:00Z",
+    now: new Date("2026-09-12T09:35:00Z"),
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecision({
+      replyNeeded: false, sendReply: false, alertManagement: false,
+      summary: "Contextual acceptance.", draft: null,
+      officeStorageArrangement: null, roomTimingRequest: "Guest accepts the previously offered arrangement.",
+    }),
+  });
+  assert.equal(result.replyNeeded, true);
+  assert.equal(result.autoReply, false);
+  assert.equal(result.alertManagement, true);
+  assert.equal(result.operationalRequest, null);
+});
+
 test("adaptive support uses GPT-5.6 Sol at xhigh reasoning with a minimal decision contract", async () => {
   let request;
   const result = await decideGuestResponse({

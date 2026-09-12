@@ -481,10 +481,14 @@ export async function decideGuestResponse({
   const timePolicy = (raw = {}) => {
     const officeOnly = raw.officeStorageArrangement
       && !/\bcheck[ -]?(?:in|out)\b/i.test(guestMessage);
-    const decision = roomPolicyDecision(Object.hasOwn(raw, "roomTimingRequest") && (raw.roomTimingRequest != null || officeOnly)
-      ? raw.roomTimingRequest : guestMessage);
+    const useExtraction = Object.hasOwn(raw, "roomTimingRequest")
+      && (raw.roomTimingRequest != null || officeOnly);
+    let decision = roomPolicyDecision(useExtraction ? raw.roomTimingRequest : guestMessage);
+    const unparsedRoomRequest = useExtraction && raw.roomTimingRequest != null && !decision;
+    // An unparseable paraphrase cannot erase a recognized guest request.
+    if (unparsedRoomRequest) decision = roomPolicyDecision(guestMessage);
     const verified = timePolicyFactsVerified(decision, verifiedFacts, knowledge);
-    return { decision, verified, blocked: Boolean(decision && !verified) };
+    return { decision, verified, blocked: Boolean(decision && !verified) || (unparsedRoomRequest && !decision) };
   };
   let { decision: timePolicyDecision, verified: timePolicyVerified, blocked: timePolicyBlocked } = timePolicy();
 
@@ -507,7 +511,7 @@ export async function decideGuestResponse({
   ({ decision: timePolicyDecision, verified: timePolicyVerified, blocked: timePolicyBlocked } = timePolicy(raw));
   ({ decision: bagDropPolicyDecision, verified: bagDropPolicyVerified, blocked: bagDropPolicyBlocked } = bagDropPolicy(raw.officeStorageArrangement));
   let draft = typeof raw.draft === "string" ? raw.draft.trim() : null;
-  let replyNeeded = raw.replyNeeded === true || Boolean(timePolicyDecision)
+  let replyNeeded = raw.replyNeeded === true || Boolean(timePolicyDecision) || timePolicyBlocked
     || bagDropPolicyDecision?.action === "accept_after_checkout";
   let wantsToSend = replyNeeded && raw.sendReply === true && Boolean(draft);
   let requiresManagement = raw.alertManagement === true;
@@ -534,7 +538,7 @@ export async function decideGuestResponse({
     ({ decision: timePolicyDecision, verified: timePolicyVerified, blocked: timePolicyBlocked } = timePolicy(raw));
     ({ decision: bagDropPolicyDecision, verified: bagDropPolicyVerified, blocked: bagDropPolicyBlocked } = bagDropPolicy(raw.officeStorageArrangement));
     draft = typeof raw.draft === "string" ? raw.draft.trim() : null;
-    replyNeeded = raw.replyNeeded === true || Boolean(timePolicyDecision)
+    replyNeeded = raw.replyNeeded === true || Boolean(timePolicyDecision) || timePolicyBlocked
       || bagDropPolicyDecision?.action === "accept_after_checkout";
     wantsToSend = replyNeeded && raw.sendReply === true && Boolean(draft);
     requiresManagement = requiresManagement || raw.alertManagement === true;
