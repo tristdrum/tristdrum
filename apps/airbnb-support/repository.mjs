@@ -403,7 +403,15 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8, notBef
         from airbnb.guest_messages message
         where message.household_id = thread.household_id
           and message.thread_id = thread.id
-        order by message.provider_sent_at desc
+        -- Airbnb's inbound copies can omit our already-sent replies.
+        union
+        select 'host', coalesce(delivery.final_text, delivery.draft_text), delivery.sent_at
+        from airbnb.reply_deliveries delivery
+        where delivery.household_id = thread.household_id
+          and delivery.thread_id = thread.id
+          and delivery.status = 'sent'
+          and delivery.sent_at is not null
+          and nullif(btrim(coalesce(delivery.final_text, delivery.draft_text)), '') is not null
       ) context_message
     ) recent_context on true
     left join airbnb.properties property

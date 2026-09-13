@@ -169,6 +169,21 @@ test("candidate loading uses an explicit activation cutoff instead of a rolling 
   assert.match(queryText, /airbnb_initial_inquiry/);
 });
 
+test("decision context includes only this thread's completed sent replies without changing reply authority", async () => {
+  const queries = [];
+  await loadShadowCandidates(async (strings) => {
+    queries.push(strings.join("?"));
+    return [];
+  }, { householdId: cursorHouseholdId });
+  assert.equal(queries.length, 1);
+  const query = queries[0];
+  assert.match(query, /union\s+select 'host', coalesce\(delivery.final_text, delivery.draft_text\), delivery.sent_at/);
+  assert.match(query, /delivery.household_id = thread.household_id\s+and delivery.thread_id = thread.id\s+and delivery.status = 'sent'\s+and delivery.sent_at is not null/);
+  assert.match(query, /nullif\(btrim\(coalesce\(delivery.final_text, delivery.draft_text\)\), ''\) is not null/);
+  assert.match(query, /thread.last_host_at < thread.last_guest_at/);
+  assert.doesNotMatch(query, /\b(?:insert|update|delete)\b/i);
+});
+
 test("automatically answerable drafts do not create Management escalations", async () => {
   const queries = [];
   const sql = async (strings, ...values) => {
