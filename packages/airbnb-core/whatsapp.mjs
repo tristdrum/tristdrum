@@ -26,6 +26,20 @@ function normalizedText(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
+function messageOccurredAt(value) {
+  if (typeof value !== "string" && typeof value !== "number") return "";
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  if (/^\d+(?:\.\d+)?$/.test(text)) {
+    const seconds = Number(text);
+    // Min supplies Unix seconds, not milliseconds or coerced provider objects.
+    if (seconds >= 10_000_000_000) return "";
+    const date = new Date(seconds * 1000);
+    return Number.isFinite(date.getTime()) ? date.toISOString() : "";
+  }
+  return Number.isFinite(Date.parse(text)) ? text : "";
+}
+
 function providerMessageId(message) {
   return String(
     message?.message_id
@@ -119,11 +133,28 @@ export async function readWhatsAppChatMessages({
     baseUrl,
   );
   url.searchParams.set("limit", String(boundedLimit));
-  const response = await fetchFn(url, {
-    headers: { "X-Min-API-Key": apiKey },
-    signal: AbortSignal.timeout(positiveInteger(env.AIRBNB_WHATSAPP_TIMEOUT_MS, DEFAULT_TIMEOUT_MS)),
-  });
-  const body = await responseJson(response);
+  const timeoutMs = positiveInteger(
+    env.AIRBNB_WHATSAPP_EVIDENCE_READ_TIMEOUT_MS,
+    positiveInteger(env.AIRBNB_WHATSAPP_TIMEOUT_MS, DEFAULT_TIMEOUT_MS),
+  );
+  const signal = AbortSignal.timeout(timeoutMs);
+  let response;
+  let body;
+  try {
+    response = await fetchFn(url, {
+      headers: { "X-Min-API-Key": apiKey },
+      signal,
+    });
+    body = await responseJson(response);
+  } catch (error) {
+    if (signal.aborted) {
+      throw Object.assign(new Error("WhatsApp evidence read exceeded its deadline."), {
+        code: "WHATSAPP_EVIDENCE_READ_TIMEOUT",
+        cause: error,
+      });
+    }
+    throw error;
+  }
   if (!response.ok) throw new Error(`WhatsApp evidence read failed with HTTP ${response.status}.`);
   return (Array.isArray(body?.messages) ? body.messages : []).map((message) => ({
     providerMessageId: String(message.message_id ?? message.id ?? "").trim(),
@@ -133,7 +164,7 @@ export async function readWhatsAppChatMessages({
     text: String(message.text ?? "").trim(),
     transcript: String(message.transcript ?? "").trim(),
     preview: String(message.preview ?? "").trim(),
-    occurredAt: String(message.timestamp ?? "").trim(),
+    occurredAt: messageOccurredAt(message.timestamp),
   })).filter((message) => message.providerMessageId);
 }
 
