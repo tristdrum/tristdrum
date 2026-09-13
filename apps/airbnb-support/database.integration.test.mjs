@@ -82,6 +82,79 @@ function emailFixture({
   };
 }
 
+test("follow-up context includes verified sent replies without changing delivery authority", { skip: !adminUrl }, async () => {
+  const admin = postgres(adminUrl, { max: 1, prepare: false, transform: postgres.camel });
+  const rollback = new Error("Roll back sent-context fixtures");
+  const owner = randomUUID();
+  const household = randomUUID();
+  const otherHousehold = randomUUID();
+  const thread = randomUUID();
+  const otherThread = randomUUID();
+  const foreignThread = randomUUID();
+  try {
+    await assert.rejects(admin.begin(async (sql) => {
+      await sql`insert into auth.users (id, email) values (${owner}, ${`${owner}@example.invalid`})`;
+      await sql`insert into public.households (id, name, created_by)
+        values (${household}, 'Sent context fixture', ${owner}), (${otherHousehold}, 'Other fixture', ${owner})`;
+      for (const [id, householdId] of [[thread, household], [otherThread, household], [foreignThread, otherHousehold]]) {
+        await sql`insert into airbnb.guest_threads
+          (id, household_id, provider_thread_id, canonical_mailbox, status, last_guest_at, last_host_at, source_fingerprint)
+          values (${id}, ${householdId}, ${id}, 'tristan', 'open', '2026-09-13T14:30Z', '2026-09-13T10:00Z', 'new-follow-up')`;
+      }
+      for (const [direction, body, at] of [
+        ['host', 'Human welcome', '2026-09-13T10:00:00Z'],
+        ['guest', 'It still does not work.', '2026-09-13T14:30:00Z'],
+      ]) {
+        await sql`insert into airbnb.guest_messages
+          (household_id, thread_id, provider_thread_id, provider_message_id, direction, body_normalized, content_hash, provider_sent_at)
+          values (${household}, ${thread}, ${thread}, ${randomUUID()}, ${direction}, ${body}, ${randomUUID()}, ${at})`;
+      }
+      const sent = async ({ body, final = null, at = '2026-09-13T13:30:00Z', status = 'sent', h = household, t = thread }) => {
+        const id = randomUUID();
+        await sql`insert into airbnb.reply_deliveries
+          (household_id, thread_id, source_fingerprint, source_last_event_at, risk_tier, draft_text, final_text,
+           status, idempotency_key, outbound_message_id, sent_at)
+          values (${h}, ${t}, ${`old-${id}`}, '2026-09-13T09:00Z', 'low', ${body}, ${final}, ${status},
+                  ${id}, ${`<${id}@example.invalid>`}, ${at})`;
+      };
+      await sent({ body: 'Unsaved draft version', final: 'Use the HDMI input.', at: '2026-09-13T13:45:00Z' });
+      await sent({ body: 'Please restart the TV.', at: '2026-09-13T14:00:00Z' });
+      await sent({ body: 'Please restart the TV.', at: '2026-09-13T14:10:00Z' });
+      await sent({ body: 'Human welcome', at: '2026-09-13T10:00:00Z' });
+      await sent({ body: 'Missing send time', at: null });
+      await sent({ body: null });
+      await sent({ body: 'Draft is not the sent final', final: '' });
+      await sent({ body: 'Other thread', t: otherThread });
+      await sent({ body: 'Other household', h: otherHousehold, t: foreignThread });
+      for (const status of ['draft', 'needs_approval', 'approved', 'failed', 'cancelled', 'ambiguous', 'handled_by_human']) {
+        await sent({ body: `Unsent ${status}`, status });
+      }
+      const before = (await sql`select status, last_host_at, source_fingerprint from airbnb.guest_threads where id = ${thread}`)[0];
+      const candidates = await loadShadowCandidates(sql, { householdId: household });
+      assert.equal(candidates.length, 1);
+      assert.deepEqual(candidates[0].conversationContext.map((entry) => [entry.direction, entry.text]), [
+        ['host', 'Human welcome'],
+        ['host', 'Use the HDMI input.'],
+        ['host', 'Please restart the TV.'],
+        ['host', 'Please restart the TV.'],
+        ['guest', 'It still does not work.'],
+      ]);
+      assert.deepEqual(candidates[0].conversationContext.map((entry) => new Date(entry.occurredAt).toISOString()), [
+        '2026-09-13T10:00:00.000Z', '2026-09-13T13:45:00.000Z', '2026-09-13T14:00:00.000Z',
+        '2026-09-13T14:10:00.000Z', '2026-09-13T14:30:00.000Z',
+      ]);
+      assert.deepEqual((await sql`select status, last_host_at, source_fingerprint from airbnb.guest_threads where id = ${thread}`)[0], before);
+      await sql`update airbnb.guest_threads set status = 'closed' where id = ${thread}`;
+      assert.deepEqual(await loadShadowCandidates(sql, { householdId: household }), []);
+      await sql`update airbnb.guest_threads set status = 'open', last_host_at = '2026-09-13T14:31Z' where id = ${thread}`;
+      assert.deepEqual(await loadShadowCandidates(sql, { householdId: household }), []);
+      throw rollback;
+    }), (error) => error === rollback);
+  } finally {
+    await admin.end({ timeout: 5 });
+  }
+});
+
 test("empty mailbox import cursor uses only qualifying durable receipts", { skip: !adminUrl }, async (t) => {
   const admin = postgres(adminUrl, { max: 1, prepare: false });
   const rollback = new Error("Roll back local cursor fixtures");
