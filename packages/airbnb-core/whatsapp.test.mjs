@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   readWhatsAppChatMessages,
   sendVerifiedManagementMessage,
@@ -176,4 +177,59 @@ test("WhatsApp evidence reads return a bounded normalized message shape without 
     preview: "",
     occurredAt: "2026-08-24T09:00:00+02:00",
   }]);
+});
+
+test("Min Unix-second timestamps normalize while ISO timestamps remain compatible", async () => {
+  const instant = "2026-09-13T10:41:00.000Z";
+  const seconds = Date.parse(instant) / 1000;
+  const timestamps = [seconds, String(seconds), instant, null, "", "not-a-date"];
+  const messages = await readWhatsAppChatMessages({
+    chatId: "cleaners@g.us", env,
+    fetchFn: async () => new Response(JSON.stringify({
+      messages: timestamps.map((timestamp, index) => ({ id: `message-${index}`, timestamp })),
+    })),
+  });
+  assert.deepEqual(messages.map((message) => message.occurredAt), [instant, instant, instant, "", "", ""]);
+});
+
+test("the evidence-read deadline is independent of unchanged write and readback deadlines", async (t) => {
+  const deadlines = [];
+  t.mock.method(AbortSignal, "timeout", (milliseconds) => {
+    deadlines.push(milliseconds);
+    return new AbortController().signal;
+  });
+  const configured = { ...env, AIRBNB_WHATSAPP_TIMEOUT_MS: "8000", AIRBNB_WHATSAPP_EVIDENCE_READ_TIMEOUT_MS: "30000" };
+  await readWhatsAppChatMessages({ chatId: "cleaners@g.us", env: configured,
+    fetchFn: async () => new Response('{"messages":[]}') });
+  let sent = false;
+  await sendVerifiedManagementMessage({ text: "Scoped timeout test", idempotencyKey: "timeout-test", env: configured,
+    fetchFn: async (url, options) => {
+      if (options.method === "POST") {
+        if (!String(url).includes("dry_run=true")) sent = true;
+        return new Response('{"ok":true}');
+      }
+      const messages = sent ? [{ id: "receipt", from_me: true, text: "Scoped timeout test" }] : [];
+      return new Response(JSON.stringify({ messages }));
+    },
+  });
+  assert.deepEqual(deadlines, [30000, 8000, 8000, 8000, 8000]);
+  for (const value of [undefined, "0", "invalid"]) {
+    await readWhatsAppChatMessages({ chatId: "cleaners@g.us",
+      env: { ...env, AIRBNB_WHATSAPP_TIMEOUT_MS: "8000", AIRBNB_WHATSAPP_EVIDENCE_READ_TIMEOUT_MS: value },
+      fetchFn: async () => new Response('{"messages":[]}') });
+    assert.equal(deadlines.at(-1), 8000);
+  }
+});
+
+test("an evidence timeout fails closed with a credential-free phase identity and no retry", async () => {
+  let calls = 0;
+  await assert.rejects(readWhatsAppChatMessages({
+    chatId: "cleaners@g.us", env: { ...env, AIRBNB_WHATSAPP_EVIDENCE_READ_TIMEOUT_MS: "5" },
+    fetchFn: async (_url, options) => {
+      calls += 1;
+      await delay(100, undefined, { signal: options.signal });
+      return new Response('{"messages":[]}');
+    },
+  }), { code: "WHATSAPP_EVIDENCE_READ_TIMEOUT", message: "WhatsApp evidence read exceeded its deadline." });
+  assert.equal(calls, 1);
 });

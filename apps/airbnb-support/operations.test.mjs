@@ -11,7 +11,7 @@ import {
   stayStartDate,
   withdrawGuestTimeRequest,
 } from "./operations.mjs";
-import { supportBagDropRequestDecision } from "@tristdrum/airbnb-core";
+import { readWhatsAppChatMessages, supportBagDropRequestDecision } from "@tristdrum/airbnb-core";
 import { loadShadowCandidates } from "./repository.mjs";
 
 function fakeSql(results) {
@@ -24,6 +24,23 @@ function fakeSql(results) {
   sql.calls = calls;
   return sql;
 }
+
+test("real Min timestamp shapes preserve the post-prompt unit-ready guard", async () => {
+  const prompted = Date.parse("2026-09-13T10:40:12.000Z") / 1000;
+  const request = { unitNumber: 3, commonName: "Jasmine", readinessPromptedAt: new Date(prompted * 1000).toISOString() };
+  const messages = await readWhatsAppChatMessages({
+    chatId: "cleaners@g.us",
+    env: { MINCOOL_CUSTOMER_WHATSAPP_API_BASE_URL: "https://min.example", MINCOOL_CUSTOMER_WHATSAPP_API_KEY: "fixture", AIRBNB_WHATSAPP_ACCOUNT_ID: "fixture" },
+    fetchFn: async () => new Response(JSON.stringify({ messages: [
+      { id: "old", timestamp: prompted - 1, text: "Unit 3 ready", from_me: false },
+      { id: "fresh", timestamp: prompted + 1, text: "Unit 3 ready", from_me: false },
+      { id: "outbound", timestamp: prompted + 1, text: "Unit 3 ready", from_me: true },
+      { id: "wrong-unit", timestamp: prompted + 1, text: "Unit 2 ready", from_me: false },
+      { id: "invalid-time", timestamp: "unknown", text: "Unit 3 ready", from_me: false },
+    ] })),
+  });
+  assert.deepEqual(messages.map((message) => cleanerReadyConfirmation(message, request)), [false, true, false, false, false]);
+});
 
 const candidate = {
   id: "thread-1",
