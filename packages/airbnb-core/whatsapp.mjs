@@ -27,10 +27,14 @@ function normalizedText(value) {
 }
 
 function messageOccurredAt(value) {
+  if (typeof value !== "string" && typeof value !== "number") return "";
   const text = String(value ?? "").trim();
   if (!text) return "";
   if (/^\d+(?:\.\d+)?$/.test(text)) {
-    const date = new Date(Number(text) * 1000);
+    const seconds = Number(text);
+    // Min supplies Unix seconds, not milliseconds or coerced provider objects.
+    if (seconds >= 10_000_000_000) return "";
+    const date = new Date(seconds * 1000);
     return Number.isFinite(date.getTime()) ? date.toISOString() : "";
   }
   return Number.isFinite(Date.parse(text)) ? text : "";

@@ -182,14 +182,14 @@ test("WhatsApp evidence reads return a bounded normalized message shape without 
 test("Min Unix-second timestamps normalize while ISO timestamps remain compatible", async () => {
   const instant = "2026-09-13T10:41:00.000Z";
   const seconds = Date.parse(instant) / 1000;
-  const timestamps = [seconds, String(seconds), instant, null, "", "not-a-date"];
+  const timestamps = [seconds, String(seconds), instant, null, "", "not-a-date", seconds * 1000, [seconds], { timestamp: seconds }, true];
   const messages = await readWhatsAppChatMessages({
     chatId: "cleaners@g.us", env,
     fetchFn: async () => new Response(JSON.stringify({
       messages: timestamps.map((timestamp, index) => ({ id: `message-${index}`, timestamp })),
     })),
   });
-  assert.deepEqual(messages.map((message) => message.occurredAt), [instant, instant, instant, "", "", ""]);
+  assert.deepEqual(messages.map((message) => message.occurredAt), [instant, instant, instant, "", "", "", "", "", "", ""]);
 });
 
 test("the evidence-read deadline is independent of unchanged write and readback deadlines", async (t) => {
