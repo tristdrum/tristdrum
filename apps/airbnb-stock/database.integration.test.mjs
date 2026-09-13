@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import postgres from "postgres";
+import { parseSixty60Message } from "@tristdrum/airbnb-core";
 import {
   createAirbnbDatabase,
   recordJobFinish,
@@ -819,6 +820,36 @@ test("scoped workers enforce household isolation, service boundaries, job locks,
       now: new Date(),
       limit: 24,
     })).some((alert) => alert.alertType === "stock_low"), false);
+
+    const windowMessage = {
+      providerMessageId: "integration-window-invoice",
+      from: "no-reply@checkers.sixty60.co.za",
+      subject: "Sixty60 invoice for order 123456789",
+      occurredAt: "2026-05-16T08:51:22.000Z",
+    };
+    const address = "1 Bowie St, Nahoon Beach, KuGompo City, 5210, South Africa";
+    for (const window of ["60 MIN", "11-12 PM", "11-12 PM"]) {
+      const parsed = parseSixty60Message({
+        ...windowMessage,
+        body: `Delivery address: ${address} ${window} Delivered on 16 May 2026 Product Detail Price (per item) Total Nosh Chocolate Bar 56g Qty 1 R 14.99 R 14.99 Product sub-total R 14.99 Total R 14.99`,
+      });
+      assert.equal(parsed.items.length, 1);
+      const result = await ingestOrderEvidence(stock.sql, { householdId, message: windowMessage, parsed });
+      assert.equal(result.addressStatus, "bowie_1");
+      const [order] = await admin`
+        select id, address_status, inventory_credited_at
+        from airbnb.orders
+        where household_id = ${householdId} and provider_order_id = '123456789'
+      `;
+      assert.equal(order.address_status, "bowie_1");
+      assert.ok(order.inventory_credited_at);
+      const [credit] = await admin`
+        select count(*)::integer as count, sum(quantity_delta)::integer as quantity
+        from airbnb.inventory_movements
+        where household_id = ${householdId} and order_id = ${order.id} and source_type = 'invoice'
+      `;
+      assert.deepEqual(credit, { count: 1, quantity: 1 });
+    }
 
     const orderNumber = randomUUID();
     const invoiceMessage = {
