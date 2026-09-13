@@ -63,7 +63,10 @@ function deliveryDueAt(occurredAt, eta) {
 }
 
 function lookbackDate(now, days) {
-  return new Date(now.getTime() - days * 86_400_000);
+  const since = new Date(now.getTime() - days * 86_400_000);
+  // IMAP SINCE has UTC date precision; the saved-message lookup must match it.
+  since.setUTCHours(0, 0, 0, 0);
+  return since;
 }
 
 export async function runStockObservation({

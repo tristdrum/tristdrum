@@ -28,6 +28,36 @@ test("the runner rejects ungated live mode before opening the database", async (
   assert.equal(databaseTouched, false);
 });
 
+test("mail search and known IDs share the UTC day cutoff at the moving lookback boundary", async () => {
+  for (const instant of ["2026-09-13T09:00:00Z", "2026-09-13T23:59:59Z", "2026-09-14T00:00:00Z", "2026-09-14T00:30:00+02:00"]) {
+    const now = new Date(instant);
+    const expected = new Date(now.getTime() - 120 * 86_400_000);
+    expected.setUTCHours(0, 0, 0, 0);
+    let databaseSince;
+    const sql = async (strings, ...values) => {
+      if (strings.join("?").includes("select provider_message_id")) {
+        databaseSince = values.find((value) => value instanceof Date);
+        return [{ providerMessageId: "<boundary-invoice@example.test>" }];
+      }
+      return [];
+    };
+    sql.begin = (callback) => callback(sql);
+    sql.json = (value) => value;
+    await assert.rejects(runStockObservation({
+      now: () => now,
+      database: { sql, householdId: async () => "22222222-2222-4222-8222-222222222222" },
+      env: {},
+      collectMessages: async ({ since, knownProviderMessageIds }) => {
+        assert.equal(since.toISOString(), expected.toISOString());
+        assert.equal(databaseSince.toISOString(), since.toISOString());
+        assert.deepEqual(knownProviderMessageIds, ["<boundary-invoice@example.test>"]);
+        throw Object.assign(new Error("End boundary fixture before any provider or forecast work."), { code: "BOUNDARY_TEST_STOP" });
+      },
+    }), { code: "BOUNDARY_TEST_STOP" });
+    assert.equal(now.getTime(), new Date(instant).getTime());
+  }
+});
+
 test("the runner fails instead of silently degrading when either WhatsApp group is missing", async () => {
   const transaction = async () => [];
   const sql = async () => [];

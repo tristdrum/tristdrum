@@ -73,3 +73,37 @@ test("collector does not download bodies for already ingested message IDs", asyn
   assert.equal(result.envelopesSkippedKnown, 1);
   assert.deepEqual(result.messages, []);
 });
+
+test("known boundary-day mail is skipped while unseen mail from the same day is downloaded", async () => {
+  const fetched = [];
+  const client = {
+    usable: true,
+    async connect() {},
+    async getMailboxLock() { return { release() {} }; },
+    async search({ since }) { assert.equal(since.toISOString(), "2026-05-16T00:00:00.000Z"); return [1, 2]; },
+    async *fetch() {
+      for (const uid of [1, 2]) yield {
+        uid,
+        internalDate: new Date(`2026-05-16T08:5${uid}:00Z`),
+        envelope: { subject: `Sixty60 invoice for order 12345678${uid}`,
+          from: [{ address: "no-reply@checkers.sixty60.co.za" }],
+          messageId: `<boundary-${uid}@example.test>` },
+      };
+    },
+    async fetchOne(uid) {
+      fetched.push(uid);
+      return { source: Buffer.from(`Message-ID: <boundary-${uid}@example.test>\r\nFrom: no-reply@checkers.sixty60.co.za\r\nSubject: Sixty60 invoice for order 12345678${uid}\r\n\r\nOrder No.: 12345678${uid}`) };
+    },
+    async logout() {},
+    close() {},
+  };
+  const result = await collectSixty60Messages({
+    since: new Date("2026-05-16T00:00:00Z"),
+    knownProviderMessageIds: ["<boundary-1@example.test>"],
+    env: { JANE_GMAIL_USER: "jane@example.test", JANE_GMAIL_APP_PASSWORD: "not-a-secret" },
+    createClient: () => client,
+  });
+  assert.deepEqual(fetched, [2]);
+  assert.equal(result.envelopesSkippedKnown, 1);
+  assert.deepEqual(result.messages.map((message) => message.providerMessageId), ["<boundary-2@example.test>"]);
+});

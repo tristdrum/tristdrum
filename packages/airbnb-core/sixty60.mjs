@@ -120,7 +120,9 @@ function orderNumber(subject, body) {
 }
 
 function deliveryAddress(body) {
-  return /Delivery address:\s*(.+?)(?=\s+(?:\d+\s*MIN|Delivered on|Product Detail))/i.exec(body)?.[1]?.trim() ?? null;
+  const address = /Delivery address:\s*(.+?)(?=\s+(?:\d+\s*MIN|Delivered on|Product Detail))/i.exec(body)?.[1]?.trim();
+  // Scheduled invoices place a delivery window after the address, before Delivered on.
+  return address?.replace(/\s+(?:0?[1-9]|1[0-2])(?::[0-5]\d)?\s*(?:AM|PM)?\s*[-\u2013]\s*(?:0?[1-9]|1[0-2])(?::[0-5]\d)?\s*(?:AM|PM)$/i, "") ?? null;
 }
 
 function totalCents(body) {

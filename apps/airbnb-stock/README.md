@@ -4,6 +4,7 @@ Private Fly worker for Jane's Sixty60 evidence and seven-day Airbnb stock foreca
 
 - Confirmations create provisional order records because they contain no delivery address.
 - Only invoices that explicitly identify `1 Bowie Street` credit inventory.
+- Scheduled delivery windows following the address are parsed separately; the exact-address verification remains unchanged. The IMAP search and saved-message lookup share a UTC-midnight lookback boundary so already ingested boundary-day invoices are not repeatedly imported as the clock advances.
 - Other-address invoices are retained as ignored evidence and never affect Airbnb stock.
 - Exact, verified mini-chocolate pack variants are converted to individual guest portions. Ambiguous packs remain unquantified instead of inventing a piece count, and historical replays post idempotent compensating movements when parser knowledge changes.
 - Observation remains the default. A separately gated live mode can send suppressed stock and order alerts to the Airbnb Management group with verified readback; order placement is always disabled.

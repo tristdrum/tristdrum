@@ -474,6 +474,34 @@ test("Sixty60 confirmation stays provisional while its 1 Bowie invoice is credit
   ]);
 });
 
+test("scheduled Sixty60 delivery windows are not part of an invoice address", () => {
+  for (const window of ["11-12 PM", "11 AM - 12 PM", "11:00-12:00 PM", "11\u201312 PM"]) {
+    for (const [address, credit] of [
+      ["1 Bowie St, Nahoon Beach, KuGompo City, 5210, South Africa", true],
+      ["2 Bowie St, Nahoon Beach, KuGompo City, 5210, South Africa", false],
+      ["11 Bowie Street, Nahoon, East London", false],
+      ["1 Bowie Street Extension, Nahoon, East London", false],
+      ["1 Other Street, Nahoon, East London", false],
+    ]) {
+      const parsed = parseSixty60Message({
+        from: "no-reply@checkers.sixty60.co.za",
+        subject: "Sixty60 invoice for order 123456789",
+        body: `Delivery address: ${address} ${window} Delivered on 16 May 2026 Product Detail Guest Water 6 x 500ml Qty 1 R 44.99 R 44.99 Total R 44.99`,
+      });
+      assert.equal(parsed.deliveryAddress, address);
+      assert.equal(decideOrderEvidence(parsed).creditInventory, credit);
+    }
+  }
+  for (const suffix of ["11-12 PM Apartment 2", "25-26 PM", "11-12 PM 99 Other Road"]) {
+    const parsed = parseSixty60Message({
+      from: "no-reply@checkers.sixty60.co.za",
+      subject: "Sixty60 invoice for order 123456789",
+      body: `Delivery address: 1 Bowie St, Nahoon, East London ${suffix} Delivered on 16 May 2026 Product Detail`,
+    });
+    assert.equal(decideOrderEvidence(parsed).creditInventory, false);
+  }
+});
+
 test("Sixty60 ignores other senders and unrelated household groceries", () => {
   assert.equal(parseSixty60Message({ from: "offers@example.com", subject: "Sixty60 invoice", body: "Order No 123456" }), null);
   assert.equal(classifyInventorySku("Selati Golden Brown Sugar 2kg"), null);
