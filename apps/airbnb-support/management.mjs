@@ -38,9 +38,14 @@ export function renderSupportManagementAlert(alert, dashboardUrl = "https://www.
     alert.details?.guestName ? `Guest: ${alert.details.guestName}` : null,
     alert.details?.decisionSummary ?? alert.details?.classificationSummary,
   ].filter(Boolean);
+  const providerThreadId = alert.providerThreadId;
+  const airbnbUrl = typeof providerThreadId === "string" && /^[0-9]+$/.test(providerThreadId)
+    ? `https://www.airbnb.com/hosting/messages/${providerThreadId}`
+    : null;
   return [
     `*${heading}*`,
     ...context,
+    ...(airbnbUrl ? [`Open Airbnb: ${airbnbUrl}`] : []),
     `Review: ${dashboardUrl}`,
   ].join("\n");
 }

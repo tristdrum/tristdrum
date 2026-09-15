@@ -1062,6 +1062,7 @@ export async function loadSuppressedSupportAlerts(sql, { householdId, limit = 24
     with ranked as (
       select alert.id, alert.alert_type, alert.severity, alert.dedupe_key,
              alert.summary, alert.details, alert.opened_at,
+             thread.provider_thread_id,
              row_number() over (
                partition by coalesce(alert.details->>'threadId', alert.dedupe_key)
                order by case alert.details->>'stage'
@@ -1101,7 +1102,7 @@ export async function loadSuppressedSupportAlerts(sql, { householdId, limit = 24
           )
         )
     )
-    select id, alert_type, severity, dedupe_key, summary, details, opened_at
+    select id, alert_type, severity, dedupe_key, summary, details, opened_at, provider_thread_id
     from ranked
     where stage_rank = 1
     order by case details->>'stage'

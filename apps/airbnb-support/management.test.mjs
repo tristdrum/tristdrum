@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { contentFingerprint } from "@tristdrum/airbnb-core";
 import {
   latestSupportAlerts,
   notifySupportManagement,
@@ -11,6 +12,7 @@ function alert(id, stage, threadId = "thread-1") {
     id,
     alertType: stage === "overdue" ? "guest_overdue" : "guest_escalation",
     dedupeKey: `guest:${threadId}:${stage}`,
+    providerThreadId: "9900001001",
     openedAt: "2026-08-23T12:00:00.000Z",
     details: {
       threadId,
@@ -53,6 +55,33 @@ test("support Management alert is concise and does not include raw message text"
   assert.match(text, /Review: https:\/\/www\.tristdrum\.com\/dashboard\/airbnb$/);
 });
 
+test("every handoff stage puts the actual Airbnb conversation before dashboard review", () => {
+  for (const stage of ["immediate", "reminder", "overdue", "delivery_ambiguous"]) {
+    const item = alert("handoff", stage, "33333333-3333-4333-8333-333333333333");
+    item.details.providerThreadId = "9900009999";
+    const text = renderSupportManagementAlert(item);
+    assert.match(text, /Open Airbnb: https:\/\/www\.airbnb\.com\/hosting\/messages\/9900001001\nReview: https:\/\/www\.tristdrum\.com\/dashboard\/airbnb$/);
+    assert.doesNotMatch(text, /33333333-3333-4333-8333-333333333333|9900009999/);
+  }
+});
+
+test("invalid or missing provider IDs retain dashboard-only review without guessing a thread", () => {
+  for (const providerThreadId of [
+    undefined, null, "", " ", "33333333-3333-4333-8333-333333333333",
+    "https://example.invalid/9900001001", "https://www.airbnb.com/hosting/messages/9900001001",
+    "9900001001/other", "9900001001?redirect=https://example.invalid", "9900001001#other",
+    "9900001001\n", "9900001001\r\n", " 9900001001", "9900001001 ", "9900001001%0a",
+    9900001001, { toString: () => "9900001001" },
+  ]) {
+    const item = alert("fallback", "immediate", "9900009999");
+    item.providerThreadId = providerThreadId;
+    item.details.providerThreadId = "9900009999";
+    const text = renderSupportManagementAlert(item, "https://www.tristdrum.com/dashboard/airbnb?view=support");
+    assert.match(text, /Review: https:\/\/www\.tristdrum\.com\/dashboard\/airbnb\?view=support$/);
+    assert.doesNotMatch(text, /Open Airbnb:|hosting\/messages|9900009999|example\.invalid/);
+  }
+});
+
 test("explicit agent escalations use a strong host-attention heading", () => {
   const item = alert("urgent", "immediate");
   item.details.requiresManagementAction = true;
@@ -80,7 +109,7 @@ test("verified Management sends are marked notified exactly once", async () => {
     env: { AIRBNB_SUPPORT_ALERT_LIMIT: "24" },
     loadAlerts: async (_sql, options) => {
       loadedLimit = options.limit;
-      return [alert("immediate", "immediate")];
+      return [alert("immediate", "immediate"), alert("other", "immediate", "thread-2")];
     },
     sendMessage: async (message) => {
       calls.push(["send", message]);
@@ -90,8 +119,11 @@ test("verified Management sends are marked notified exactly once", async () => {
     now: () => new Date("2026-08-23T12:05:00.000Z"),
   });
   assert.equal(loadedLimit, 24);
+  assert.equal(result.length, 1);
   assert.equal(result[0].verified, true);
   assert.deepEqual(calls.map(([name]) => name), ["send", "mark"]);
+  assert.equal(calls[0][1].idempotencyKey, `airbnb-support-alert:${contentFingerprint("guest:thread-1:immediate")}`);
+  assert.match(calls[0][1].text, /Open Airbnb: https:\/\/www\.airbnb\.com\/hosting\/messages\/9900001001\nReview:/);
 });
 
 test("a delayed first notification scans all stages and sends only the overdue alert", async () => {
