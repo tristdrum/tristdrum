@@ -40,6 +40,22 @@ test("support knowledge leaves an unknown listing unresolved", () => {
   assert.match(knowledge.policies.join(" "), /missing or contradictory/i);
 });
 
+test("each known studio supplies its verified public listing link without implying availability", () => {
+  const expected = {
+    "Bougainvillea Courtyard Studio": "https://www.airbnb.com/h/bougainvillea-courtyard-studio",
+    "The Spekboom Studio": "https://www.airbnb.com/h/the-spekboom-studio",
+    "Jasmine Studio Stay": "https://www.airbnb.com/h/jasmine-studio-stay",
+  };
+  for (const [listingName, url] of Object.entries(expected)) {
+    const knowledge = supportKnowledgeForListing({ listingName });
+    assert.equal(knowledge.property.publicListingUrl, url);
+    assert.deepEqual(Object.fromEntries(knowledge.knownProperties.map((p) => [p.listingName, p.publicListingUrl])), expected);
+    assert.match(knowledge.policies.join(" "), /link is not evidence of vacancy/);
+    assert.match(knowledge.policies.join(" "), /instead of only promising to check/);
+    assert.ok(Object.isFrozen(knowledge.property));
+  }
+});
+
 test("office permission overrides only studio storage conditions without inventing collection or timing facts", () => {
   const text = SUPPORT_KNOWLEDGE.policies.join(" ");
   assert.match(text, /ALWAYS welcome.*office.*verified location/);

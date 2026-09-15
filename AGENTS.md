@@ -44,6 +44,8 @@ is deployed, enabled, or healthy now.
 - For support, Tristan's conversation mail is the reply route; Jane's mail is
   supplemental evidence. Preserve newer-host/guest vetoes, explicit live gates,
   and the prohibition on automatic retry after an ambiguous SMTP result.
+  Follow [Management handoffs](docs/AIRBNB_MANAGEMENT_HANDOFFS.md) for original
+  owner voice instructions, routine-message authority, and guest/host link routing.
 - Stock observations do not place orders. Preserve verified-address invoice
   checks, authoritative physical counts, and guarded Management alerts.
 - Keep credentials, raw mailbox/guest data, and finance evidence or generated

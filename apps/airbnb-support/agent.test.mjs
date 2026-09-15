@@ -197,6 +197,36 @@ test("stay phase respects the verified local checkout time", () => {
   }), "after_stay");
 });
 
+test("an extension question can receive verified listing links while the host decision remains unresolved", async () => {
+  let captured;
+  const draft = "You can check your dates here: https://www.airbnb.com/h/jasmine-studio-stay. Your current reservation has not been extended; that still needs confirmation.";
+  const result = await decideGuestResponse({
+    guestMessage: "Could I extend my stay for one more night?",
+    guestName: "Guest",
+    listingName: "Jasmine Studio Stay",
+    stayLabel: "Sep 13 - 15, 2026",
+    latestEventAt: "2026-09-14T19:06:55Z",
+    now: new Date("2026-09-14T19:10:00Z"),
+    facts: { checkInTime: "15:00", checkOutTime: "10:00" },
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecision({
+      replyNeeded: true, sendReply: true, alertManagement: true,
+      summary: "Guest can check public availability; extension remains a host decision.",
+      draft, officeStorageArrangement: null, roomTimingRequest: null,
+    }, (request) => { captured = request; }),
+  });
+  const input = JSON.parse(captured.input[1].content[0].text);
+  assert.equal(input.canonicalKnowledge.property.publicListingUrl, "https://www.airbnb.com/h/jasmine-studio-stay");
+  assert.equal(input.canonicalKnowledge.knownProperties.length, 3);
+  assert.match(captured.input[0].content[0].text, /proactively share canonicalKnowledge\.property\.publicListingUrl/);
+  assert.match(captured.input[0].content[0].text, /never invent a URL or share a host-only/);
+  assert.equal(result.autoReply, true);
+  assert.equal(result.alertManagement, true);
+  assert.equal(result.draft, draft);
+  assert.equal(result.operationalRequest, null);
+  assert.deepEqual(result.qualityIssues, []);
+});
+
 test("post-stay collection does not become a new check-in permission", async () => {
   let input;
   const result = await decideGuestResponse({

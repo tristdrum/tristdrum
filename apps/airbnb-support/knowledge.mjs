@@ -12,6 +12,12 @@ const PROPERTY_CAUTIONS = Object.freeze({
   ]),
 });
 
+const PUBLIC_LISTING_URLS = Object.freeze({
+  "Bougainvillea Courtyard Studio": "https://www.airbnb.com/h/bougainvillea-courtyard-studio",
+  "The Spekboom Studio": "https://www.airbnb.com/h/the-spekboom-studio",
+  "Jasmine Studio Stay": "https://www.airbnb.com/h/jasmine-studio-stay",
+});
+
 export const SUPPORT_KNOWLEDGE = deepFreeze({
   sharedFacts: {
     area: "Nahoon, East London",
@@ -31,6 +37,8 @@ export const SUPPORT_KNOWLEDGE = deepFreeze({
     "Use runtime property facts for exact address, directions, parking, Wi-Fi, access instructions, and current amenities.",
     "Never guess availability, prices, refunds, reservation changes, exceptions, safety details, or an unverified amenity.",
     "When a fact is missing or contradictory, say that it needs checking instead of choosing the most convenient answer.",
+    "When live availability cannot be verified, give the relevant verified public listing link so the guest can check their dates. Offer the other studio links when alternatives would help, instead of only promising to check and get back to them.",
+    "A public listing link is not evidence of vacancy, a confirmed extension, or permission to change, cancel, or replace a reservation. Keep a genuine host decision separate from a helpful link reply.",
     "Historical examples guide tone and problem-solving, but they do not make a changing property detail current.",
     "Early check-in may be offered from 13:00, but it is always conditional on the previous guest and cleaning being finished.",
     "For studio storage, guests are always welcome to drop bags after the previous guest has actually checked out. This is normally from 10:00; if the previous guest leaves late, studio bag drop starts only after their actual departure.",
@@ -56,7 +64,7 @@ export const SUPPORT_KNOWLEDGE = deepFreeze({
     },
     {
       situation: "A guest asks about availability, a booking decision, or a reservation change.",
-      approach: "Acknowledge the request and offer to check; do not promise, accept, decline, or change anything in the draft.",
+      approach: "Answer from current verified facts. If live availability is unknown, share the relevant public listing links for checking dates; do not stop at a vague promise to check. Alert hosts for a genuine unresolved decision without claiming a booking or extension is approved.",
     },
     {
       situation: "A guest asks for a distance or travel time.",
@@ -119,6 +127,7 @@ export function supportKnowledgeForListing({ listingName, propertyFacts = {} } =
       unitNumber: property.unitNumber,
       commonName: property.commonName,
       listingName: property.listingName,
+      publicListingUrl: PUBLIC_LISTING_URLS[property.listingName],
       currentDetailsSource: "runtime property facts",
       cautions: PROPERTY_CAUTIONS[property.listingName] ?? [],
     }
@@ -144,6 +153,7 @@ export function supportKnowledgeForListing({ listingName, propertyFacts = {} } =
       unitNumber: knownProperty.unitNumber,
       commonName: knownProperty.commonName,
       listingName: knownProperty.listingName,
+      publicListingUrl: PUBLIC_LISTING_URLS[knownProperty.listingName],
     })),
     property: propertyScope,
     listingRecognized: Boolean(propertyScope),

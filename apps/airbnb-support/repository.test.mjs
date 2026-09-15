@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { renderSupportManagementAlert } from "./management.mjs";
 import {
   latestConversationEvidenceAt,
   latestConversationImportCursorAt,
@@ -437,6 +438,43 @@ test("support alert loading revalidates thread and delivery state", async () => 
   assert.match(query, /row_number\(\) over/i);
   assert.match(query, /where stage_rank = 1/i);
   assert.match(query, /when 'delivery_ambiguous' then 3/i);
+});
+
+test("support alert loading supplies joined provider IDs for current and legacy payloads", async () => {
+  const threadId = "33333333-3333-4333-8333-333333333333";
+  const providerThreadId = "9900001001";
+  for (const payload of [
+    { stage: "immediate", decisionSummary: "A host answer is needed.", requiresManagementAction: true, shadowMode: false },
+    { stage: "overdue", classificationSummary: "A host answer is overdue." },
+    { stage: "delivery_ambiguous", providerThreadId: "https://example.invalid/untrusted" },
+  ]) {
+    const details = { threadId, replyDeliveryId: "44444444-4444-4444-8444-444444444444", ...payload };
+    const row = {
+      id: "alert-fixture", dedupeKey: "guest:fixture", openedAt: "2026-09-15T08:00:00.000Z",
+      details, providerThreadId,
+    };
+    const queries = [];
+    const sql = async (strings, ...values) => {
+      queries.push({ query: strings.join("?"), values });
+      return [row];
+    };
+    const [loaded] = await loadSuppressedSupportAlerts(sql, {
+      householdId: cursorHouseholdId, limit: 24, notBefore: "2026-09-15T06:00:00.000Z",
+    });
+    assert.equal(queries.length, 1);
+    const { query, values } = queries[0];
+    assert.match(query, /alert\.opened_at,\s+thread\.provider_thread_id,/);
+    assert.match(query, /select id, alert_type, severity, dedupe_key, summary, details, opened_at, provider_thread_id\s+from ranked/);
+    assert.match(query, /thread\.household_id = alert\.household_id/);
+    assert.match(query, /thread\.id = nullif\(alert\.details->>'threadId', ''\)::uuid/);
+    assert.doesNotMatch(query, /details->>'providerThreadId'|update |insert /i);
+    assert.deepEqual(values, [cursorHouseholdId, "2026-09-15T06:00:00.000Z", "2026-09-15T06:00:00.000Z", 24]);
+    assert.equal(loaded.providerThreadId, providerThreadId);
+    assert.deepEqual(loaded.details, details);
+    const text = renderSupportManagementAlert(loaded);
+    assert.match(text, /Open Airbnb: https:\/\/www\.airbnb\.com\/hosting\/messages\/9900001001\nReview:/);
+    assert.doesNotMatch(text, /33333333-3333-4333-8333-333333333333|example\.invalid/);
+  }
 });
 
 test("delivery queue safely recovers stale claims and admits only versioned agent decisions", async () => {
