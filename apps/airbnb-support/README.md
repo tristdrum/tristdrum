@@ -45,10 +45,14 @@ from a successful controlled recovery.
 
 Support imports the shared packages, so build it from the repository root.
 After the scoped Fly identity and app-status checks, use this command on the
-configured Mac:
+configured Mac. First read the currently deployed
+`AIRBNB_SUPPORT_AUTOMATION_NOT_BEFORE` from the scoped Fly machine configuration
+and set `SUPPORT_AUTOMATION_NOT_BEFORE` to that verified timestamp. The checked-in
+bootstrap value can predate a recovery; do not reset the live cutoff by deploying
+that older value. The command fails locally if the verified override is unset:
 
 ```sh
-/Users/tristdrum/.local/bin/fly-personal deploy . --app tristdrum-airbnb-support --config apps/airbnb-support/fly.toml --dockerfile apps/airbnb-support/Dockerfile --remote-only --ha=false --yes
+/Users/tristdrum/.local/bin/fly-personal deploy . --app tristdrum-airbnb-support --config apps/airbnb-support/fly.toml --dockerfile apps/airbnb-support/Dockerfile --env "AIRBNB_SUPPORT_AUTOMATION_NOT_BEFORE=${SUPPORT_AUTOMATION_NOT_BEFORE:?Set the verified live cutoff first}" --remote-only --ha=false --yes
 ```
 
 Apply reviewed database migrations before deploying a worker that consumes them.
