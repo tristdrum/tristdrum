@@ -10,6 +10,7 @@ import {
   createAirbnbDatabase,
   recordJobFinish,
   recordJobStart,
+  retryPendingManagementPings,
   sanitizedError,
 } from "@tristdrum/airbnb-db";
 import { collectSixty60Messages } from "./gmail.mjs";
@@ -74,6 +75,7 @@ export async function runStockObservation({
   collectMessages = collectSixty60Messages,
   collectWhatsAppObservations = collectStockWhatsAppObservations,
   notifyManagement = notifyStockManagement,
+  retryManagementPings = retryPendingManagementPings,
   database = null,
   env = process.env,
   fullReview = false,
@@ -85,6 +87,7 @@ export async function runStockObservation({
   const ownDatabase = database ?? createAirbnbDatabase({ env, postgresFactory: postgres });
   const householdId = await ownDatabase.householdId();
   let started = false;
+  let managementPingRetry = { notifications: [], error: null };
   try {
     await recordJobStart(ownDatabase.sql, {
       householdId,
@@ -97,6 +100,11 @@ export async function runStockObservation({
       targetDate: localDate(startedAt),
     });
     started = true;
+    if (mode === "live" && capabilities.managementAlertsEnabled) {
+      managementPingRetry = await retryManagementPings({
+        sql: ownDatabase.sql, householdId, sourceService: "stock", env, now, limit: 1,
+      });
+    }
     const lookbackDays = Number.parseInt(env.AIRBNB_STOCK_LOOKBACK_DAYS ?? "120", 10);
     const since = lookbackDate(startedAt, lookbackDays);
     const knownProviderMessageIds = await loadKnownSixty60MessageIds(ownDatabase.sql, {
@@ -211,6 +219,13 @@ export async function runStockObservation({
       managementAlertsEnabled: mode === "live" && capabilities.managementAlertsEnabled,
       managementAlertCount: managementAlerts.length,
       verifiedManagementAlertCount: managementAlerts.filter((alert) => alert.verified).length,
+      managementNotifications: managementAlerts,
+      managementPingRetry,
+      managementPingAcceptedCount: [...managementAlerts, ...managementPingRetry.notifications]
+        .filter((item) => item.pingStatus === "accepted").length,
+      managementPingFailedCount: [...managementAlerts, ...managementPingRetry.notifications]
+        .filter((item) => item.pingStatus === "failed").length,
+      managementPingRetryError: managementPingRetry.error,
       orderPlacementAllowed: false,
     };
     await recordJobFinish(ownDatabase.sql, {
@@ -236,6 +251,7 @@ export async function runStockObservation({
           externalWritesEnabled: mode === "live" && capabilities.managementAlertsEnabled,
           managementAlertsEnabled: mode === "live" && capabilities.managementAlertsEnabled,
           orderPlacementAllowed: false,
+          managementPingRetry,
           error: failure,
         },
         errorCode: failure.code,

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   decideGuestResponse,
   SUPPORT_DECISION_SCHEMA,
+  SUPPORT_DECISION_VERSION,
   supportStayPhase,
 } from "./agent.mjs";
 
@@ -35,6 +36,221 @@ function modelDecisionSequence(values, inspect = () => {}) {
     };
   };
 }
+
+const selfServiceInput = {
+  guestName: "Guest",
+  listingName: "Jasmine Studio Stay",
+  stayLabel: "Sep 22 - 24, 2026",
+  latestEventAt: "2026-09-22T10:00:00Z",
+  now: new Date("2026-09-22T10:05:00Z"),
+  facts: { checkInTime: "15:00", checkOutTime: "10:00", earliestCheckInTime: "13:00" },
+  env: { OPENAI_API_KEY: "test-key" },
+};
+
+const selfServiceDecision = {
+  replyNeeded: true, sendReply: true, alertManagement: false,
+  summary: "Routine self-service timing.", managementSummary: null,
+  officeStorageArrangement: null,
+};
+
+for (const fixture of [
+  { name: "Marcus 16:20", guestName: "Marcus", guestMessage: "We will arrive around 16:20.",
+    roomTimingRequest: "The guest expects to arrive around 16:20.", draft: "That works, Marcus. You can use self check-in when you arrive." },
+  { name: "Leon after 17", guestName: "Leon", guestMessage: "We will only arrive after 17.",
+    roomTimingRequest: "The guest will arrive after 17.", draft: "No problem, Leon. You can use self check-in when you arrive." },
+  { name: "David shortly after 3pm tomorrow", guestName: "David", guestMessage: "We will arrive shortly after 3pm tomorrow.",
+    stayLabel: "Sep 23 - 24, 2026", bookedStay: { checkIn: "2026-09-23", checkOut: "2026-09-24" },
+    roomTimingRequest: "The guest will arrive shortly after 3pm on 2026-09-23.",
+    draft: "That works, David. You can use self check-in when you arrive tomorrow." },
+  { name: "late without a clock", guestMessage: "Our flight is delayed so we will arrive late.",
+    roomTimingRequest: "Late check-in on 2026-09-22, time unspecified.", draft: "A late arrival is fine. You can use self check-in." },
+  { name: "after midnight in the booked night", guestMessage: "Can we check in at 1am on the 23rd?",
+    roomTimingRequest: "Check-in on 2026-09-23 at 01:00.", draft: "Yes, that is within your booked night. You can use self check-in." },
+  { name: "midnight on the checkout date", guestMessage: "We will arrive at midnight on the 24th.",
+    roomTimingRequest: "Check-in on 2026-09-24 at 00:00.", draft: "You can use self check-in then. Your checkout is still by 10:00 that morning." },
+  { name: "early departure", guestMessage: "We will leave at 5am on the 24th.",
+    roomTimingRequest: "Early check-out on 2026-09-24 at 05:00.", draft: "That is fine. Please follow the usual self checkout instructions." },
+  { name: "early departure without a clock", guestMessage: "We are leaving early on the 24th.",
+    roomTimingRequest: "Early check-out on 2026-09-24, time unspecified.", draft: "An early departure is fine. Please follow the usual self checkout instructions." },
+  { name: "departure one day early at 17:00", guestMessage: "We are leaving at 5pm on the 23rd instead.",
+    roomTimingRequest: "Check-out on 2026-09-23 at 17:00.", draft: "Leaving then is fine. Please follow the usual self checkout instructions." },
+  { name: "checkout at the boundary", guestMessage: "We will check out at 10am on the 24th.",
+    roomTimingRequest: "Check-out on 2026-09-24 at 10:00.", draft: "That works. Thank you for staying with us." },
+]) {
+  test(`${fixture.name} is a quiet self-service decision in one call`, async () => {
+    let calls = 0;
+    const result = await decideGuestResponse({
+      ...selfServiceInput, ...fixture,
+      fetchFn: modelDecision({ ...selfServiceDecision, roomTimingRequest: fixture.roomTimingRequest, draft: fixture.draft }, (request) => {
+        calls += 1;
+        const input = JSON.parse(request.input[1].content[0].text);
+        assert.deepEqual(input.bookedStay, fixture.bookedStay ?? { checkIn: "2026-09-22", checkOut: "2026-09-24" });
+        assert.match(request.input[0].content[0].text, /Routine self check-in and self checkout/);
+        assert.match(request.input[0].content[0].text, /After-midnight arrival on the night already booked/);
+      }),
+    });
+    assert.equal(calls, 1);
+    assert.equal(result.autoReply, true);
+    assert.equal(result.alertManagement, false);
+    assert.equal(result.operationalRequest, null);
+    assert.equal(result.bagDropRequest, null);
+    assert.doesNotMatch(result.draft, /you(?:'ve| have| already) (?:arrived|checked in)|glad you arrived/i);
+    assert.deepEqual(result.qualityIssues, []);
+    assert.equal(result.decisionVersion, SUPPORT_DECISION_VERSION);
+  });
+}
+
+test("routine ETA and completed checkout can be acknowledged without forcing a reply or alert", async () => {
+  for (const fixture of [
+    { guestMessage: "Thanks, still arriving at 16:20.", roomTimingRequest: "Check-in on 2026-09-22 at 16:20." },
+    { guestMessage: "Thanks, we checked out at 8am.", roomTimingRequest: "Check-out on 2026-09-24 at 08:00.",
+      latestEventAt: "2026-09-24T09:00:00Z" },
+  ]) {
+    const result = await decideGuestResponse({
+      ...selfServiceInput, ...fixture,
+      fetchFn: modelDecision({ ...selfServiceDecision, roomTimingRequest: fixture.roomTimingRequest,
+        replyNeeded: false, sendReply: false, draft: null }),
+    });
+    assert.equal(result.replyNeeded, false);
+    assert.equal(result.autoReply, false);
+    assert.equal(result.alertManagement, false);
+    assert.equal(result.operationalRequest, null);
+  }
+});
+
+test("midnight before booked access keeps the 13:00 conditional earliest-entry policy", async () => {
+  const result = await decideGuestResponse({
+    ...selfServiceInput, guestMessage: "Can we check in at 1am on the 22nd?",
+    fetchFn: modelDecision({ ...selfServiceDecision,
+      roomTimingRequest: "Check-in on 2026-09-22 at 01:00.",
+      draft: "The earliest we can offer is 13:00 on the 22nd, subject to cleaning. Would that work?" }),
+  });
+  assert.equal(result.autoReply, true);
+  assert.equal(result.operationalRequest.action, "offer_earliest");
+  assert.equal(result.operationalRequest.effectiveTime, "13:00");
+  assert.equal(result.operationalRequest.createsOperationalRequest, false);
+});
+
+test("an ambiguous midnight date is clarified in one call, not treated as guaranteed entry", async () => {
+  let calls = 0;
+  const result = await decideGuestResponse({
+    ...selfServiceInput, guestMessage: "Can we arrive after midnight?",
+    fetchFn: modelDecision({ ...selfServiceDecision, roomTimingRequest: "Check-in after midnight, date unspecified.",
+      draft: "Which date will you arrive? I want to make sure that is within your booked night." }, () => { calls += 1; }),
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.autoReply, true);
+  assert.equal(result.alertManagement, false);
+  assert.equal(result.operationalRequest.action, "clarify_date");
+  assert.equal(result.operationalRequest.createsOperationalRequest, false);
+});
+
+test("out-of-stay dates and unverified timing facts cannot grant self-service access", async () => {
+  for (const fixture of [
+    { roomTimingRequest: "Check-in on 2026-09-21 at 16:20." },
+    { roomTimingRequest: "Check-in on 2026-09-24 at 16:20." },
+    { roomTimingRequest: "Check-in on 2026-09-25 at 01:00." },
+    { roomTimingRequest: "Check-in on 2026-09-22 at 16:20.", listingName: "Unknown listing" },
+    { roomTimingRequest: "Check-in on 2026-09-22 at 16:20.", facts: {} },
+    { roomTimingRequest: "Check-in on 2026-09-22 at 16:20.", facts: { checkInTime: "14:00", checkOutTime: "10:00" } },
+  ]) {
+    const result = await decideGuestResponse({
+      ...selfServiceInput, ...fixture, guestMessage: "Is that arrival okay?",
+      fetchFn: modelDecision({ ...selfServiceDecision, roomTimingRequest: fixture.roomTimingRequest,
+        draft: "You can use self check-in then." }),
+    });
+    assert.equal(result.autoReply, false);
+    assert.equal(result.alertManagement, true);
+    assert.equal(result.operationalRequest, null);
+  }
+});
+
+test("routine late ETA does not suppress a mixed lockout or missing access issue", async () => {
+  for (const issue of ["the lockbox will not open", "I do not have the access details"]) {
+    const naturalSummary = `Marcus is staying 22-24 September and arriving after 17:00, but ${issue}. He needs help getting into the studio.`;
+    let calls = 0;
+    const result = await decideGuestResponse({
+      ...selfServiceInput, guestName: "Marcus", guestMessage: `I am arriving after 17:00, but ${issue}.`,
+      priorManagementAlerts: [{ summary: naturalSummary, notifiedAt: "2026-09-22T09:55:00Z", resolvedAt: null, stage: "immediate" }],
+      fetchFn: modelDecision({ ...selfServiceDecision, alertManagement: true, managementSummary: naturalSummary,
+        roomTimingRequest: "Check-in on 2026-09-22 after 17:00.",
+        draft: "Arriving then is fine. I am sorry about the access trouble; that needs checking." }, () => { calls += 1; }),
+    });
+    assert.equal(calls, 1);
+    assert.equal(result.autoReply, true);
+    assert.equal(result.alertManagement, true);
+    assert.equal(result.managementSummary, naturalSummary);
+    assert.equal(result.operationalRequest, null);
+  }
+});
+
+test("prior delivered summaries let the single full-context decision keep unchanged follow-ups quiet", async () => {
+  const priorManagementAlerts = [{
+    summary: "Leon is staying 22-24 September and cannot open the lockbox. He needs help gaining access.",
+    notifiedAt: "2026-09-22T15:10:00Z", resolvedAt: null, stage: "immediate",
+  }, {
+    summary: "Leon needed directions to the studio for his stay on 22-24 September.",
+    notifiedAt: "2026-09-22T10:10:00Z", resolvedAt: "2026-09-22T10:15:00Z", stage: "immediate",
+  }];
+  for (const [guestMessage, changed] of [["Thank you, I will wait.", false], ["Still the same issue, thanks for checking.", false],
+    ["The suggested fix failed and we are still locked out with our children.", true]]) {
+    let calls = 0;
+    const result = await decideGuestResponse({
+      ...selfServiceInput, guestName: "Leon", guestMessage, priorManagementAlerts,
+      latestEventAt: "2026-09-22T15:15:00Z", now: new Date("2026-09-22T15:16:00Z"),
+      conversationContext: [{ direction: "guest", text: "I cannot open the lockbox." }],
+      fetchFn: modelDecision({ replyNeeded: changed, sendReply: changed, alertManagement: changed,
+        summary: changed ? "Failed assistance needs renewed attention." : "Already alerted; no new action.",
+        managementSummary: changed ? "Leon is staying 22-24 September and remains locked out after trying the suggested fix. He is waiting outside with his children and needs help now." : null,
+        roomTimingRequest: null, officeStorageArrangement: null,
+        draft: changed ? "I am sorry that did not work. You still need help getting in." : null }, (request) => {
+        calls += 1;
+        assert.deepEqual(JSON.parse(request.input[1].content[0].text).priorManagementAlerts, priorManagementAlerts);
+        assert.match(request.input[0].content[0].text, /unchanged follow-ups about an already-alerted issue/);
+        assert.match(request.input[0].content[0].text, /failed help, or new action needed/);
+      }),
+    });
+    assert.equal(calls, 1);
+    assert.equal(result.alertManagement, changed);
+    assert.equal(result.replyNeeded, changed);
+    assert.equal(result.managementSummary !== null, changed);
+  }
+});
+
+test("managementSummary is nullable and backward compatible, with no links, labels, or credentials", async () => {
+  assert.deepEqual(SUPPORT_DECISION_SCHEMA.properties.managementSummary, { type: ["string", "null"], maxLength: 800 });
+  assert.ok(SUPPORT_DECISION_SCHEMA.required.includes("managementSummary"));
+  for (const managementSummary of [undefined, null, "", "x".repeat(801), "Summary: Guest needs help.",
+    "Guest needs help. The door is broken. Please repair it.", "Guest needs help: airbnb.com/hosting/thread/123",
+    "Guest needs help.\nThe door is broken.", "Guest needs help: https://example.com/hosting/thread/123",
+    "The Wi-Fi password is fixture-secret.", "The lockbox does not accept 4827.", "The door PIN: 9326 fails.", "The door code 9326 fails."]) {
+    const result = await decideGuestResponse({
+      ...selfServiceInput, guestMessage: "The door is broken.",
+      facts: { ...selfServiceInput.facts, wifiPassword: "fixture-secret", accessInstructions: "Use code 4827." },
+      fetchFn: modelDecision({ replyNeeded: true, sendReply: false, alertManagement: true,
+        summary: "The guest needs help.", managementSummary, draft: null }),
+    });
+    assert.equal(result.managementSummary, null);
+    assert.equal(result.alertManagement, true);
+  }
+});
+
+test("dated stay context honors explicit years and rejects impossible ranges", async () => {
+  for (const [stayLabel, bookedStay] of [
+    ["Sep 22 - 24, 2027", { checkIn: "2027-09-22", checkOut: "2027-09-24" }],
+    ["Dec 31 - Jan 2, 2026", { checkIn: "2026-12-31", checkOut: "2027-01-02" }],
+    ["Sep 31 - Oct 2, 2026", null],
+    ["Sep 24 - 22, 2026", null],
+  ]) {
+    await decideGuestResponse({
+      ...selfServiceInput, stayLabel, guestMessage: "Thank you.",
+      fetchFn: modelDecision({ ...selfServiceDecision, replyNeeded: false, sendReply: false, draft: null,
+        roomTimingRequest: null }, (request) => {
+        assert.deepEqual(JSON.parse(request.input[1].content[0].text).bookedStay, bookedStay);
+      }),
+    });
+  }
+});
 
 test("accepting a host counteroffer creates the accepted room-timing operation, independently of office policy", async () => {
   for (const officeAllowed of [false, true]) {

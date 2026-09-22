@@ -1,3 +1,5 @@
+export { sendManagementNotification, retryPendingManagementPings } from "./management-notifications.mjs";
+
 function required(name, env) {
   const value = String(env[name] ?? "").trim();
   if (!value) throw new Error(`Missing required environment variable ${name}.`);

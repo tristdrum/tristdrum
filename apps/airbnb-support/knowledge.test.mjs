@@ -2,6 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { SUPPORT_KNOWLEDGE, supportKnowledgeForListing } from "./knowledge.mjs";
 
+test("quiet self-service policy preserves booked-date, early-entry, and mixed-issue boundaries", () => {
+  assert.deepEqual(SUPPORT_KNOWLEDGE.sharedFacts.selfService, {
+    checkIn: true, checkOut: true, staffAttendanceRequired: false,
+  });
+  const text = SUPPORT_KNOWLEDGE.policies.join(" ");
+  assert.match(text, /15:00 on the booked arrival date.*10:00 on the booked departure date/);
+  assert.match(text, /late arrival, even without an exact clock.*early departure/);
+  assert.match(text, /after midnight within a stay already begun is ordinary self check-in/i);
+  assert.match(text, /conditional 13:00 earliest-entry rule still applies/);
+  assert.match(text, /Late check-out requests are politely declined/);
+  assert.match(text, /unresolved lockout, missing access facts, safety issue/);
+  assert.match(text, /prior delivered Management alert summaries/);
+});
+
 test("support knowledge identifies each canonical listing without storing private details", () => {
   const jasmine = supportKnowledgeForListing({ listingName: "Jasmine Studio Stay" });
   assert.equal(jasmine.listingRecognized, true);

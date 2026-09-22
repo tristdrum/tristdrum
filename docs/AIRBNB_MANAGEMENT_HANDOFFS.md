@@ -64,6 +64,9 @@ channel separately: a failed Ping must never replay WhatsApp or a guest reply.
 The support worker retries eligible Ping failures independently of new guest
 mail; this does not depend on the optional Codex watch. Human group messages and
 cleaning-team notices are not mirrored. Stock messaging remains disabled.
+Use the [support operator notice command](../apps/airbnb-support/README.md#operator-management-notices)
+for Codex-originated Management notices. Do not send historical Pings on rollout:
+only newly authorized notices enter the paired ledger.
 
 Booking acceptance, reservation alterations, price, payment, refunds,
 cancellation, availability changes, staffing, and safety-critical actions retain

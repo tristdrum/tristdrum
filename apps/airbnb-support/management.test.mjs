@@ -1,163 +1,90 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { contentFingerprint } from "@tristdrum/airbnb-core";
-import {
-  latestSupportAlerts,
-  notifySupportManagement,
-  renderSupportManagementAlert,
-} from "./management.mjs";
+import { latestSupportAlerts, notifySupportManagement, renderSupportManagementAlert } from "./management.mjs";
 
+const summary = "Alex, staying 23-25 September, cannot get through the gate and needs help now.";
 function alert(id, stage, threadId = "thread-1") {
-  return {
-    id,
-    alertType: stage === "overdue" ? "guest_overdue" : "guest_escalation",
-    dedupeKey: `guest:${threadId}:${stage}`,
-    providerThreadId: "9900001001",
-    openedAt: "2026-08-23T12:00:00.000Z",
-    details: {
-      threadId,
-      stage,
-      listingName: "Jasmine Studio Stay",
-      guestName: "Guest Fixture",
-      decisionSummary: "A booking question needs a human answer.",
-    },
-  };
+  return { id, dedupeKey: `guest:${threadId}:${stage}`, openedAt: "2026-09-22T10:00:00Z",
+    details: { threadId, stage, guestName: "ALEX", stayLabel: "Sep 23 - 25",
+      listingName: "Jasmine Studio Stay", managementSummary: summary } };
 }
 
-test("a delayed first alert sends only the most useful stage for each thread", () => {
-  assert.deepEqual(
-    latestSupportAlerts([
-      alert("immediate", "immediate"),
-      alert("reminder", "reminder"),
-      alert("overdue", "overdue"),
-      alert("ambiguous", "delivery_ambiguous"),
-      alert("other", "immediate", "thread-2"),
-    ]).map((item) => item.id),
-    ["ambiguous", "other"],
-  );
-});
-
-test("higher-stage alerts are selected before older immediate alerts", () => {
-  const immediate = alert("old-immediate", "immediate", "thread-old");
-  immediate.openedAt = "2026-08-23T10:00:00.000Z";
-  const overdue = alert("new-overdue", "overdue", "thread-new");
-  overdue.openedAt = "2026-08-23T12:00:00.000Z";
-  assert.deepEqual(latestSupportAlerts([immediate, overdue]).map((item) => item.id), [
-    "new-overdue",
-    "old-immediate",
-  ]);
-});
-
-test("support Management alert is concise and does not include raw message text", () => {
-  const text = renderSupportManagementAlert(alert("overdue", "overdue"));
-  assert.match(text, /^\*Airbnb guest reply overdue\*/);
-  assert.match(text, /Jasmine Studio Stay/);
-  assert.match(text, /Review: https:\/\/www\.tristdrum\.com\/dashboard\/airbnb$/);
-});
-
-test("every handoff stage puts the actual Airbnb conversation before dashboard review", () => {
+test("Management uses the model's natural summary unchanged with no framing or links", () => {
   for (const stage of ["immediate", "reminder", "overdue", "delivery_ambiguous"]) {
-    const item = alert("handoff", stage, "33333333-3333-4333-8333-333333333333");
-    item.details.providerThreadId = "9900009999";
-    const text = renderSupportManagementAlert(item);
-    assert.match(text, /Open Airbnb: https:\/\/www\.airbnb\.com\/hosting\/messages\/9900001001\nReview: https:\/\/www\.tristdrum\.com\/dashboard\/airbnb$/);
-    assert.doesNotMatch(text, /33333333-3333-4333-8333-333333333333|9900009999/);
+    const item = alert("example", stage);
+    item.providerThreadId = "9900001001";
+    assert.equal(renderSupportManagementAlert(item), summary);
   }
 });
 
-test("invalid or missing provider IDs retain dashboard-only review without guessing a thread", () => {
-  for (const providerThreadId of [
-    undefined, null, "", " ", "33333333-3333-4333-8333-333333333333",
-    "https://example.invalid/9900001001", "https://www.airbnb.com/hosting/messages/9900001001",
-    "9900001001/other", "9900001001?redirect=https://example.invalid", "9900001001#other",
-    "9900001001\n", "9900001001\r\n", " 9900001001", "9900001001 ", "9900001001%0a",
-    9900001001, { toString: () => "9900001001" },
-  ]) {
-    const item = alert("fallback", "immediate", "9900009999");
-    item.providerThreadId = providerThreadId;
-    item.details.providerThreadId = "9900009999";
-    const text = renderSupportManagementAlert(item, "https://www.tristdrum.com/dashboard/airbnb?view=support");
-    assert.match(text, /Review: https:\/\/www\.tristdrum\.com\/dashboard\/airbnb\?view=support$/);
-    assert.doesNotMatch(text, /Open Airbnb:|hosting\/messages|9900009999|example\.invalid/);
-  }
+test("legacy and transport failures have a brief factual fallback without inventing stay dates", () => {
+  const item = alert("legacy", "immediate");
+  delete item.details.managementSummary;
+  item.details.decisionSummary = "The guest needs help with access. https://example.invalid/private";
+  assert.equal(renderSupportManagementAlert(item), "Alex, staying Sep 23 - 25: A host needs to check the unresolved guest request.");
+  delete item.details.stayLabel;
+  item.stayLabel = "Sep 25 - 26";
+  assert.match(renderSupportManagementAlert(item), /Sep 25 - 26/);
+  delete item.stayLabel;
+  delete item.details.decisionSummary;
+  item.details.stage = "delivery_ambiguous";
+  assert.match(renderSupportManagementAlert(item), /Reply delivery is uncertain/);
+  assert.doesNotMatch(renderSupportManagementAlert(item), /https?:|Guest:|Review:|\*/);
 });
 
-test("explicit agent escalations use a strong host-attention heading", () => {
-  const item = alert("urgent", "immediate");
-  item.details.requiresManagementAction = true;
-  item.details.decisionSummary = "The guest is waiting at the property.";
-  assert.match(
-    renderSupportManagementAlert(item),
-    /^\*Airbnb guest needs host attention\*/,
-  );
+test("only the most important stage per thread is selected, preserving other threads", () => {
+  const selected = latestSupportAlerts([alert("immediate", "immediate"), alert("reminder", "reminder"),
+    alert("overdue", "overdue"), alert("ambiguous", "delivery_ambiguous"), alert("other", "immediate", "thread-2")]);
+  assert.deepEqual(selected.map((a) => a.id), ["ambiguous", "other"]);
 });
 
-test("ambiguous delivery alerts ask for explicit reconciliation", () => {
-  const item = alert("ambiguous", "delivery_ambiguous");
-  item.details.decisionSummary = "Check Sent mail, then mark the reply sent, retry it, or cancel it.";
-  const text = renderSupportManagementAlert(item);
-  assert.match(text, /^\*Airbnb reply delivery needs confirmation\*/);
-  assert.match(text, /Check Sent mail/);
+test("rejected model summaries never leak through an internal-summary fallback", () => {
+  const item = alert("unsafe", "immediate");
+  item.details.managementSummary = null;
+  item.details.decisionVersion = 3;
+  item.details.decisionSummary = "The access information is fixture-private-information.";
+  assert.doesNotMatch(renderSupportManagementAlert(item), /fixture-private-information/);
+  delete item.details.decisionVersion;
+  item.details.decisionSummary = "Guest needs password: fixture-only-secret";
+  assert.doesNotMatch(renderSupportManagementAlert(item), /fixture-only-secret/);
+  assert.match(renderSupportManagementAlert(item), /unresolved guest request/);
 });
 
-test("verified Management sends are marked notified exactly once", async () => {
+test("paired delivery receives the exact summary and stable key; WhatsApp success remains notified when Ping fails", async () => {
   const calls = [];
-  let loadedLimit;
   const result = await notifySupportManagement({
-    sql: {},
-    householdId: "22222222-2222-4222-8222-222222222222",
-    env: { AIRBNB_SUPPORT_ALERT_LIMIT: "24" },
+    sql: {}, householdId: "household", env: { AIRBNB_SUPPORT_ALERT_LIMIT: "24" },
     loadAlerts: async (_sql, options) => {
-      loadedLimit = options.limit;
-      return [alert("immediate", "immediate"), alert("other", "immediate", "thread-2")];
+      assert.equal(options.limit, 24);
+      return [alert("first", "immediate"), alert("other", "immediate", "thread-2")];
     },
-    sendMessage: async (message) => {
-      calls.push(["send", message]);
-      return { verification: { found: true } };
+    sendNotification: async (input) => {
+      calls.push(input);
+      return { id: "notification", whatsappStatus: "verified", pingStatus: "failed" };
     },
-    markNotified: async (_sql, value) => calls.push(["mark", value.alertId]),
-    now: () => new Date("2026-08-23T12:05:00.000Z"),
+    markNotified: async (_sql, input) => calls.push(input),
   });
-  assert.equal(loadedLimit, 24);
-  assert.equal(result.length, 1);
-  assert.equal(result[0].verified, true);
-  assert.deepEqual(calls.map(([name]) => name), ["send", "mark"]);
-  assert.equal(calls[0][1].idempotencyKey, `airbnb-support-alert:${contentFingerprint("guest:thread-1:immediate")}`);
-  assert.match(calls[0][1].text, /Open Airbnb: https:\/\/www\.airbnb\.com\/hosting\/messages\/9900001001\nReview:/);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].text, summary);
+  assert.equal(calls[0].notificationKey, `airbnb-support-alert:${contentFingerprint("guest:thread-1:immediate")}`);
+  assert.equal(calls[0].sourceService, "support");
+  assert.equal(calls[1].alertId, "first");
+  assert.deepEqual(result, [{ alertId: "first", stage: "immediate", verified: true,
+    pingStatus: "failed", notificationId: "notification" }]);
 });
 
-test("a delayed first notification scans all stages and sends only the overdue alert", async () => {
-  const calls = [];
-  const result = await notifySupportManagement({
-    sql: {},
-    householdId: "22222222-2222-4222-8222-222222222222",
-    loadAlerts: async () => [
-      alert("immediate", "immediate"),
-      alert("reminder", "reminder"),
-      alert("overdue", "overdue"),
-    ],
-    sendMessage: async (message) => {
-      calls.push(message.text);
-      return { verification: { found: true } };
-    },
-    markNotified: async (_sql, value) => calls.push(value.alertId),
-  });
-  assert.equal(result[0].stage, "overdue");
-  assert.match(calls[0], /reply overdue/i);
-  assert.equal(calls[1], "overdue");
-});
-
-test("an unverified Management send is never marked notified", async () => {
+test("uncertain WhatsApp delivery never marks an alert notified", async () => {
   let marked = false;
-  await assert.rejects(
-    notifySupportManagement({
-      sql: {},
-      householdId: "22222222-2222-4222-8222-222222222222",
-      loadAlerts: async () => [alert("immediate", "immediate")],
-      sendMessage: async () => ({ verification: { found: false } }),
-      markNotified: async () => { marked = true; },
-    }),
-    { code: "MANAGEMENT_READBACK_UNVERIFIED" },
-  );
+  await assert.rejects(notifySupportManagement({
+    sql: {}, householdId: "household", loadAlerts: async () => [alert("first", "immediate")],
+    sendNotification: async () => ({ whatsappStatus: "ambiguous", pingStatus: "pending" }),
+    markNotified: async () => { marked = true; },
+  }), { code: "MANAGEMENT_READBACK_UNVERIFIED" });
   assert.equal(marked, false);
+});
+
+test("there is no notification for an empty eligible alert list", async () => {
+  assert.deepEqual(await notifySupportManagement({sql: {}, householdId: "household", loadAlerts: async () => [],
+    sendNotification: async () => { throw new Error("Must not send"); }}), []);
 });

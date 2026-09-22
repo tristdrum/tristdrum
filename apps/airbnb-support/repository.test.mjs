@@ -312,6 +312,7 @@ test("a no-reply follow-up preserves an earlier actionable Management alert", as
 
   const resolution = queries.find(({ query }) => (
     query.includes("update airbnb.alerts") && query.includes("status = 'resolved'")
+      && query.includes("details->>'threadId'") && query.includes("requiresManagementAction")
   ));
   assert.ok(resolution);
   assert.match(resolution.query, /requiresManagementAction/);
@@ -464,7 +465,7 @@ test("support alert loading supplies joined provider IDs for current and legacy 
     assert.equal(queries.length, 1);
     const { query, values } = queries[0];
     assert.match(query, /alert\.opened_at,\s+thread\.provider_thread_id,/);
-    assert.match(query, /select id, alert_type, severity, dedupe_key, summary, details, opened_at, provider_thread_id\s+from ranked/);
+    assert.match(query, /select id, alert_type, severity, dedupe_key, summary, details, opened_at, provider_thread_id, stay_label\s+from ranked/);
     assert.match(query, /thread\.household_id = alert\.household_id/);
     assert.match(query, /thread\.id = nullif\(alert\.details->>'threadId', ''\)::uuid/);
     assert.doesNotMatch(query, /details->>'providerThreadId'|update |insert /i);
@@ -472,7 +473,7 @@ test("support alert loading supplies joined provider IDs for current and legacy 
     assert.equal(loaded.providerThreadId, providerThreadId);
     assert.deepEqual(loaded.details, details);
     const text = renderSupportManagementAlert(loaded);
-    assert.match(text, /Open Airbnb: https:\/\/www\.airbnb\.com\/hosting\/messages\/9900001001\nReview:/);
+    assert.doesNotMatch(text, /Open Airbnb:|Review:|https?:/);
     assert.doesNotMatch(text, /33333333-3333-4333-8333-333333333333|example\.invalid/);
   }
 });

@@ -9,6 +9,7 @@ import {
   createAirbnbDatabase,
   recordJobFinish,
   recordJobStart,
+  retryPendingManagementPings,
   sanitizedError,
 } from "@tristdrum/airbnb-db";
 import { decideGuestResponse } from "./agent.mjs";
@@ -29,6 +30,7 @@ import {
   latestConversationImportCursorAt,
   latestSupportRun,
   loadDeliveryGuardCandidates,
+  loadManagementDeliveryHealth,
   loadShadowCandidates,
   reconcileBookingLifecycle,
   reconcileGuestTimeRequestNotifications,
@@ -142,7 +144,7 @@ function fallbackDecision(error) {
 
 export function canReuseStoredDecision(decision, mode, candidate = null) {
   return Boolean(
-    decision?.decisionVersion === 2
+    decision?.decisionVersion === 3
     && decision?.decisionSource === "adaptive_agent"
     && !(mode === "live" && decision?.shadowMode === true)
     && !(
@@ -190,6 +192,7 @@ export async function runSupport({
   decide = decideGuestResponse,
   processDelivery = processDeliveryGuard,
   notifyManagement = notifySupportManagement,
+  retryManagementPings = retryPendingManagementPings,
   captureTimeRequest = captureGuestTimeRequest,
   withdrawTimeRequest = withdrawGuestTimeRequest,
   processReadiness = processTimeRequestReadiness,
@@ -208,6 +211,7 @@ export async function runSupport({
   let supplementalMailboxRetryCount = 0;
   let lifecycleMailboxRetryCount = 0;
   let supplementalSearchSince = null;
+  let managementPingRetry = { notifications: [], error: null };
   try {
     await recordJobStart(ownDatabase.sql, {
       householdId,
@@ -218,6 +222,9 @@ export async function runSupport({
       startedAt,
     });
     started = true;
+    if (mode === "live" && capabilities.managementAlertsEnabled) {
+      managementPingRetry = await retryManagementPings({ sql: ownDatabase.sql, householdId, env, now, limit: 1 });
+    }
     const janeUserConfigured = Boolean(String(env.AIRBNB_SUPPORT_JANE_GMAIL_USER ?? "").trim());
     const janePasswordConfigured = Boolean(String(env.AIRBNB_SUPPORT_JANE_GMAIL_APP_PASSWORD ?? "").trim());
     const janeConfigured = janeUserConfigured && janePasswordConfigured;
@@ -368,6 +375,7 @@ export async function runSupport({
           latestEventAt: candidate.latestEventAt,
           activeTimeRequest: candidate.activeTimeRequest,
           conversationContext: candidate.conversationContext,
+          priorManagementAlerts: candidate.priorManagementAlerts ?? [],
           now: startedAt,
           env,
         });
@@ -495,6 +503,7 @@ export async function runSupport({
       : [];
 
     const deliveryOutcomeCounts = summarizeDeliveryOutcomes(deliveries);
+    const managementDeliveryHealth = await loadManagementDeliveryHealth(ownDatabase.sql, householdId);
     const receipt = {
       schemaVersion: 1,
       runId,
@@ -534,6 +543,12 @@ export async function runSupport({
       ...deliveryOutcomeCounts,
       managementNotificationCount: managementNotifications.length,
       managementNotificationVerifiedCount: managementNotifications.filter((item) => item.verified).length,
+      managementPingAcceptedCount: [...managementNotifications, ...managementPingRetry.notifications]
+        .filter((item) => item.pingStatus === "accepted").length,
+      managementPingFailedCount: [...managementNotifications, ...managementPingRetry.notifications]
+        .filter((item) => item.pingStatus === "failed").length,
+      managementPingRetryError: managementPingRetry.error,
+      managementDeliveryHealth,
       timeRequestCount: timeRequests.length,
       timeRequestNotifiedCount: timeRequests.filter((item) => ["notified", "already_notified"].includes(item.status)).length,
       timeRequestCancelledCount: timeRequests.filter((item) => item.status === "cancelled").length,
@@ -564,7 +579,8 @@ export async function runSupport({
         runId,
         status: "error",
         receipt: { schemaVersion: 1, runId, status: "error", error: failure, supplementalSearchSince,
-          canonicalMailboxRetryCount, supplementalMailboxRetryCount, lifecycleMailboxRetryCount, mailboxFailures },
+          canonicalMailboxRetryCount, supplementalMailboxRetryCount, lifecycleMailboxRetryCount, mailboxFailures,
+          managementPingRetry },
         errorCode: failure.code,
         errorMessage: failure.message,
         completedAt: now().toISOString(),

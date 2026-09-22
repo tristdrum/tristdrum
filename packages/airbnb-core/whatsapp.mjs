@@ -210,7 +210,7 @@ export async function sendVerifiedWhatsAppGroupMessage({
   const attempts = positiveInteger(env.AIRBNB_WHATSAPP_READBACK_ATTEMPTS, DEFAULT_READBACK_ATTEMPTS);
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const messages = await readMessages({ chatId: destination, env, fetchFn });
-    const found = messages.some((candidate) => {
+    const found = messages.find((candidate) => {
       if (candidate.from_me !== true || normalizedText(candidate.text) !== expected) return false;
       const candidateId = providerMessageId(candidate);
       return live.providerMessageId
@@ -221,7 +221,7 @@ export async function sendVerifiedWhatsAppGroupMessage({
       return {
         dryRun,
         live,
-        verification: { found: true, attempts: attempt },
+        verification: { found: true, attempts: attempt, providerMessageId: providerMessageId(found) || null },
       };
     }
     if (attempt < attempts) await waitFn(500 * attempt);

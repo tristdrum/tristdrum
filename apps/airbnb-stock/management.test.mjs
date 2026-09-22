@@ -24,16 +24,14 @@ function stockAlert() {
   };
 }
 
-test("shopping-list alerts use stored quantities and flag counts to confirm", () => {
+test("shopping-list alerts summarize the stored list and flag counts to confirm", () => {
   const text = renderStockManagementAlert(stockAlert());
-  assert.match(text, /^\*Airbnb stock shopping list\*/);
-  assert.match(text, /- 6 x Guest chocolates/);
-  assert.match(text, /- 2\.5 x Coffee sachets/);
-  assert.match(text, /Historical price estimate: R400\.20 \(informational only\)\./);
-  assert.match(text, /current Sixty60 basket at R350 or more/);
+  assert.match(text, /^The Airbnb shopping list has 2 items to review in the dashboard\./);
+  assert.match(text, /historical estimate is R400\.20; confirm current prices/);
+  assert.match(text, /current Sixty60 basket is at least R350/);
   assert.match(text, /aim for about R400/);
-  assert.match(text, /Count to confirm: Coffee sachets/);
-  assert.match(text, /Review: https:\/\/www\.tristdrum\.com\/dashboard\/airbnb$/);
+  assert.match(text, /Some stock counts still need confirmation/);
+  assert.doesNotMatch(text, /Guest chocolates|Coffee sachets|\n|https?:|\*/);
 });
 
 test("shopping-list alerts state the minimum when prices cannot prove it", () => {
@@ -44,14 +42,14 @@ test("shopping-list alerts state the minimum when prices cannot prove it", () =>
     meetsFreeDeliveryMinimum: false,
   };
   const text = renderStockManagementAlert(alert);
-  assert.match(text, /Historical price estimate: R120\.00 plus unpriced items \(informational only\)\./);
-  assert.match(text, /R350 or more/);
+  assert.match(text, /historical estimate is R120\.00 plus unpriced items; confirm current prices/);
+  assert.match(text, /at least R350/);
   assert.match(text, /aim for about R400/);
 });
 
 test("shopping-list alerts keep the basket reminder even when a historical estimate exceeds R350", () => {
   const text = renderStockManagementAlert(stockAlert());
-  assert.match(text, /current Sixty60 basket at R350 or more/);
+  assert.match(text, /current Sixty60 basket is at least R350/);
   assert.match(text, /aim for about R400/);
 });
 
@@ -60,13 +58,20 @@ test("shopping-list alerts never guess a missing item quantity", () => {
   alert.items = [{ displayName: "Sugar portions", quantity: null, countToConfirm: true }];
   const text = renderStockManagementAlert(alert);
   assert.doesNotMatch(text, /x Sugar portions/);
-  assert.match(text, /Shopping list is ready in the dashboard\./);
-  assert.match(text, /Count to confirm: Sugar portions/);
+  assert.match(text, /1 item to review in the dashboard/);
+  assert.match(text, /Some stock counts still need confirmation/);
 });
 
-test("a blank dashboard override retains the canonical review link", () => {
-  const text = renderStockManagementAlert(stockAlert(), "  ");
-  assert.match(text, /Review: https:\/\/www\.tristdrum\.com\/dashboard\/airbnb$/);
+test("large shopping lists and weekly reviews remain natural summaries under 1000 characters", () => {
+  const items = Array.from({ length: 200 }, (_, index) => ({ displayName: `Bathroom supply ${index} ${"long ".repeat(100)}`,
+    quantity: "1.000", stockUnit: "bottle", countToConfirm: true }));
+  for (const alert of [{ ...stockAlert(), items }, { alertType: "stock_count_review", details: { countsToConfirm: items } }]) {
+    const text = renderStockManagementAlert(alert);
+    assert.ok(text.length <= 1000);
+    assert.equal(text, text.trim());
+    assert.match(text, /200/);
+    assert.doesNotMatch(text, /Bathroom supply|\n|https?:|\*/);
+  }
 });
 
 test("order confirmation and delivery alerts are concise", () => {
@@ -76,8 +81,8 @@ test("order confirmation and delivery alerts are concise", () => {
     summary: "Sixty60 order 123 was placed",
     details: { deliveryDueAt: "2026-08-24T16:30:00+02:00" },
   });
-  assert.match(confirmation, /^\*Airbnb stock order placed\*/);
-  assert.match(confirmation, /Delivery due:/);
+  assert.match(confirmation, /^Sixty60 order 123 was placed\./);
+  assert.match(confirmation, /Delivery is due/);
 
   const delivery = renderStockManagementAlert({
     alertType: "order_update",
@@ -85,11 +90,19 @@ test("order confirmation and delivery alerts are concise", () => {
     summary: "Sixty60 order 123 was delivered to 1 Bowie",
     details: {},
   });
-  assert.match(delivery, /^\*Airbnb stock delivery confirmed\*/);
-  assert.doesNotMatch(delivery, /Delivery due:/);
+  assert.equal(delivery, "Sixty60 order 123 was delivered to 1 Bowie.");
+  assert.doesNotMatch(delivery, /Delivery is due/);
 });
 
-test("weekly stock counts include cleaning, linen, and tableware confirmations", () => {
+test("oversized order summaries use a bounded factual fallback", () => {
+  for (const [key, summary] of [["sixty60:confirmation:123", "A Sixty60 stock order was placed."],
+    ["sixty60:invoice:123", "A Sixty60 stock delivery was confirmed."]]) {
+    const text = renderStockManagementAlert({ alertType: "order_update", dedupeKey: key, summary: "x".repeat(1001), details: {} });
+    assert.equal(text, summary);
+  }
+});
+
+test("weekly stock counts summarize confirmation needs without an item list", () => {
   const text = renderStockManagementAlert({
     alertType: "stock_count_review",
     dedupeKey: "stock-count-review:2026-08-25",
@@ -101,10 +114,7 @@ test("weekly stock counts include cleaning, linen, and tableware confirmations",
       ],
     },
   });
-  assert.match(text, /^\*Airbnb weekly stock count\*/);
-  assert.match(text, /- Bleach \(bottle\)/);
-  assert.match(text, /- Ready linen sets \(set\)/);
-  assert.match(text, /- Mugs \(each\)/);
+  assert.equal(text, "Please confirm 3 Airbnb stock counts in the dashboard.");
 });
 
 test("verified sends are marked and audited through the repository transition", async () => {
@@ -118,9 +128,9 @@ test("verified sends are marked and audited through the repository transition", 
       loadedLimit = options.limit;
       return [stockAlert()];
     },
-    sendMessage: async (message) => {
+    sendNotification: async (message) => {
       calls.push(["send", message]);
-      return { verification: { found: true } };
+      return { id: "notification-stock", whatsappStatus: "verified", pingStatus: "accepted" };
     },
     markNotified: async (_sql, value) => {
       calls.push(["mark", value]);
@@ -130,13 +140,18 @@ test("verified sends are marked and audited through the repository transition", 
   });
   assert.equal(loadedLimit, 1);
   assert.deepEqual(calls.map(([name]) => name), ["send", "mark"]);
-  assert.match(calls[0][1].idempotencyKey, /^airbnb-stock-alert:[a-f0-9]{64}$/);
-  assert.equal(calls[1][1].idempotencyKey, calls[0][1].idempotencyKey);
+  assert.match(calls[0][1].notificationKey, /^airbnb-stock-alert:[a-f0-9]{64}$/);
+  assert.equal(calls[1][1].idempotencyKey, calls[0][1].notificationKey);
+  assert.equal(calls[0][1].sourceService, "stock");
   assert.deepEqual(result, [{
     alertId: "alert-stock",
     alertType: "stock_low",
     verified: true,
     markedNotified: true,
+    pingStatus: "accepted",
+    pingError: null,
+    notificationId: "notification-stock",
+    persistenceError: null,
   }]);
 });
 
@@ -148,7 +163,7 @@ test("an unverified sender result never marks an alert notified", async () => {
       householdId: "22222222-2222-4222-8222-222222222222",
       env: {},
       loadAlerts: async () => [stockAlert()],
-      sendMessage: async () => ({ verification: { found: false } }),
+      sendNotification: async () => ({ whatsappStatus: "ambiguous" }),
       markNotified: async () => {
         marked = true;
       },
@@ -156,4 +171,20 @@ test("an unverified sender result never marks an alert notified", async () => {
     (error) => error.code === "MANAGEMENT_READBACK_UNVERIFIED",
   );
   assert.equal(marked, false);
+});
+
+test("Ping failure still marks verified WhatsApp notified and retains the failure for the receipt", async () => {
+  let marked = 0;
+  const result = await notifyStockManagement({ sql: {}, householdId: "household", env: {},
+    loadAlerts: async () => [stockAlert()],
+    sendNotification: async ({ text }) => {
+      assert.equal(text, renderStockManagementAlert(stockAlert()));
+      return { id: "notification", whatsappStatus: "verified", pingStatus: "failed", pingError: "permanent:invalid_api_key" };
+    },
+    markNotified: async () => { marked += 1; return { id: "alert-stock" }; },
+  });
+  assert.equal(marked, 1);
+  assert.equal(result[0].verified, true);
+  assert.equal(result[0].pingStatus, "failed");
+  assert.equal(result[0].pingError, "permanent:invalid_api_key");
 });
