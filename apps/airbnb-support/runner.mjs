@@ -376,6 +376,7 @@ export async function runSupport({
           activeTimeRequest: candidate.activeTimeRequest,
           conversationContext: candidate.conversationContext,
           priorManagementAlerts: candidate.priorManagementAlerts ?? [],
+          replyRouteAvailable: candidate.replyCapable !== false,
           now: startedAt,
           env,
         });
