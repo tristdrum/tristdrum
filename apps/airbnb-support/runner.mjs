@@ -151,6 +151,8 @@ export function canReuseStoredDecision(decision, mode, candidate = null) {
       decision?.deterministicGuard === "initial_inquiry_requires_airbnb_ui"
       && candidate?.replyCapable === true
     )
+    && !(candidate?.replyCapable === false && decision?.alertManagement === true
+      && !decision?.managementSummary)
   );
 }
 
