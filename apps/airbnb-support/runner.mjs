@@ -151,6 +151,8 @@ export function canReuseStoredDecision(decision, mode, candidate = null) {
       decision?.deterministicGuard === "initial_inquiry_requires_airbnb_ui"
       && candidate?.replyCapable === true
     )
+    && !(candidate?.replyCapable === false && decision?.alertManagement === true
+      && !decision?.managementSummary)
   );
 }
 
@@ -376,6 +378,7 @@ export async function runSupport({
           activeTimeRequest: candidate.activeTimeRequest,
           conversationContext: candidate.conversationContext,
           priorManagementAlerts: candidate.priorManagementAlerts ?? [],
+          replyRouteAvailable: candidate.replyCapable !== false,
           now: startedAt,
           env,
         });

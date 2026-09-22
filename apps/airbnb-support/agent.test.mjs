@@ -413,6 +413,20 @@ test("stay phase respects the verified local checkout time", () => {
   }), "after_stay");
 });
 
+test("missing reply routes are in the same decision context so host summaries explain the real action", async () => {
+  const managementSummary = "Alex, asking about 23-25 September, needs the studio location confirmed; reply in Airbnb because email replies are unavailable.";
+  const result = await decideGuestResponse({guestMessage: "Where is the studio?",guestName:"Alex",
+    listingName:"Jasmine Studio Stay",stayLabel:"Sep 23 - 25, 2026",replyRouteAvailable:false,
+    env:{OPENAI_API_KEY:"test-key"},fetchFn:modelDecision({replyNeeded:true,sendReply:false,
+      alertManagement:true,summary:"Location question needs an Airbnb reply.",managementSummary,
+      draft:"We are in Nahoon, East London.",roomTimingRequest:null,officeStorageArrangement:null},request=>{
+        assert.equal(JSON.parse(request.input[1].content[0].text).replyRouteAvailable,false);
+      })});
+  assert.equal(result.managementSummary,managementSummary);
+  assert.equal(result.autoReply,false);
+  assert.equal(result.alertManagement,true);
+});
+
 test("an extension question can receive verified listing links while the host decision remains unresolved", async () => {
   let captured;
   const draft = "You can check your dates here: https://www.airbnb.com/h/jasmine-studio-stay. Your current reservation has not been extended; that still needs confirmation.";

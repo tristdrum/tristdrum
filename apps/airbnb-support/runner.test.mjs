@@ -233,6 +233,10 @@ test("mailbox diagnostics retain failure identity without provider text or crede
 });
 
 test("only successful adaptive decisions from the same runtime mode are cached", () => {
+  assert.equal(canReuseStoredDecision({...liveDecision,alertManagement:true,managementSummary:null},
+    "live",{replyCapable:false}),false);
+  assert.equal(canReuseStoredDecision({...liveDecision,alertManagement:true,managementSummary:"Alex needs a reply in Airbnb."},
+    "live",{replyCapable:false}),true);
   assert.equal(canReuseStoredDecision(liveDecision, "live"), true);
   assert.equal(canReuseStoredDecision({ ...liveDecision, shadowMode: true }, "shadow"), true);
   assert.equal(canReuseStoredDecision({ ...liveDecision, shadowMode: true }, "live"), false);
