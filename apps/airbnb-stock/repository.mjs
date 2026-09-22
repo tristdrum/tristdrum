@@ -672,6 +672,13 @@ export async function loadSuppressedStockAlerts(sql, {
     from airbnb.alerts alert
     where alert.household_id = ${householdId}
       and alert.status = 'suppressed'
+      and not exists (
+        select 1 from airbnb.management_notifications notification
+        where notification.household_id = alert.household_id
+          and notification.source_service = 'stock'
+          and notification.notification_key = 'airbnb-stock-alert:' || encode(sha256(convert_to(alert.dedupe_key, 'UTF8')), 'hex')
+          and notification.whatsapp_status in ('sending', 'ambiguous')
+      )
       and alert.alert_type in ('stock_low', 'stock_count_review', 'order_update')
       and (
         (

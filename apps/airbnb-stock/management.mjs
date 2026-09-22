@@ -1,18 +1,9 @@
-import { contentFingerprint, sendVerifiedManagementMessage } from "@tristdrum/airbnb-core";
+import { contentFingerprint } from "@tristdrum/airbnb-core";
+import { sendManagementNotification } from "@tristdrum/airbnb-db";
 import {
   loadSuppressedStockAlerts,
   markStockAlertNotified,
 } from "./repository.mjs";
-
-const DEFAULT_DASHBOARD_URL = "https://www.tristdrum.com/dashboard/airbnb";
-
-function quantityLabel(value) {
-  const quantity = Number(value);
-  if (!Number.isFinite(quantity) || quantity <= 0) return null;
-  return Number.isInteger(quantity)
-    ? String(quantity)
-    : String(Number(quantity.toFixed(3)));
-}
 
 function currencyLabel(cents) {
   const value = Number(cents);
@@ -31,69 +22,49 @@ function deliveryLabel(value) {
   }).format(date);
 }
 
-function renderShoppingList(alert, dashboardUrl) {
+function renderShoppingList(alert) {
   const items = Array.isArray(alert.items) ? alert.items : [];
-  const itemLines = items.flatMap((item) => {
-    const quantity = quantityLabel(item.quantity);
-    const name = String(item.displayName ?? "").trim();
-    return quantity && name ? [`- ${quantity} x ${name}`] : [];
-  });
-  const confirmNames = items
-    .filter((item) => item.countToConfirm === true)
-    .map((item) => String(item.displayName ?? "").trim())
-    .filter(Boolean);
-  const hasUnresolvedConfirmations = confirmNames.length > 0
+  const hasUnresolvedConfirmations = items.some((item) => item.countToConfirm === true)
     || (Array.isArray(alert.details?.countsToConfirm) && alert.details.countsToConfirm.length > 0);
   const total = currencyLabel(alert.shoppingList?.estimatedTotalCents);
   const estimateComplete = alert.shoppingList?.priceEstimateComplete === true;
   return [
-    "*Airbnb stock shopping list*",
-    ...(itemLines.length ? itemLines : ["Shopping list is ready in the dashboard."]),
-    ...(total ? [`Historical price estimate: ${total}${estimateComplete ? "" : " plus unpriced items"} (informational only).`] : []),
-    "Keep the current Sixty60 basket at R350 or more for free delivery; aim for about R400.",
+    items.length
+      ? `The Airbnb shopping list has ${items.length} item${items.length === 1 ? "" : "s"} to review in the dashboard.`
+      : "An Airbnb shopping list is ready to review in the dashboard.",
+    ...(total ? [`The historical estimate is ${total}${estimateComplete ? "" : " plus unpriced items"}; confirm current prices.`] : []),
+    "Check that the current Sixty60 basket is at least R350 for free delivery; aim for about R400.",
     ...(hasUnresolvedConfirmations
-      ? [`Count to confirm: ${confirmNames.length ? confirmNames.join(", ") : "see dashboard"}`]
+      ? ["Some stock counts still need confirmation."]
       : []),
-    `Review: ${dashboardUrl}`,
-  ].join("\n");
+  ].join(" ");
 }
 
-function renderOrderUpdate(alert, dashboardUrl) {
+function renderOrderUpdate(alert) {
   const delivered = String(alert.dedupeKey ?? "").includes(":invoice:")
     || /delivered/i.test(String(alert.summary ?? ""));
   const due = delivered ? null : deliveryLabel(alert.details?.deliveryDueAt);
+  const summary = String(alert.summary ?? "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim();
+  const fallback = delivered ? "A Sixty60 stock delivery was confirmed." : "A Sixty60 stock order was placed.";
   return [
-    delivered ? "*Airbnb stock delivery confirmed*" : "*Airbnb stock order placed*",
-    String(alert.summary ?? "").trim(),
-    ...(due ? [`Delivery due: ${due}`] : []),
-    `Review: ${dashboardUrl}`,
-  ].filter(Boolean).join("\n");
+    summary && summary.length <= 800 ? `${summary}${/[.!?]$/.test(summary) ? "" : "."}` : fallback,
+    ...(due ? [`Delivery is due ${due}.`] : []),
+  ].join(" ");
 }
 
-function renderStockCountReview(alert, dashboardUrl) {
+function renderStockCountReview(alert) {
   const items = Array.isArray(alert.details?.countsToConfirm)
     ? alert.details.countsToConfirm
     : [];
-  const lines = items.flatMap((item) => {
-    const name = String(item?.displayName ?? "").trim();
-    const unit = String(item?.stockUnit ?? "").trim();
-    return name ? [`- ${name}${unit ? ` (${unit})` : ""}`] : [];
-  });
-  return [
-    "*Airbnb weekly stock count*",
-    ...(lines.length ? lines : ["Please confirm the outstanding stock counts in the dashboard."]),
-    `Review: ${dashboardUrl}`,
-  ].join("\n");
+  return items.length
+    ? `Please confirm ${items.length} Airbnb stock count${items.length === 1 ? "" : "s"} in the dashboard.`
+    : "Please confirm the outstanding Airbnb stock counts in the dashboard.";
 }
 
-export function renderStockManagementAlert(
-  alert,
-  dashboardUrl = DEFAULT_DASHBOARD_URL,
-) {
-  const reviewUrl = String(dashboardUrl ?? "").trim() || DEFAULT_DASHBOARD_URL;
-  if (alert.alertType === "stock_low") return renderShoppingList(alert, reviewUrl);
-  if (alert.alertType === "stock_count_review") return renderStockCountReview(alert, reviewUrl);
-  if (alert.alertType === "order_update") return renderOrderUpdate(alert, reviewUrl);
+export function renderStockManagementAlert(alert) {
+  if (alert.alertType === "stock_low") return renderShoppingList(alert);
+  if (alert.alertType === "stock_count_review") return renderStockCountReview(alert);
+  if (alert.alertType === "order_update") return renderOrderUpdate(alert);
   throw new Error(`Unsupported stock alert type ${alert.alertType}.`);
 }
 
@@ -104,7 +75,7 @@ export async function notifyStockManagement({
   env = process.env,
   loadAlerts = loadSuppressedStockAlerts,
   markNotified = markStockAlertNotified,
-  sendMessage = sendVerifiedManagementMessage,
+  sendNotification = sendManagementNotification,
 }) {
   const configuredLimit = Number.parseInt(env.AIRBNB_STOCK_ALERT_LIMIT ?? "1", 10);
   const limit = Number.isFinite(configuredLimit) && configuredLimit > 0
@@ -114,10 +85,11 @@ export async function notifyStockManagement({
   const alerts = await loadAlerts(sql, { householdId, limit, now: checkedAt });
   const results = [];
   for (const alert of alerts) {
-    const text = renderStockManagementAlert(alert, env.AIRBNB_DASHBOARD_URL);
+    const text = renderStockManagementAlert(alert);
     const idempotencyKey = `airbnb-stock-alert:${contentFingerprint(alert.dedupeKey)}`;
-    const delivery = await sendMessage({ text, idempotencyKey, env });
-    if (delivery.verification?.found !== true) {
+    const delivery = await sendNotification({ sql, householdId, sourceService: "stock", text,
+      notificationKey: idempotencyKey, env, now });
+    if (delivery.whatsappStatus !== "verified") {
       throw Object.assign(new Error("Stock Management alert readback was not verified."), {
         code: "MANAGEMENT_READBACK_UNVERIFIED",
       });
@@ -133,6 +105,10 @@ export async function notifyStockManagement({
       alertType: alert.alertType,
       verified: true,
       markedNotified: marked != null,
+      pingStatus: delivery.pingStatus,
+      pingError: delivery.pingError ?? null,
+      notificationId: delivery.id,
+      persistenceError: delivery.persistenceError ?? null,
     });
   }
   return results;

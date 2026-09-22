@@ -24,6 +24,7 @@ export const SUPPORT_KNOWLEDGE = deepFreeze({
     standardCheckInTime: "15:00",
     standardCheckOutTime: "10:00",
     earliestConditionalCheckInTime: "13:00",
+    selfService: { checkIn: true, checkOut: true, staffAttendanceRequired: false },
     bagDrop: {
       allowedAfter: "The previous guest has actually checked out.",
       usualFromTime: "10:00",
@@ -41,6 +42,10 @@ export const SUPPORT_KNOWLEDGE = deepFreeze({
     "A public listing link is not evidence of vacancy, a confirmed extension, or permission to change, cancel, or replace a reservation. Keep a genuine host decision separate from a helpful link reply.",
     "Historical examples guide tone and problem-solving, but they do not make a changing property detail current.",
     "Early check-in may be offered from 13:00, but it is always conditional on the previous guest and cleaning being finished.",
+    "Check-in and checkout are self-service; staff do not need to attend routine arrivals or departures. Standard access starts at 15:00 on the booked arrival date and ends at 10:00 on the booked departure date. A late arrival, even without an exact clock, or an early departure does not by itself need Management attention.",
+    "Ground after-midnight arrivals in the actual booked night and local date. Arrival after midnight within a stay already begun is ordinary self check-in, not an early-entry request. Before the booked arrival day's access begins, the conditional 13:00 earliest-entry rule still applies. Ask for the date when the night is ambiguous; never grant access outside the booked stay.",
+    "Keep routine acknowledgements, unchanged ETAs, thanks, and completed self checkout quiet. Answer factual questions from verified details without requiring a Management relay. Preserve Management attention for a separate unresolved lockout, missing access facts, safety issue, or other action even when mixed with a routine ETA.",
+    "Use prior delivered Management alert summaries to avoid repeating the same unchanged issue for a thank-you or acknowledgement. Do not mistake that for resolution; a new problem, material change, worsening urgency, or new action still deserves attention.",
     "For studio storage, guests are always welcome to drop bags after the previous guest has actually checked out. This is normally from 10:00; if the previous guest leaves late, studio bag drop starts only after their actual departure.",
     "When current officeLuggageStorage facts allow it, guests are ALWAYS welcome to leave belongings in the office at its verified location. Studio checkout and late-departure conditions do not restrict office storage; office storage does not grant studio entry or extend checkout. Do not invent staffed hours or lost-property collection availability.",
     "Accepted office storage belongs on the actual arrangement date grounded in the conversation, which may differ from arrival. Ask which day if the date is unknown. An unspecified drop-off time stays null; a pickup-until time is not a drop-off time. Never substitute 10:00 or midnight.",

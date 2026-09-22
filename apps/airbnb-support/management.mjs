@@ -1,4 +1,5 @@
-import { contentFingerprint, sendVerifiedManagementMessage } from "@tristdrum/airbnb-core";
+import { contentFingerprint } from "@tristdrum/airbnb-core";
+import { sendManagementNotification } from "@tristdrum/airbnb-db";
 import {
   loadSuppressedSupportAlerts,
   markSupportAlertNotified,
@@ -22,32 +23,17 @@ export function latestSupportAlerts(alerts) {
   });
 }
 
-export function renderSupportManagementAlert(alert, dashboardUrl = "https://www.tristdrum.com/dashboard/airbnb") {
-  const stage = alert.details?.stage ?? "immediate";
-  const heading = stage === "delivery_ambiguous"
-    ? "Airbnb reply delivery needs confirmation"
-    : stage === "overdue"
-    ? "Airbnb guest reply overdue"
-    : stage === "reminder"
-      ? "Airbnb guest reply reminder"
-      : alert.details?.requiresManagementAction === true
-        ? "Airbnb guest needs host attention"
-        : "Airbnb guest message needs review";
-  const context = [
-    alert.details?.listingName,
-    alert.details?.guestName ? `Guest: ${alert.details.guestName}` : null,
-    alert.details?.decisionSummary ?? alert.details?.classificationSummary,
-  ].filter(Boolean);
-  const providerThreadId = alert.providerThreadId;
-  const airbnbUrl = typeof providerThreadId === "string" && /^[0-9]+$/.test(providerThreadId)
-    ? `https://www.airbnb.com/hosting/messages/${providerThreadId}`
-    : null;
-  return [
-    `*${heading}*`,
-    ...context,
-    ...(airbnbUrl ? [`Open Airbnb: ${airbnbUrl}`] : []),
-    `Review: ${dashboardUrl}`,
-  ].join("\n");
+export function renderSupportManagementAlert(alert) {
+  const summary = alert.details?.managementSummary;
+  if (typeof summary === "string" && summary.trim()) return summary.trim();
+  // Legacy and transport-error records predate model-written Management text.
+  const name = String(alert.details?.guestName || "A guest").toLocaleLowerCase("en-ZA")
+    .replace(/(^|[\s'-])\p{L}/gu, (letter) => letter.toLocaleUpperCase("en-ZA"));
+  const dates = alert.details?.stayLabel || alert.stayLabel;
+  const issue = alert.details?.stage === "delivery_ambiguous"
+      ? "Reply delivery is uncertain; check the conversation before sending again."
+      : "A host needs to check the unresolved guest request.";
+  return `${name}${dates ? `, staying ${dates}` : ""}: ${issue}`.slice(0, 1000);
 }
 
 export async function notifySupportManagement({
@@ -57,7 +43,7 @@ export async function notifySupportManagement({
   env = process.env,
   loadAlerts = loadSuppressedSupportAlerts,
   markNotified = markSupportAlertNotified,
-  sendMessage = sendVerifiedManagementMessage,
+  sendNotification = sendManagementNotification,
 }) {
   const configuredLimit = Number.parseInt(env.AIRBNB_SUPPORT_ALERT_LIMIT ?? "1", 10);
   const limit = Number.isFinite(configuredLimit) && configuredLimit > 0
@@ -71,10 +57,11 @@ export async function notifySupportManagement({
   })).slice(0, limit);
   const results = [];
   for (const alert of alerts) {
-    const text = renderSupportManagementAlert(alert, env.AIRBNB_DASHBOARD_URL);
+    const text = renderSupportManagementAlert(alert);
     const idempotencyKey = `airbnb-support-alert:${contentFingerprint(alert.dedupeKey)}`;
-    const delivery = await sendMessage({ text, idempotencyKey, env });
-    if (delivery.verification?.found !== true) {
+    const delivery = await sendNotification({ sql, householdId, sourceService: "support", text,
+      notificationKey: idempotencyKey, env, now });
+    if (delivery.whatsappStatus !== "verified") {
       throw Object.assign(new Error("Support Management alert readback was not verified."), {
         code: "MANAGEMENT_READBACK_UNVERIFIED",
       });
@@ -84,6 +71,8 @@ export async function notifySupportManagement({
       alertId: alert.id,
       stage: alert.details?.stage ?? null,
       verified: true,
+      pingStatus: delivery.pingStatus,
+      notificationId: delivery.id,
     });
   }
   return results;

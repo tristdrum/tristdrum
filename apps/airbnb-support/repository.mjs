@@ -355,7 +355,8 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8, notBef
       active_time_request.effective_time as active_time_request_effective_time,
       active_time_request.status as active_time_request_status,
       active_time_request.ready_at as active_time_request_ready_at,
-      recent_context.messages as conversation_context
+      recent_context.messages as conversation_context,
+      prior_alerts.messages as prior_management_alerts
     from airbnb.guest_threads thread
     join lateral (
       select message.body_normalized, message.provider_sent_at
@@ -414,6 +415,23 @@ export async function loadShadowCandidates(sql, { householdId, limit = 8, notBef
           and nullif(btrim(coalesce(delivery.final_text, delivery.draft_text)), '') is not null
       ) context_message
     ) recent_context on true
+    left join lateral (
+      select jsonb_agg(jsonb_build_object(
+        'summary', coalesce(prior.details->>'managementSummary', prior.details->>'decisionSummary', prior.summary),
+        'notifiedAt', prior.notified_at,
+        'resolvedAt', prior.resolved_at,
+        'stage', prior.details->>'stage'
+      ) order by prior.notified_at) as messages
+      from (
+        select alert.details, alert.summary, alert.notified_at, alert.resolved_at
+        from airbnb.alerts alert
+        where alert.household_id = thread.household_id
+          and alert.details->>'threadId' = thread.id::text
+          and alert.notified_at is not null
+        order by alert.notified_at desc
+        limit 8
+      ) prior
+    ) prior_alerts on true
     left join airbnb.properties property
       on property.household_id = thread.household_id
      and property.id = thread.property_id
@@ -518,6 +536,17 @@ export async function storeSupportDraft(sql, {
                   updated_at = now()
     returning id, status
   `;
+  if (!shadowMode && !requiresManagementAction) {
+    await sql`
+      update airbnb.alerts
+      set status = 'resolved', resolved_at = ${now}, updated_at = ${now}
+      where household_id = ${householdId}
+        and status in ('open', 'suppressed', 'notified')
+        and alert_type in ('guest_escalation', 'guest_overdue')
+        and details->>'replyDeliveryId' = ${rows[0].id}
+        and coalesce(details->>'stage', '') <> 'delivery_ambiguous'
+    `;
+  }
   await sql`
     update airbnb.guest_threads
     set status = case
@@ -591,6 +620,9 @@ export async function storeSupportDraft(sql, {
           topic: classificationToStore.topic,
           listingName: candidate.listingName,
           guestName: candidate.guestDisplayName,
+          stayLabel: candidate.stayLabel,
+          managementSummary: classificationToStore.managementSummary ?? null,
+          decisionVersion: classificationToStore.decisionVersion ?? null,
           decisionSummary: classificationToStore.summary,
           requiresManagementAction,
           shadowMode,
@@ -1030,8 +1062,8 @@ export async function loadDeliveryGuardCandidates(sql, { householdId, now, limit
       and (
         approved_by is not null
         or (
-          classification->>'decisionSource' in ('adaptive_agent', 'operational_readiness')
-          and classification @> '{"decisionVersion": 2, "autoReply": true}'::jsonb
+          classification @> '{"decisionSource": "adaptive_agent", "decisionVersion": 3, "autoReply": true}'::jsonb
+          or classification @> '{"decisionSource": "operational_readiness", "decisionVersion": 2, "autoReply": true}'::jsonb
         )
       )
     order by created_at
@@ -1063,6 +1095,7 @@ export async function loadSuppressedSupportAlerts(sql, { householdId, limit = 24
       select alert.id, alert.alert_type, alert.severity, alert.dedupe_key,
              alert.summary, alert.details, alert.opened_at,
              thread.provider_thread_id,
+             coalesce(alert.details->>'stayLabel', conversation.stay_label) as stay_label,
              row_number() over (
                partition by coalesce(alert.details->>'threadId', alert.dedupe_key)
                order by case alert.details->>'stage'
@@ -1079,8 +1112,24 @@ export async function loadSuppressedSupportAlerts(sql, { householdId, limit = 24
       join airbnb.reply_deliveries delivery
         on delivery.household_id = alert.household_id
        and delivery.id = nullif(alert.details->>'replyDeliveryId', '')::uuid
+      left join lateral (
+        select evidence.normalized_payload->>'stayLabel' as stay_label
+        from airbnb.evidence evidence
+        where evidence.household_id = thread.household_id
+          and evidence.provider_thread_id = thread.provider_thread_id
+          and evidence.evidence_kind = 'conversation'
+        order by evidence.occurred_at desc
+        limit 1
+      ) conversation on true
       where alert.household_id = ${householdId}
         and alert.status = 'suppressed'
+        and not exists (
+          select 1 from airbnb.management_notifications notification
+          where notification.household_id = alert.household_id
+            and notification.source_service = 'support'
+            and notification.notification_key = 'airbnb-support-alert:' || encode(sha256(convert_to(alert.dedupe_key, 'UTF8')), 'hex')
+            and notification.whatsapp_status in ('sending', 'ambiguous')
+        )
         and alert.alert_type in ('guest_escalation', 'guest_overdue')
         and thread.status <> 'closed'
         and (${notBefore}::timestamptz is null or thread.last_guest_at >= ${notBefore}::timestamptz)
@@ -1102,7 +1151,7 @@ export async function loadSuppressedSupportAlerts(sql, { householdId, limit = 24
           )
         )
     )
-    select id, alert_type, severity, dedupe_key, summary, details, opened_at, provider_thread_id
+    select id, alert_type, severity, dedupe_key, summary, details, opened_at, provider_thread_id, stay_label
     from ranked
     where stage_rank = 1
     order by case details->>'stage'
@@ -1149,6 +1198,18 @@ export async function markSupportAlertNotified(sql, { householdId, alertId, now 
     });
     return { id: rows[0].id, status: "notified" };
   });
+}
+
+export async function loadManagementDeliveryHealth(sql, householdId) {
+  const [row] = await sql`
+    select count(*) filter (where whatsapp_status = 'ambiguous'
+      or (whatsapp_status = 'sending' and updated_at < now() - interval '1 minute'))::integer as whatsapp_ambiguous,
+           count(*) filter (where ping_status = 'failed')::integer as ping_failed,
+           count(*) filter (where whatsapp_status = 'verified' and ping_status in ('pending','sending'))::integer as ping_pending
+    from airbnb.management_notifications
+    where household_id = ${householdId} and source_service in ('support','operator')
+  `;
+  return row ?? { whatsappAmbiguous: 0, pingFailed: 0, pingPending: 0 };
 }
 
 export async function claimDeliveryForGuard(sql, { householdId, deliveryId, now }) {

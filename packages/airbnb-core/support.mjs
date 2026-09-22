@@ -149,16 +149,60 @@ export function supportBagDropRequestDecision(message, facts = {}, officeStorage
   };
 }
 
-export function supportTimeRequestDecision(message, facts = {}) {
-  const requestType = timeRequestType(message);
+export function supportTimeRequestDecision(message, facts = {}, { extracted = false, stay = null } = {}) {
+  const text = String(message ?? "").normalize("NFKC");
+  // Only the full-context model's room extraction may supply declarative timing intent.
+  const extractedType = extracted
+    ? /\b(?:check[ -]?in|arriv(?:al|e|es|ing))\b/i.test(text) ? "early_checkin"
+      : /\b(?:check[ -]?out|depart(?:ure|ing|s)?|leav(?:e|es|ing))\b/i.test(text) ? "late_checkout" : null
+    : null;
+  const requestType = timeRequestType(text) ?? extractedType;
   if (!requestType) return null;
 
   const standardCheckIn = clockMinutes(facts.checkInTime, 15 * 60);
   const standardCheckOut = clockMinutes(facts.checkOutTime, 10 * 60);
   const earliestCheckIn = clockMinutes(facts.earliestCheckInTime, 13 * 60);
   const standardMinutes = requestType === "early_checkin" ? standardCheckIn : standardCheckOut;
-  const requestedMinutes = requestedClockMinutes(message, requestType, standardMinutes);
+  const requestedMinutes = requestedClockMinutes(text, requestType, standardMinutes);
   const requestedTime = requestedMinutes == null ? null : clockLabel(requestedMinutes);
+
+  if (extracted) {
+    const dateText = text.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0];
+    const dateStamp = dateText ? Date.parse(`${dateText}T12:00:00Z`) : NaN;
+    const date = Number.isFinite(dateStamp) && new Date(dateStamp).toISOString().slice(0, 10) === dateText
+      ? dateText : null;
+    const afterMidnight = /\b(?:after midnight|overnight)\b/i.test(text)
+      || (requestedMinutes != null && requestedMinutes < 6 * 60);
+    const routine = (action, reply) => ({
+      topic: requestType === "early_checkin" ? "early_check_in" : "late_check_out",
+      requestType, action, requestedTime, effectiveTime: null,
+      createsOperationalRequest: false, needsCleanerNotification: false, reply,
+    });
+    if ((dateText && !date) || (requestType === "early_checkin" && afterMidnight && (!date || !stay))) {
+      return routine("clarify_date", "Which date will you arrive? Please confirm so we can check it against your booked stay.");
+    }
+    if (date && stay && (date < stay.checkIn || date > stay.checkOut
+      || (requestType === "early_checkin" && date === stay.checkOut && requestedMinutes >= standardCheckOut))) {
+      return routine("outside_stay", "This would be outside the booked access period and needs a host to check it.");
+    }
+    if (requestType === "early_checkin" && date === stay?.checkOut && requestedMinutes == null) {
+      return routine("ask_time", `What time will you arrive? Your booked stay ends at ${clockLabel(standardCheckOut)} that day.`);
+    }
+    if (requestType === "early_checkin" && date && stay && date > stay.checkIn
+      && (date < stay.checkOut || (requestedMinutes != null && requestedMinutes < standardCheckOut))) {
+      return routine("standard_time", "That arrival is within your booked stay; you can use self check-in.");
+    }
+    if (requestType === "late_checkout" && date && stay && date < stay.checkOut) {
+      return routine("standard_time", "An earlier departure is fine; please follow the usual self checkout instructions.");
+    }
+    const lateArrival = /\b(?:late(?:r)?\s+(?:arriv(?:al|e|ing)|check[ -]?in)|(?:arriv(?:al|e|es|ing)|check[ -]?in)\s+(?:late|later))\b/i.test(text);
+    const earlyDeparture = /\b(?:early\s+(?:depart(?:ure|ing)?|check[ -]?out)|(?:depart(?:ure|ing|s)?|leav(?:e|es|ing)|check[ -]?out)\s+early)\b/i.test(text);
+    if (requestedMinutes == null && (requestType === "early_checkin" ? lateArrival && !afterMidnight : earlyDeparture)) {
+      return routine("standard_time", requestType === "early_checkin"
+        ? "A later arrival is fine with self check-in during your booked stay."
+        : "An early departure is fine; please follow the usual self checkout instructions.");
+    }
+  }
 
   if (requestType === "early_checkin") {
     if (requestedMinutes == null) {

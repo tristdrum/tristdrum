@@ -16,7 +16,7 @@ import {
 
 const liveDecision = {
   decisionSource: "adaptive_agent",
-  decisionVersion: 2,
+  decisionVersion: 3,
   shadowMode: false,
 };
 
@@ -107,6 +107,28 @@ test("empty Jane mailbox resumes from a successful scan instead of repeating fir
   assert.equal(imports.find((item) => item.mailboxScope === "tristan").since, "2026-06-13T13:20:00.000Z");
   assert.equal(receipt.supplementalSearchSince, "2026-09-11T07:15:00.000Z");
   assert.equal(database.receipts[0].supplementalSearchSince, receipt.supplementalSearchSince);
+});
+
+test("Ping retries run without new guest mail and cannot send in shadow mode", async () => {
+  for (const mode of ["shadow", "live"]) {
+    const database = emptyMailboxDatabase();
+    const calls = [];
+    const receipt = await runSupport({ mode, database,
+      env: { ...configuredJane, AIRBNB_SUPPORT_EXTERNAL_WRITES_ENABLED: "true",
+        AIRBNB_SUPPORT_LIVE_CONFIRMATION: "ENABLE_AIRBNB_SUPPORT_WRITES",
+        AIRBNB_SUPPORT_MANAGEMENT_ALERTS_ENABLED: "true" },
+      retryManagementPings: async ({limit}) => {
+        calls.push("ping"); assert.equal(limit, 1);
+        return {notifications: [{pingStatus: "accepted"}], error: null};
+      },
+      collectMessages: async () => { calls.push("mail"); return {messages: [], envelopesFound: 0}; },
+      collectLifecycleMessages: async () => ({messages: [], envelopesFound: 0}),
+      notifyManagement: async () => [],
+    });
+    assert.equal(receipt.managementPingAcceptedCount, mode === "live" ? 1 : 0);
+    if (mode === "live") assert.equal(calls[0], "ping");
+    else assert.ok(!calls.includes("ping"));
+  }
 });
 
 test("selected Jane searchSince survives a failed whole run with unchanged two-attempt retry", async () => {
