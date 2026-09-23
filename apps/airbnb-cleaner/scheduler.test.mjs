@@ -106,3 +106,53 @@ test("monitor hardening requires readback after every send result and reuses one
   assert.doesNotMatch(hardeningLowered, /idempotency_key\s*\|\|\s*':attempt-'/);
   assert.doesNotMatch(hardeningLowered, /'alerted',\s*true\s*\)\s*;\s*end/);
 });
+
+const evidenceMigrations = readdirSync(MIGRATIONS_DIR).filter(
+  (name) => name.endsWith("_airbnb_cleaner_monitor_evidence.sql"),
+);
+assert.equal(evidenceMigrations.length, 1, "expected exactly one cleaner monitor evidence migration");
+const evidenceSql = readFileSync(resolve(MIGRATIONS_DIR, evidenceMigrations[0]), "utf8");
+const helperDefinition = evidenceSql.match(
+  /create or replace function internal\.airbnb_cleaner_delivery_evidence\([\s\S]*?\$function\$;/i,
+)?.[0];
+const monitorDefinition = evidenceSql.match(
+  /create or replace function internal\.monitor_airbnb_cleaner\([\s\S]*?\$function\$;/i,
+)?.[0];
+
+test("evidence migration defines a stable SQL-only helper without writes, secrets, or network access", () => {
+  assert.ok(helperDefinition, "expected the new delivery evidence helper");
+  assert.match(helperDefinition, /checked_at timestamptz default now\(\)/i);
+  assert.match(helperDefinition, /language plpgsql\s+stable\s+set search_path = ''/i);
+  assert.doesNotMatch(helperDefinition, /\bsecurity\s+definer\b/i);
+  assert.match(helperDefinition, /from airbnb\.job_runs\b/i);
+  assert.match(helperDefinition, /from airbnb\.cleaner_plans\b/i);
+  assert.doesNotMatch(helperDefinition, /\b(?:insert|update|delete|merge|truncate|execute|perform)\b/i);
+  assert.doesNotMatch(helperDefinition, /\b(?:net|extensions|vault|cron)\./i);
+  assert.doesNotMatch(helperDefinition, /https?:\/\//i);
+  assert.match(evidenceSql, /revoke all on function internal\.airbnb_cleaner_delivery_evidence\(uuid, date, timestamptz, timestamptz\)\s+from public, anon, authenticated/i);
+  assert.doesNotMatch(evidenceSql, /\bcron\./i);
+});
+
+test("evidence monitor returns database verification before reading secrets or making HTTP requests", () => {
+  assert.ok(monitorDefinition, "expected the replacement monitor");
+  const normalizedMonitor = monitorDefinition.replace(/\s+/g, " ").toLowerCase();
+  assert.ok(normalizedMonitor.includes("count(distinct identity.household_id) = 1"));
+  assert.ok(normalizedMonitor.includes("where identity.service = 'cleaner'"));
+  const verified = normalizedMonitor.indexOf("if database_state = 'verified' then");
+  const returned = normalizedMonitor.indexOf("return pg_catalog.jsonb_build_object", verified);
+  const secrets = normalizedMonitor.indexOf("from vault.decrypted_secrets");
+  const http = normalizedMonitor.indexOf("from extensions.http(");
+  assert.ok(verified >= 0 && returned > verified && secrets > returned && http > returned);
+  assert.match(normalizedMonitor.slice(returned, secrets), /'evidencesource', 'database'/);
+  assert.match(normalizedMonitor.slice(returned, secrets), /'alerted', false/);
+  assert.match(normalizedMonitor, /if database_state in \('blocked', 'error', 'unverified', 'running'\) then receipt := database_evidence -> 'receipt';/);
+  assert.match(normalizedMonitor, /else begin select response\.\* into status_response from extensions\.http/);
+  assert.match(normalizedMonitor, /coalesce\(receipt_status, ''\) not in \('blocked', 'error', 'unverified', 'running'\)/);
+});
+
+test("evidence monitor describes unconfirmed delivery without claiming the schedule did not run", () => {
+  assert.ok(monitorDefinition);
+  assert.match(monitorDefinition, /a successful, verified delivery for this cleaning window could not be confirmed/i);
+  assert.match(monitorDefinition, /Check the delivery records before sending another plan/);
+  assert.doesNotMatch(monitorDefinition, /(?:schedule|scheduled run).*(?:did not run|has not run|missing)/i);
+});
