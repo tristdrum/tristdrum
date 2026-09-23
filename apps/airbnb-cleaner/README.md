@@ -16,6 +16,15 @@ failure alerts are sent only to the private destination and count as delivered
 only after exact chat readback. Live failures are mirrored into sanitized
 Supabase job receipts even when plan generation does not complete.
 
+The independent monitor checks the latest live run and matching shared delivery
+ledger first. A current-window sent/duplicate-skipped receipt must have clean
+confidence, synced database state, verified WhatsApp readback and matching plan
+identity/hash before it can suppress an alert. A later blocked, failed or still
+running check takes precedence over an earlier success. The monitor does not
+depend on waking the Fly machine to reconfirm an already verified delivery.
+When evidence is unavailable it reports that verification is needed, not that
+the plan is definitely missing. Monitoring must never resend a plan to verify it.
+
 Accepted early check-ins, late check-outs, and bag drops are read from the shared
 Airbnb database and shown under the relevant unit in English and Xhosa. Office
 storage appears on its actual arrangement date; an unspecified drop-off time
