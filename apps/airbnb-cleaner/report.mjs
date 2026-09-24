@@ -630,6 +630,11 @@ export function mergeReservations(reservations) {
         code: "ACCEPTED_CHANGE_ITINERARY_UNRESOLVED",
       });
     }
+    if (!hasCompleteItinerary || (update.guestCountChangeAccepted && !update.guests)) {
+      throw Object.assign(new Error("Reservation change needs a verified current Airbnb itinerary."), {
+        code: "RESERVATION_UPDATE_UNRESOLVED",
+      });
+    }
     activeByConfirmationCode.set(update.confirmationCode, {
       ...existing,
       unitId: update.unitId ?? existing.unitId,
