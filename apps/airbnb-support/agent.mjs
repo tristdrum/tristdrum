@@ -1,4 +1,5 @@
 import {
+  AIRBNB_PROPERTIES,
   supportBagDropRequestDecision,
   supportTimeFollowUpDecision,
   supportTimeRequestDecision,
@@ -222,7 +223,47 @@ function reservationChangeQualityIssues({ draft, guestMessage }) {
     : [];
 }
 
-function liveWebsiteClaimQualityIssues(draft, liveWebsiteFacts) {
+function exactWebsiteStayMentioned(text, stay) {
+  const [startYear, startMonth, startDay] = stay.checkIn.split("-").map(Number);
+  const [endYear, endMonth, endDay] = stay.checkOut.split("-").map(Number);
+  const years = [startYear, endYear];
+  if ([...text.matchAll(/\b20\d{2}\b/g)].some(([year]) => !years.includes(Number(year)))) return false;
+  if ([...text.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)]
+    .some(([date]) => date !== stay.checkIn && date !== stay.checkOut)) return false;
+  for (const [, first, last, monthText] of text.matchAll(
+    /\b(\d{1,2})\s*(?:-|\u2013|\u2014|to|through)\s*(\d{1,2})\s+([A-Za-z]{3,9})\b/gi,
+  )) {
+    const mentionedMonth = STAY_MONTHS.get(monthText.slice(0, 3).toUpperCase());
+    if (mentionedMonth && (Number(first) !== startDay || Number(last) !== endDay
+      || mentionedMonth !== startMonth || startMonth !== endMonth)) return false;
+  }
+  if (text.includes(stay.checkIn) && text.includes(stay.checkOut)) return true;
+  const month = (number) => new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" })
+    .format(new Date(Date.UTC(2026, number - 1, 1)));
+  const name = (number) => `(?:${month(number)}|${month(number).slice(0, 3)})`;
+  const between = "\\s*(?:-|\\u2013|\\u2014|to|through)\\s*";
+  const formats = startMonth === endMonth && startYear === endYear
+    ? [
+      `\\b${startDay}${between}${endDay}\\s+${name(startMonth)}\\b`,
+      `\\b${name(startMonth)}\\s+${startDay}${between}${endDay}\\b`,
+      `\\b${startDay}\\s+${name(startMonth)}${between}${endDay}\\s+${name(endMonth)}\\b`,
+    ]
+    : [
+      `\\b${startDay}\\s+${name(startMonth)}${between}${endDay}\\s+${name(endMonth)}\\b`,
+      `\\b${name(startMonth)}\\s+${startDay}${between}${name(endMonth)}\\s+${endDay}\\b`,
+    ];
+  return formats.some((format) => new RegExp(format, "i").test(text));
+}
+
+function exactWebsiteScopeMentioned(text, fact) {
+  const mentionedListings = AIRBNB_PROPERTIES.filter(({ commonName }) =>
+    new RegExp(`\\b${commonName}\\b`, "i").test(text));
+  return mentionedListings.length === 1
+    && mentionedListings[0].listingName === fact.listingName
+    && exactWebsiteStayMentioned(text, fact);
+}
+
+export function liveWebsiteClaimQualityIssues(draft, liveWebsiteFacts) {
   const text = String(draft ?? "");
   const reservation = liveWebsiteFacts?.reservation;
   const calendar = liveWebsiteFacts?.calendar;
@@ -243,6 +284,9 @@ function liveWebsiteClaimQualityIssues(draft, liveWebsiteFacts) {
       || claimsApproval) {
       issues.push("Match the exact verified Airbnb UI reservation status; do not infer approval or a change from it.");
     }
+    if (!exactWebsiteScopeMentioned(text, reservation)) {
+      issues.push(`State only the verified reservation listing and full date range (${reservation.listingName}, ${reservation.checkIn} to ${reservation.checkOut}).`);
+    }
   }
 
   const unavailabilityPattern = /\b(?:(?:not|isn't|aren't)\s+(?:currently\s+)?available|unavailable|fully booked|already booked)\b/i;
@@ -250,13 +294,16 @@ function liveWebsiteClaimQualityIssues(draft, liveWebsiteFacts) {
   const availableClaim = text.split(/[.!?;]+/).some((sentence) => (
     !unavailabilityPattern.test(sentence)
     && !/\b(?:check|see|find out|confirm)\b[^.!?]{0,80}\b(?:whether|if)\b[^.!?]{0,80}\bavailable\b/i.test(sentence)
-    && /\b(?:is|are|shows?|showing|appears?|looks?|may be|might be|could be)\s+(?:currently\s+|still\s+|as\s+)?available\b|\bshows?[^.!?]{0,40}\bas available\b|\bdates? (?:are|is) open\b|\b(?:studio|unit|place) is free\b/i.test(sentence)
+    && /\b(?:is|are|shows?|showing|appears?|looks?|may be|might be|could be)\s+(?:currently\s+|still\s+|as\s+)?available\b|\bshows?[^.!?]{0,40}\bas available\b|\bdates? (?:are|is) open\b|\b(?:studio|unit|place) is free\b|\b(?:we|I)\s+(?:have|can offer)\s+(?:some\s+)?availability\b/i.test(sentence)
   ));
   if ((availableClaim || unavailableClaim) && !calendar) {
     issues.push("Do not claim availability without a fresh, complete, verified Airbnb UI calendar check for the exact asked listing and dates.");
   } else if ((availableClaim && calendar.status !== "available")
     || (unavailableClaim && calendar.status !== "unavailable")) {
     issues.push("Match the exact verified Airbnb UI calendar result for the asked listing and dates.");
+  }
+  if ((availableClaim || unavailableClaim) && calendar && !exactWebsiteScopeMentioned(text, calendar)) {
+    issues.push(`State only the verified calendar listing and full date range (${calendar.listingName}, ${calendar.checkIn} to ${calendar.checkOut}).`);
   }
   return issues;
 }
@@ -638,7 +685,7 @@ export async function decideGuestResponse({
     replyNeeded = raw.replyNeeded === true || timingNeedsReply() || timePolicyBlocked
       || bagDropPolicyDecision?.action === "accept_after_checkout";
     wantsToSend = replyNeeded && raw.sendReply === true && Boolean(draft);
-    requiresManagement = requiresManagement || raw.alertManagement === true;
+    requiresManagement = raw.alertManagement === true;
   }
   const qualityIssues = wantsToSend
     ? [
@@ -663,23 +710,25 @@ export async function decideGuestResponse({
     && bagDropPolicyVerified
     ? bagDropPolicyDecision
     : null;
+  const alertManagement = requiresManagement || (replyNeeded && !sendReply);
 
   return {
     topic: "adaptive_support",
     riskTier: sendReply ? "low" : "high",
     replyNeeded,
     summary: raw.summary,
-    managementSummary: managementSummary(raw.managementSummary, verifiedFacts),
+    managementSummary: alertManagement ? managementSummary(raw.managementSummary, verifiedFacts) : null,
     draft,
     decisionSource: "adaptive_agent",
     decisionVersion: SUPPORT_DECISION_VERSION,
+    liveWebsiteFacts: verifiedWebsiteFacts,
     qualityRevisionCount,
     qualityIssues,
     operationalRequest,
     bagDropRequest,
     autoReply: sendReply,
     status: sendReply ? "approved_for_guard" : "needs_human",
-    alertManagement: requiresManagement || (replyNeeded && !sendReply),
+    alertManagement,
     model,
     reasoningEffort: effort,
   };

@@ -13,6 +13,7 @@ import {
   sanitizedError,
 } from "@tristdrum/airbnb-db";
 import { decideGuestResponse } from "./agent.mjs";
+import { liveWebsiteObservationIsFresh } from "./live-website-facts.mjs";
 import { processDeliveryGuard } from "./delivery.mjs";
 import {
   collectBookingLifecycleMessages,
@@ -142,10 +143,12 @@ function fallbackDecision(error) {
   };
 }
 
-export function canReuseStoredDecision(decision, mode, candidate = null) {
+export function canReuseStoredDecision(decision, mode, candidate = null, at = new Date()) {
   return Boolean(
     decision?.decisionVersion === 3
     && decision?.decisionSource === "adaptive_agent"
+    && (!decision?.liveWebsiteFacts
+      || liveWebsiteObservationIsFresh(decision.liveWebsiteFacts.observedAt, at))
     && !(mode === "live" && decision?.shadowMode === true)
     && !(
       decision?.deterministicGuard === "initial_inquiry_requires_airbnb_ui"
@@ -363,7 +366,7 @@ export async function runSupport({
     let decisionFailureCount = 0;
     const decideAndStore = async (candidate) => {
       let decision;
-      const existingDecision = canReuseStoredDecision(candidate.existingDecision, mode, candidate)
+      const existingDecision = canReuseStoredDecision(candidate.existingDecision, mode, candidate, now())
         ? candidate.existingDecision
         : null;
       if (existingDecision) {
@@ -374,12 +377,13 @@ export async function runSupport({
         let liveWebsiteFacts = null;
         if (typeof loadLiveWebsiteFacts === "function") {
           try {
-            liveWebsiteFacts = await loadLiveWebsiteFacts({ candidate, now: startedAt });
+            liveWebsiteFacts = await loadLiveWebsiteFacts({ candidate, now: now() });
           } catch {
             // A read failure supplies no live evidence and cannot itself create
             // a new Management alert or authorize a factual guest claim.
           }
         }
+        const decisionAt = now();
         decision = await decide({
           guestMessage: candidate.guestMessage,
           guestName: candidate.guestDisplayName,
@@ -393,7 +397,7 @@ export async function runSupport({
           priorManagementAlerts: candidate.priorManagementAlerts ?? [],
           replyRouteAvailable: candidate.replyCapable !== false,
           liveWebsiteFacts,
-          now: startedAt,
+          now: decisionAt,
           env,
         });
       } catch (error) {

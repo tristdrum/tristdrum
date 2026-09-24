@@ -76,3 +76,6 @@ cancellation, availability changes, staffing, and safety-critical actions retain
 their specific authorization boundaries. Existing conversational holds and
 newer-human-reply/duplicate-send guards remain in force. See
 [cleaning-team authority](AIRBNB_CLEANING_TEAM_AUTHORITY.md) for staffing rules.
+The pure support booking-approval policy does not itself accept a request or
+trigger a Management/Ping handoff. Leave that handoff disabled until the typed
+browser action writer can identify and deduplicate an actual booking request.

@@ -1222,6 +1222,7 @@ export async function claimDeliveryForGuard(sql, { householdId, deliveryId, now 
         delivery.source_last_event_at,
         delivery.draft_text,
         delivery.final_text,
+        delivery.classification,
         delivery.outbound_message_id,
         delivery.send_attempt_count,
         delivery.send_attempted_at,

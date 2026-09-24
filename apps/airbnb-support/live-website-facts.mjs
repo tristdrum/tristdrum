@@ -2,6 +2,13 @@ import { propertyForListing } from "@tristdrum/airbnb-core";
 
 const MAX_AGE_MS = 5 * 60 * 1000;
 
+export function liveWebsiteObservationIsFresh(observedAt, now = new Date()) {
+  if (typeof observedAt !== "string"
+    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(observedAt)) return false;
+  const age = new Date(now).getTime() - new Date(observedAt).getTime();
+  return Number.isFinite(age) && age >= 0 && age <= MAX_AGE_MS;
+}
+
 /**
  * @typedef {{ listingName: string, checkIn: string, checkOut: string }} WebsiteStay
  * @typedef {{ status: 'confirmed'|'pending'|'cancelled', listingName: string,
@@ -33,11 +40,8 @@ export function verifiedLiveWebsiteFacts(value, { providerThreadId, listingName,
   if (!value || typeof value !== "object" || value.source !== "airbnb_ui") return null;
   if (!providerThreadId || value.providerThreadId !== providerThreadId) return null;
   const property = propertyForListing(listingName);
-  if (!property || typeof value.observedAt !== "string"
-    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value.observedAt)) return null;
+  if (!property || !liveWebsiteObservationIsFresh(value.observedAt, now)) return null;
   const observedAt = new Date(value.observedAt);
-  const age = new Date(now).getTime() - observedAt.getTime();
-  if (!Number.isFinite(age) || age < 0 || age > MAX_AGE_MS) return null;
 
   const reservationStay = stay(value.reservation, property.listingName);
   const reservation = value.reservation?.verified === true

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { collectBookingLifecycleMessages, collectConversationMessages } from "./gmail.mjs";
+import { verifiedLiveWebsiteFacts } from "./live-website-facts.mjs";
 
 import {
   actionableOperationalRequests,
@@ -133,19 +134,25 @@ test("a new support decision receives optional live facts without a browser acti
   database.sql.json = (value) => value;
   let readerCalls = 0;
   let decisionCalls = 0;
+  let clockCalls = 0;
   const receipt = await runSupport({
-    database, now: () => new Date("2026-09-24T10:05:00.000Z"),
+    database, now: () => new Date(clockCalls++ === 0
+      ? "2026-09-24T10:00:00.000Z" : "2026-09-24T10:05:00.000Z"),
     collectMessages: async () => ({ messages: [], envelopesFound: 0 }),
     collectLifecycleMessages: async () => ({ messages: [], envelopesFound: 0 }),
-    loadLiveWebsiteFacts: async ({ candidate: selected }) => {
+    loadLiveWebsiteFacts: async ({ candidate: selected, now }) => {
       readerCalls += 1;
       assert.equal(selected.id, candidate.id);
+      assert.equal(now.toISOString(), "2026-09-24T10:05:00.000Z");
       return websiteFacts;
     },
-    decide: async ({ liveWebsiteFacts, providerThreadId }) => {
+    decide: async ({ liveWebsiteFacts, providerThreadId, now }) => {
       decisionCalls += 1;
       assert.equal(providerThreadId, candidate.providerThreadId);
       assert.deepEqual(liveWebsiteFacts, websiteFacts);
+      assert.equal(now.toISOString(), "2026-09-24T10:05:00.000Z");
+      assert.ok(verifiedLiveWebsiteFacts(liveWebsiteFacts,
+        { providerThreadId, listingName: candidate.listingName, now }));
       return { topic: "adaptive_support", riskTier: "low", replyNeeded: true,
         summary: "Verified answer.", draft: "The booking is confirmed.",
         decisionSource: "adaptive_agent", decisionVersion: 3,
@@ -294,6 +301,13 @@ test("only successful adaptive decisions from the same runtime mode are cached",
     ...liveDecision,
     deterministicGuard: "initial_inquiry_requires_airbnb_ui",
   }, "live", { replyCapable: true }), false);
+  const withWebsiteFacts = { ...liveDecision, liveWebsiteFacts: {
+    observedAt: "2026-09-24T10:00:00.000Z",
+  } };
+  assert.equal(canReuseStoredDecision(withWebsiteFacts, "live", null,
+    new Date("2026-09-24T10:04:59.000Z")), true);
+  assert.equal(canReuseStoredDecision(withWebsiteFacts, "live", null,
+    new Date("2026-09-24T10:05:01.000Z")), false);
 });
 
 test("initial inquiries without an SMTP reply route are held and escalated", () => {

@@ -75,8 +75,13 @@ invalid/mismatched dates, wrong listing/thread, a future timestamp, or an observ
 older than five minutes. It sends only validated facts to the existing
 `gpt-5.6-sol` xhigh full-context decision. A draft that asserts unsupported or
 contradictory booking/availability claims gets one revision attempt, then is
-held for review. An opening does not confirm or alter a reservation. The
-Tristan/Jane reply veto and existing delivery guard still apply.
+held for review. The final draft must name the verified listing and full date
+range. The decision stores only its validated fact snapshot. Stored decisions
+with expired facts are not reused; the pre-SMTP guard rechecks that snapshot
+and the final (possibly edited) text at send time. Expiry fails before SMTP and
+returns the delivery for a fresh decision, without replaying an ambiguous send.
+An opening does not confirm or alter a reservation. The Tristan/Jane reply
+veto and existing delivery guard still apply.
 
 `bookingApprovalDecision(evidence)` in `booking-approval.mjs` is a separate pure
 policy recommendation returning `approve` or `human_review`, never `decline`.
@@ -87,6 +92,10 @@ rated at least 4.5 may be eligible. Missing/inconsistent evidence or a lower
 rating requires human review. This return value is not a production acceptance
 writer or permission to tell a guest their request was accepted. Any future
 typed browser action must independently recheck current UI state and authority.
+The policy result is deliberately not wired to Management/paired Ping yet. That
+handoff remains disabled until a typed browser action path can bind a real
+booking request and durable notification key; a policy evaluation alone is not
+a new guest or Management message.
 
 With the support schedule paused, `AIRBNB_SUPPORT_BACKFILL_CONFIRMATION=RUN_WITH_SUPPORT_SCHEDULE_PAUSED node backfill.mjs` imports historical Airbnb conversation evidence from Tristan and Jane in bounded batches. It writes no guest or WhatsApp messages and is safe to rerun.
 
