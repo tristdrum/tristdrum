@@ -19,6 +19,7 @@ test("stored reservation revisions preserve dates, counts, cancellation, and sou
     id: "old-booking", unitNumber: 3, commonName: "Jasmine", listingName: "Jasmine Studio Stay",
     checkIn: new Date("2026-09-04T00:00:00Z"), checkOut: "2026-09-07",
     guestName: "Advance Guest", adults: 1, children: 1, infants: 2, guestCountKnown: true,
+    guestProfileId: "123456789",
     confirmationCode: "HMADVANCE", bookingStatus: "confirmed", sourceCutoffAt,
   };
   const [record] = cleanerReservationRecords([row]);
@@ -27,6 +28,7 @@ test("stored reservation revisions preserve dates, counts, cancellation, and sou
   assert.equal(record.checkIn, "2026-09-04");
   assert.equal(record.checkOut, "2026-09-07");
   assert.equal(record.guests, "1 adult, 1 child, 2 infants");
+  assert.equal(record.guestProfileId, "123456789");
   assert.equal(record.evidenceKind, "confirmed");
   const [cancelled] = cleanerReservationRecords([{ ...row, bookingStatus: "cancelled", guestCountKnown: false }]);
   assert.equal(cancelled.evidenceKind, "cancelled");
@@ -49,6 +51,7 @@ test("the stored reservation read includes bounded historical confirmation conte
     assert.match(query, /link\.reservation_id = reservation\.id/);
     assert.match(query, /linked\.occurred_at <= reservation\.source_cutoff_at/);
     assert.match(query, /count_evidence\.composite/);
+    assert.match(query, /normalized_payload->>'guestProfileId' as guest_profile_id/);
     assert.deepEqual(values, [householdId, "2026-09-04", "2026-09-04", "2026-09-04", 90]);
     return [];
   };

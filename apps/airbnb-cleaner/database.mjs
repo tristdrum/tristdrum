@@ -72,6 +72,7 @@ export function cleanerReservationRecords(rows) {
     checkOut: databaseDateKey(row.checkOut),
     dateSource: "database-revision",
     guestName: row.guestName ?? "",
+    guestProfileId: /^\d+$/.test(String(row.guestProfileId ?? "")) ? String(row.guestProfileId) : null,
     guests: row.guestCountKnown ? [
       [Number(row.adults), "adult", "adults"],
       [Number(row.children), "child", "children"],
@@ -111,6 +112,7 @@ export async function loadCleanerReservations({
              reservation.adults, reservation.children, reservation.infants,
              reservation.guest_count_known, reservation.booking_status,
              reservation.source_cutoff_at,
+             evidence.normalized_payload->>'guestProfileId' as guest_profile_id,
              coalesce(
                nullif(evidence.normalized_payload->'guestCountChangeEvidence', 'null'::jsonb),
                count_evidence.composite

@@ -489,6 +489,7 @@ export function mergeReservations(reservations) {
       ...primary,
       guestName: primary.guestName || fallback.guestName,
       guests: primary.guests || fallback.guests,
+      guestProfileId: primary.guestProfileId || null,
       confirmationTimestamp: Math.max(
         existing.confirmationTimestamp ?? existing.sourceTimestamp ?? 0,
         reservation.sourceTimestamp || 0
@@ -716,9 +717,16 @@ export function classifyUnits(reservations, targetDate) {
       return compareDates(checkIn, targetDate) < 0 && compareDates(checkOut, targetDate) > 0;
     });
     const touches = unitReservations.filter((reservation) => reservationTouchesTarget(reservation, targetDate));
+    const continuousStay = touches.length === 2 && stayovers.length === 0
+      && arrivals.length === 1 && checkouts.length === 1
+      && Boolean(arrivals[0].confirmationCode && checkouts[0].confirmationCode)
+      && arrivals[0].confirmationCode !== checkouts[0].confirmationCode
+      && Boolean(arrivals[0].guestProfileId)
+      && arrivals[0].guestProfileId === checkouts[0].guestProfileId;
 
     let action = "empty";
-    if (arrivals.length && checkouts.length) action = "turnover";
+    if (continuousStay) action = "stayover";
+    else if (arrivals.length && checkouts.length) action = "turnover";
     else if (arrivals.length) action = "arrival";
     else if (checkouts.length) action = "checkout";
     else if (stayovers.length) action = "stayover";
@@ -726,9 +734,10 @@ export function classifyUnits(reservations, targetDate) {
     return {
       unit,
       action,
-      arrivals,
-      checkouts,
-      stayovers,
+      continuousStay,
+      arrivals: continuousStay ? [] : arrivals,
+      checkouts: continuousStay ? [] : checkouts,
+      stayovers: continuousStay ? [arrivals[0]] : stayovers,
       touches,
     };
   });
@@ -969,7 +978,8 @@ export function buildUnitEnglish(report, operationalNotes = []) {
   }
 
   if (action === "stayover") {
-    if (!notes.length) return "";
+    if (report.continuousStay) lines.push("- Continuing stay; no turnover cleaning.");
+    if (lines.length === 1 && !notes.length) return "";
     for (const note of notes) lines.push(`- ${note.english}`);
     return lines.join("\n");
   }
@@ -1011,8 +1021,9 @@ export function buildXhosaSummary(unitReports, weather, targetDate, operationalN
       lines.push(label);
       lines.push(`- ${xhosaGuestCountLabel(null)}.`);
       for (const note of notes) lines.push(`- ${note.xhosa}`);
-    } else if (notes.length) {
+    } else if (report.continuousStay || notes.length) {
       lines.push(label);
+      if (report.continuousStay) lines.push("- Undwendwe lusaqhubeka nokuhlala; akukho kucoca kokutshintsha iindwendwe.");
       for (const note of notes) lines.push(`- ${note.xhosa}`);
     }
   }
