@@ -136,8 +136,8 @@ test("an unrelated historical update without an anchor does not block the target
   assert.equal(collected.unmatchedUpdateCount, 0);
 });
 
-test("a persisted historical booking anchors its date-less update inside the mail lookback", async () => {
-  const collected = await collectReservations(
+test("an equal-cutoff stored booking cannot validate a date-less update", async () => {
+  await assert.rejects(collectReservations(
     parseISODate("2026-09-05"),
     90,
     80,
@@ -174,15 +174,11 @@ test("a persisted historical booking anchors its date-less update inside the mai
       evidenceKind: "confirmed",
       cancelled: false,
     }],
-  );
-
-  assert.equal(collected.unmatchedUpdateCount, 0);
-  assert.deepEqual(classifyUnits(collected.reservations, parseISODate("2026-09-05"))
-    .flatMap((report) => report.touches), []);
+  ), { code: "RESERVATION_UPDATE_UNRESOLVED" });
 });
 
-test("a persisted historical booking older than a date-less update remains blocked", async () => {
-  const collected = await collectReservations(
+test("a newer date-less update cannot silently retain an older booking", async () => {
+  await assert.rejects(collectReservations(
     parseISODate("2026-09-05"),
     90,
     80,
@@ -219,9 +215,7 @@ test("a persisted historical booking older than a date-less update remains block
       evidenceKind: "confirmed",
       cancelled: false,
     }],
-  );
-
-  assert.equal(collected.unmatchedUpdateCount, 1);
+  ), { code: "RESERVATION_UPDATE_UNRESOLVED" });
 });
 
 test("collection includes seven future stock dates without widening the cleaner target", async () => {

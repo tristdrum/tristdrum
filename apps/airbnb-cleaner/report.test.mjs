@@ -332,7 +332,9 @@ test("an accepted change cannot turn a generic update-you reply into guest-count
     parseISODate("2026-08-28"),
   );
   assert.equal(wifiReply.guestCountChangeClaimed, false);
-  assert.equal(mergeReservations([confirmation, discussion, accepted, wifiReply])[0].guests, "1 adult");
+  assert.throws(() => mergeReservations([confirmation, discussion, accepted, wifiReply]), {
+    code: "RESERVATION_UPDATE_UNRESOLVED",
+  });
 });
 
 test("date, arrival-time, and update-you replies cannot claim a guest-count change", () => {
@@ -392,6 +394,7 @@ test("a later explicit update preserves a previously paired accepted guest-count
     confirmationCode: "HMCHANGE03",
     evidenceKind: "supplemental",
     evidenceSubtype: "update",
+    unitId: 1,
     checkIn: "2026-08-28",
     checkOut: "2026-08-30",
     guests: "",
@@ -399,6 +402,32 @@ test("a later explicit update preserves a previously paired accepted guest-count
   const merged = mergeReservations([confirmation, discussion, accepted, countReply, laterDateUpdate]);
   assert.equal(merged[0].guests, "2 adults");
   assert.equal(merged[0].checkOut, "2026-08-30");
+});
+
+test("a date-less accepted alteration cannot turn an old confirmation into a confident arrival", () => {
+  const confirmation = {
+    ...reservation({ unitId: 3, guestName: "Changed Guest", guests: "1 adult, 1 child", checkIn: "2026-09-24", checkOut: "2026-09-27" }),
+    confirmationCode: "HMALTER001", sourceEnvelopeId: "confirmed", sourceTimestamp: 100,
+    evidenceKind: "confirmed",
+  };
+  const changed = {
+    sourceEnvelopeId: "accepted", sourceTimestamp: 200, confirmationCode: "HMALTER001",
+    evidenceKind: "supplemental", evidenceSubtype: "update", unitId: 3,
+    checkIn: null, checkOut: null, guests: "",
+  };
+  const staleStored = { ...confirmation, sourceEnvelopeId: "database:old", sourceTimestamp: 200 };
+  assert.throws(() => mergeReservations([confirmation, staleStored, changed]), {
+    code: "RESERVATION_UPDATE_UNRESOLVED",
+  });
+
+  const currentItinerary = {
+    ...confirmation, sourceEnvelopeId: "database:verified-airbnb", sourceTimestamp: 300,
+    checkIn: "2026-09-22", checkOut: "2026-09-25",
+  };
+  const verified = mergeReservations([confirmation, changed, currentItinerary]);
+  assert.equal(verified[0].checkIn, "2026-09-22");
+  assert.equal(verified[0].checkOut, "2026-09-25");
+  assert.equal(classifyUnits(verified, parseISODate("2026-09-24"))[2].action, "stayover");
 });
 
 test("accepted guest-count evidence cannot cross into a same-date replacement guest", () => {
@@ -437,7 +466,11 @@ test("accepted guest-count evidence cannot cross into a same-date replacement gu
     guestCountChangeClaimed: true,
     providerThreadId: "old-thread",
   };
-  const merged = mergeReservations([replacement, oldGuestDiscussion, accepted, oldGuestCount]);
+  assert.throws(() => mergeReservations([replacement, oldGuestDiscussion, accepted, oldGuestCount]), {
+    code: "RESERVATION_UPDATE_UNRESOLVED",
+  });
+  const verified = { ...replacement, sourceEnvelopeId: "airbnb-ui", sourceTimestamp: 300 };
+  const merged = mergeReservations([replacement, oldGuestDiscussion, accepted, oldGuestCount, verified]);
   assert.equal(merged[0].guestName, "New Guest");
   assert.equal(merged[0].guests, "1 adult");
 });
@@ -516,6 +549,22 @@ test("reproduces the July 28 checkout-only and turnover timeline", () => {
   assert.match(updatedMessage, /Unit 2\n- 1 undwendwe; Arrival Two\./);
   assert.match(updatedMessage, /Unit 3\n- 1 undwendwe; Arrival Three\./);
   assert.doesNotMatch(updatedMessage, /tomorrow|ngomso/i);
+});
+
+test("a no-work room plan never assigns or cancels a cleaner's shift", () => {
+  for (const [date, checkIn, checkOut] of [
+    ["2026-07-28", "2026-07-27", "2026-07-29"],
+    ["2026-09-24", "2026-09-22", "2026-09-25"],
+  ]) {
+    const target = parseISODate(date);
+    const stays = [1, 2, 3].map((unitId) => reservation({
+      unitId, guestName: `Guest ${unitId}`, guests: "1 adult", checkIn, checkOut,
+    }));
+    const message = buildMessage({ targetDate: target, unitReports: classifyUnits(stays, target), weather: dryWeather });
+    assert.match(message, /No Airbnb units need cleaning/);
+    assert.match(message, /Akukho zi-unit ze-Airbnb ekufuneka zenziwe/);
+    assert.doesNotMatch(message, /please .*come|still come|normal Tuesday work|umsebenzi wangoLwesibini/i);
+  }
 });
 
 test("accepted timing and bag-drop notes appear beneath the correct unit in English and Xhosa", () => {

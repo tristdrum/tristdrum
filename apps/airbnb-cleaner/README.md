@@ -10,6 +10,12 @@ delivery-ledger authority; the volume JSONL remains a rollback mirror until the
 post-cutover rollback window closes. Live delivery fails closed when the shared
 ledger cannot be loaded.
 
+An Airbnb alteration notice without complete current itinerary details cannot
+advance a confirmed booking. The report fails closed until newer, verified
+reservation evidence supplies the current dates and guest count. A stored row at
+the notice's timestamp is not proof that the alteration was reconciled. Preserve
+the original notice and link the later verified evidence to the same booking.
+
 Scheduled attempts reuse a content-occurrence WhatsApp idempotency key, so
 retries remain stable while a later `B -> C -> B` reversion gets a new key. Final
 failure alerts are sent only to the private destination and count as delivered
