@@ -108,9 +108,16 @@ export async function extractCalendarViewport(page, listingName, today) {
   const uniqueBars = new Map();
   const seenSelectors = new Set();
   const barTargets = [];
+  const labeledSelectors = new Set(raw.bars.filter((bar) => bar.summary).map((bar) => bar.selector));
   for (const bar of raw.bars) {
-    if (!/^reservation-bar-\d{4}-\d{2}-\d{2}$/.test(bar.selector ?? "") ||
-        !bar.summary?.startsWith("Reservation")) throw new ExtractionError("Unrecognized reservation bar");
+    if (!/^reservation-bar-\d{4}-\d{2}-\d{2}$/.test(bar.selector ?? "")) {
+      throw new ExtractionError("Unrecognized reservation bar");
+    }
+    if (!bar.summary) {
+      if (!labeledSelectors.has(bar.selector)) throw new ExtractionError("Unmatched empty reservation bar");
+      continue;
+    }
+    if (!bar.summary.startsWith("Reservation")) throw new ExtractionError("Unrecognized reservation bar");
     const interval = reservationInterval(bar.summary);
     const previous = uniqueBars.get(interval.key);
     if (previous && previous.summary !== bar.summary) throw new ExtractionError("Multiple reservation bars claim one interval");

@@ -65,6 +65,18 @@ test("unknown reservation bars cannot be ignored beside a valid booking", async 
   });
 });
 
+test("empty decorative bar is ignored only beside a labeled bar with the exact selector", async () => {
+  await withFixtureContext((url) => calendarHtml(LISTINGS[Number(url.pathname.split("/").at(-1)) - 101])
+    .replace('<div id="detail"></div>', '<div data-testid="reservation-bar" data-selector="reservation-bar-2026-09-24"></div><div id="detail"></div>'), async (context) => {
+    const snapshot = await scanCalendars(context, { calendarUrls }, undefined, new Date("2026-09-24T10:00:00Z"));
+    assert.equal(snapshot.listings[0].reservations.length, 1);
+  });
+  await withFixtureContext((url) => calendarHtml(LISTINGS[Number(url.pathname.split("/").at(-1)) - 101])
+    .replace('<div id="detail"></div>', '<div data-testid="reservation-bar" data-selector="reservation-bar-2026-09-23"></div><div id="detail"></div>'), async (context) => {
+    await assert.rejects(scanCalendars(context, { calendarUrls }, undefined, new Date("2026-09-24T10:00:00Z")), /Unmatched empty reservation bar/);
+  });
+});
+
 test("every reserved interval must agree with a bar and a fully extracted detail", async () => {
   await withFixtureContext((url) => calendarHtml(LISTINGS[Number(url.pathname.split("/").at(-1)) - 101])
     .replace(/data-selector="reservation-bar-2026-09-24">Reservation Synthetic Guest Checkin on Sep 24, 2026, checkout on Sep 26, 2026\./,
