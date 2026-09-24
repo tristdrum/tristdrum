@@ -8,6 +8,7 @@ WORKDIR /workspace/apps/airbnb-browser
 COPY apps/airbnb-browser/package.json apps/airbnb-browser/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY apps/airbnb-browser/*.mjs ./
+COPY apps/airbnb-browser/bootstrap-ui.html apps/airbnb-browser/bootstrap-ui.js ./
 
 EXPOSE 3000
 CMD ["node", "entrypoint.mjs"]

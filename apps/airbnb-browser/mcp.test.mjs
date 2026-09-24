@@ -11,7 +11,7 @@ test("Agents API adapter uses environment none and service-origin narrow MCP", (
   assert.deepEqual(connection.environment, { type: "none" });
   assert.equal(connection.tool.connection_origin, "service");
   assert.equal(connection.tool.required, true);
-  assert.equal(connection.tool.allowed_tools.length, 5);
+  assert.equal(connection.tool.allowed_tools.length, 6);
   assert.throws(() => agentsApiConnection("http://pilot.example/mcp", "x".repeat(40)), /HTTPS/);
   assert.throws(() => agentsApiConnection("https://pilot.example/mcp?url=other", "x".repeat(40)), /HTTPS/);
 });
@@ -19,12 +19,15 @@ test("Agents API adapter uses environment none and service-origin narrow MCP", (
 test("authenticated remote MCP exposes only read tools and calls them", async () => {
   const service = {
     read: (kind) => ({ source: "airbnb_host_website", fetchedAt: "2026-09-24T10:00:00Z", complete: true, kind,
+      listings: kind === "calendar" ? [{ unitNumber: 1 }, { unitNumber: 2 }, { unitNumber: 3 }] : undefined,
       threads: kind === "messages" ? [{ threadId: "123", unitNumber: 1, messages: [{ id: "m1", sentAt: "2026-09-24T08:00:00Z", body: "Synthetic text" }] }] : undefined }),
-    refresh: async () => ({ calendar: { ok: true }, messages: { ok: true } }),
+    refresh: async (kind) => kind === "calendar" ? { calendar: { ok: true } } :
+      { calendar: { ok: true }, messages: { ok: false, reason: "layout_or_partial" } },
     status: () => ({ pilot: "read_only", auth: "configured" }),
     recordMcpOutput: async () => {},
     reserveAgentCost: async (maxUsd) => ({ modelUsd: maxUsd }),
     ready: () => false,
+    sourceReady: (kind) => kind === "calendar",
   };
   const server = createApp(service, { mcpToken: "a".repeat(40), operatorToken: "b".repeat(40) }).listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -40,8 +43,10 @@ test("authenticated remote MCP exposes only read tools and calls them", async ()
     assert.equal(operatorOnMcp.status, 401);
     const ready = await fetch(new URL("/readyz", url), { headers: { Authorization: `Bearer ${"b".repeat(40)}` } });
     assert.equal(ready.status, 503);
+    assert.equal((await fetch(new URL("/readyz/calendar", url), { headers: { Authorization: `Bearer ${"b".repeat(40)}` } })).status, 200);
+    assert.equal((await fetch(new URL("/readyz/messages", url), { headers: { Authorization: `Bearer ${"b".repeat(40)}` } })).status, 503);
     const scheduledRefresh = await fetch(new URL("/refresh/messages", url), { method: "POST", headers: { Authorization: `Bearer ${"b".repeat(40)}` } });
-    assert.equal(scheduledRefresh.status, 200);
+    assert.equal(scheduledRefresh.status, 503);
     const reserve = await fetch(new URL("/budget/reserve-agent", url), { method: "POST", headers: { Authorization: `Bearer ${"b".repeat(40)}`, "Content-Type": "application/json" }, body: JSON.stringify({ maxUsd: 0.25 }) });
     assert.equal((await reserve.json()).budget.modelUsd, 0.25);
     const metrics = await fetch(new URL("/metrics", url), { headers: { Authorization: `Bearer ${"b".repeat(40)}` } });
@@ -52,7 +57,8 @@ test("authenticated remote MCP exposes only read tools and calls them", async ()
       await client.connect(transport);
       const tools = await client.listTools();
       assert.deepEqual(tools.tools.map((item) => item.name).sort(), [
-        "get_calendar_snapshot", "get_message_snapshot", "get_pilot_status", "list_message_threads", "refresh_before_plan",
+        "get_calendar_snapshot", "get_message_snapshot", "get_pilot_status", "list_message_threads",
+        "refresh_before_plan", "refresh_calendar_before_plan",
       ]);
       const calendar = await client.callTool({ name: "get_calendar_snapshot", arguments: { unitNumber: 1 } });
       assert.equal(calendar.structuredContent.kind, "calendar");
@@ -61,7 +67,9 @@ test("authenticated remote MCP exposes only read tools and calls them", async ()
       const thread = await client.callTool({ name: "get_message_snapshot", arguments: { threadId: "123" } });
       assert.equal(thread.structuredContent.threads[0].messages[0].body, "Synthetic text");
       const refresh = await client.callTool({ name: "refresh_before_plan", arguments: {} });
-      assert.equal(refresh.structuredContent.complete, true);
+      assert.equal(refresh.isError, true);
+      const cleanerRefresh = await client.callTool({ name: "refresh_calendar_before_plan", arguments: {} });
+      assert.equal(cleanerRefresh.structuredContent.listingCount, 3);
     } finally { await client.close(); }
   } finally { server.close(); await once(server, "close"); }
 });

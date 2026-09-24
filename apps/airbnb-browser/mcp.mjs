@@ -62,6 +62,18 @@ export function createMcpServer(service) {
     if (!result.calendar.ok || !result.messages.ok) return toolFailure("refresh_incomplete");
     return toolResult(service, { complete: true, calendar: result.calendar, messages: result.messages });
   });
+  server.registerTool("refresh_calendar_before_plan", {
+    description: "Refresh only the three listing calendars for cleaner planning; Messages failure does not suppress valid calendar evidence.",
+    inputSchema: {},
+  }, async () => {
+    const result = await service.refresh("calendar", { force: true });
+    if (!result.calendar?.ok) return toolFailure("calendar_refresh_incomplete");
+    try {
+      const snapshot = service.read("calendar");
+      if (snapshot.listings.length !== 3) return toolFailure("calendar_refresh_incomplete");
+      return toolResult(service, { complete: true, source: "calendar", fetchedAt: snapshot.fetchedAt, listingCount: 3 });
+    } catch { return toolFailure("calendar_refresh_incomplete"); }
+  });
   server.registerTool("get_pilot_status", {
     description: "Read pilot freshness, authentication health and budget metrics without guest data.",
     inputSchema: {},
@@ -80,6 +92,11 @@ export function createApp(service, { mcpToken, operatorToken }) {
   };
   app.use(["/readyz", "/metrics", "/refresh", "/budget"], requireToken(operatorToken));
   app.get("/readyz", (_request, response) => response.status(service.ready() ? 200 : 503).json({ ready: service.ready() }));
+  app.get("/readyz/:kind", (request, response) => {
+    if (!["calendar", "messages"].includes(request.params.kind)) return response.sendStatus(404);
+    const ready = service.sourceReady(request.params.kind);
+    return response.status(ready ? 200 : 503).json({ source: request.params.kind, ready });
+  });
   app.get("/metrics", (_request, response) => response.json(service.status()));
   app.post("/refresh/:kind", async (request, response) => {
     if (!["messages", "calendar"].includes(request.params.kind)) return response.sendStatus(404);

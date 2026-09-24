@@ -1,5 +1,6 @@
 const READ_TOOLS = Object.freeze([
-  "get_calendar_snapshot", "list_message_threads", "get_message_snapshot", "refresh_before_plan", "get_pilot_status",
+  "get_calendar_snapshot", "list_message_threads", "get_message_snapshot", "refresh_before_plan",
+  "refresh_calendar_before_plan", "get_pilot_status",
 ]);
 
 export function agentsApiConnection(serverUrl, bearerToken) {

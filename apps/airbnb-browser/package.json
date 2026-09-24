@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test *.test.mjs"
+    "test": "node --test *.test.mjs",
+    "operator:provision": "node operator-proxy.mjs provision",
+    "operator:serve": "node operator-proxy.mjs serve"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.1",

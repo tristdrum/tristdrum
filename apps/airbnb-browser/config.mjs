@@ -44,5 +44,8 @@ export function loadConfig(env = process.env) {
     messagesUrl: airbnbUrl(env.AIRBNB_BROWSER_MESSAGES_URL ?? "https://www.airbnb.co.za/hosting/messages", "/hosting/messages"),
     statePath: resolve(env.AIRBNB_BROWSER_STATE_PATH ?? "/data/browser-state.enc"),
     port: Number(env.PORT ?? 3000),
+    bootstrapEnabled: env.AIRBNB_BROWSER_BOOTSTRAP_ENABLED === "true",
+    bootstrapPort: 3001,
+    bootstrapHost: "fly-local-6pn",
   });
 }

@@ -3,6 +3,7 @@ import { budgetStatus, currentBudget, addRuntime, addTransfer, reserveEventModel
 import { EncryptedStore } from "./encrypted-store.mjs";
 import { readCalendars, readMessages, AuthExpiredError } from "./browser.mjs";
 import { ExtractionError } from "./extract.mjs";
+import { validateStorageState } from "./auth-state.mjs";
 
 const READERS = Object.freeze({ calendar: readCalendars, messages: readMessages });
 
@@ -58,6 +59,8 @@ export class BrowserPilotService {
     this.state = null;
     this.inFlight = Promise.resolve();
     this.runtimeAccountedAt = null;
+    this.bootstrapActive = false;
+    this.pollTimers = [];
   }
 
   async init() {
@@ -83,10 +86,53 @@ export class BrowserPilotService {
     return result;
   }
 
+  startPolling() {
+    if (this.pollTimers.length) return;
+    for (const [kind, interval] of [["messages", 5 * 60_000], ["calendar", 15 * 60_000]]) {
+      this.pollTimers.push(setInterval(() => { void this.refresh(kind).catch(() => {}); }, interval));
+    }
+  }
+
+  stopPolling() { for (const timer of this.pollTimers) clearInterval(timer); this.pollTimers = []; }
+
+  beginBootstrap() {
+    const run = async () => {
+      if (this.bootstrapActive) throw new Error("Bootstrap session already active");
+      this.#accountRuntime(this.now());
+      if (budgetStatus(this.state.budget, this.now()).exhausted) throw new Error("Monthly pilot budget exhausted");
+      this.bootstrapActive = true;
+    };
+    const result = this.inFlight.then(run);
+    this.inFlight = result.catch(() => {});
+    return result;
+  }
+
+  saveFreshCloudLogin(context) {
+    const run = async () => {
+      if (!this.bootstrapActive) throw new Error("No active bootstrap session");
+      const auth = validateStorageState(await context.storageState());
+      this.#accountRuntime(this.now());
+      const next = { ...this.state, auth, snapshots: {}, attempts: {} };
+      await this.store.write(next);
+      this.state = next;
+    };
+    const result = this.inFlight.then(run);
+    this.inFlight = result.catch(() => {});
+    return result;
+  }
+
+  endBootstrap() {
+    const run = async () => { this.bootstrapActive = false; };
+    const result = this.inFlight.then(run);
+    this.inFlight = result.catch(() => {});
+    return result;
+  }
+
   refresh(kind, { force = false } = {}) {
     if (!["calendar", "messages", "all"].includes(kind)) throw new Error("Unknown refresh kind");
     const run = async () => {
       const kinds = kind === "all" ? ["messages", "calendar"] : [kind];
+      if (this.bootstrapActive) return Object.fromEntries(kinds.map((item) => [item, { ok: false, reason: "bootstrap_active" }]));
       const results = {};
       for (const item of kinds) results[item] = await this.#refreshOne(item, force);
       return results;
@@ -131,6 +177,7 @@ export class BrowserPilotService {
 
   read(kind, filter = {}) {
     if (!["calendar", "messages"].includes(kind)) throw new Error("Unknown snapshot kind");
+    if (this.bootstrapActive) throw new SnapshotUnavailableError("bootstrap_active");
     const attempt = this.state.attempts[kind];
     const snapshot = this.state.snapshots[kind];
     const ageMs = snapshot ? this.now().getTime() - Date.parse(snapshot.fetchedAt) : Infinity;
@@ -173,8 +220,14 @@ export class BrowserPilotService {
 
   ready() {
     const status = this.status();
-    return status.auth === "configured" && !status.budget.exhausted &&
+    return !this.bootstrapActive && status.auth === "configured" && !status.budget.exhausted &&
       Object.values(status.kinds).every((kind) => kind.fresh);
+  }
+
+  sourceReady(kind) {
+    if (!["calendar", "messages"].includes(kind)) return false;
+    const status = this.status();
+    return !this.bootstrapActive && status.auth === "configured" && !status.budget.exhausted && status.kinds[kind].fresh;
   }
 
   status() {
@@ -188,7 +241,7 @@ export class BrowserPilotService {
         complete: Boolean(snapshot?.complete), fresh: Boolean(attempt?.ok && snapshot?.complete && ageMs >= 0 && ageMs <= MAX_AGE_MS[kind]),
         lastAttempt: attempt ?? null }];
     }));
-    return { pilot: "read_only", auth: !this.state.auth ? "missing" :
+    return { pilot: "read_only", bootstrap: this.bootstrapActive ? "active" : "idle", auth: !this.state.auth ? "missing" :
       Object.values(this.state.attempts).some((attempt) => attempt.reason === "auth_expired") ? "expired" : "configured", kinds,
       counts: this.state.counts, budget: budgetStatus(this.state.budget, now) };
   }

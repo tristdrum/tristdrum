@@ -83,6 +83,18 @@ test("expired login makes message snapshot unavailable even when cached", async 
   assert.equal(service.status().kinds.messages.fresh, false);
 });
 
+test("Messages layout failure does not suppress complete fresh cleaner calendars", async () => {
+  const { service, setMessages } = fixtureService();
+  await service.init();
+  await service.refresh("calendar");
+  setMessages(new Error("synthetic layout change"));
+  assert.equal((await service.refresh("messages")).messages.ok, false);
+  assert.equal(service.ready(), false);
+  assert.equal(service.sourceReady("calendar"), true);
+  assert.equal(service.sourceReady("messages"), false);
+  assert.equal(service.read("calendar").listings.length, 3);
+});
+
 test("a failed browser scan still charges its transferred bytes", async () => {
   const { service, setMessages, storage } = fixtureService();
   await service.init();
@@ -131,4 +143,29 @@ test("started runtime is metered and persisted without billing stopped gaps", as
   assert.equal(service.status().budget.runtimeUsd, 0.01);
   await service.flushRuntime();
   assert.equal(storage.budget.startedSeconds, 3600);
+});
+
+test("fresh cloud auth wins over queued refresh and runtime checkpoints atomically", async () => {
+  const { service, storage } = fixtureService();
+  await service.init();
+  await service.refresh("all");
+  await service.beginBootstrap();
+  await assert.rejects(service.beginBootstrap(), /already active/);
+  assert.equal(service.ready(), false);
+  assert.throws(() => service.read("calendar"), /bootstrap_active/);
+  assert.equal((await service.refresh("calendar")).calendar.reason, "bootstrap_active");
+  const fresh = { cookies: [{ domain: ".airbnb.co.za", name: "synthetic", value: "fresh" }], origins: [] };
+  await Promise.all([
+    service.flushRuntime(),
+    service.saveFreshCloudLogin({ storageState: async () => fresh }),
+    service.flushRuntime(),
+  ]);
+  await service.endBootstrap();
+  assert.deepEqual(storage.auth, fresh);
+  assert.deepEqual(storage.snapshots, {});
+  assert.deepEqual(storage.attempts, {});
+  assert.equal(service.status().auth, "configured");
+  service.startPolling();
+  assert.equal(service.pollTimers.length, 2);
+  service.stopPolling();
 });

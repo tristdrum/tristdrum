@@ -25,6 +25,10 @@ test("configuration fixes the three listing URLs and rejects foreign hosts", () 
     }),
   };
   assert.equal(loadConfig(env).calendarUrls[3], "https://www.airbnb.co.za/multicalendar/103");
+  assert.equal(loadConfig(env).bootstrapEnabled, false);
+  const bootstrap = loadConfig({ ...env, AIRBNB_BROWSER_BOOTSTRAP_ENABLED: "true" });
+  assert.equal(bootstrap.bootstrapHost, "fly-local-6pn");
+  assert.equal(bootstrap.bootstrapPort, 3001);
   assert.throws(() => loadConfig({ ...env, AIRBNB_BROWSER_OPERATOR_TOKEN: env.AIRBNB_BROWSER_MCP_TOKEN }), /distinct/);
   assert.throws(() => loadConfig({ ...env, AIRBNB_BROWSER_CALENDAR_URLS: JSON.stringify({
     1: "https://evil.example/multicalendar/101", 2: env.AIRBNB_BROWSER_MESSAGES_URL, 3: "https://www.airbnb.co.za/multicalendar/103",
@@ -53,10 +57,10 @@ test("in-memory cloud login capture accepts only Airbnb-owned state", async () =
   assert.throws(() => validateStorageState({ ...valid, cookies: [{ ...valid.cookies[0], domain: ".evil.example" }] }));
   assert.throws(() => validateStorageState({ ...valid, origins: [{ origin: "https://evil.example" }] }));
   const state = {};
-  const store = { read: async () => state, write: async (value) => Object.assign(state, value) };
+  const service = { saveFreshCloudLogin: async (browser) => { state.auth = validateStorageState(await browser.storageState()); state.snapshots = {}; } };
   const context = { storageState: async () => valid };
-  await assert.rejects(persistFreshCloudLogin(context, store, {}), /inside the pilot Fly app/);
-  await persistFreshCloudLogin(context, store, { FLY_APP_NAME: "tristdrum-airbnb-browser-pilot" });
+  await assert.rejects(persistFreshCloudLogin(context, service, {}), /inside the pilot Fly app/);
+  await persistFreshCloudLogin(context, service, { FLY_APP_NAME: "tristdrum-airbnb-browser-pilot" });
   assert.equal(state.auth, valid);
   assert.deepEqual(state.snapshots, {});
 });
@@ -88,12 +92,14 @@ test("monthly meter resets, caps transfer and gates future event costs", () => {
   assert.throws(() => reserveEventModelCost(budget, 0.71, now), /budget exhausted/);
 });
 
-test("Fly config keeps one on-demand Machine reachable by remote MCP", async () => {
+test("Fly config keeps one Machine polling while the login UI remains a private unmapped port", async () => {
   const fly = await readFile(new URL("./fly.toml", import.meta.url), "utf8");
   assert.match(fly, /^\s*auto_stop_machines = "stop"\s*$/m);
   assert.match(fly, /^\s*auto_start_machines = true\s*$/m);
-  assert.match(fly, /^\s*min_machines_running = 0\s*$/m);
+  assert.match(fly, /^\s*min_machines_running = 1\s*$/m);
   assert.match(fly, /^\s*memory_mb = 1024\s*$/m);
+  assert.match(fly, /^\s*internal_port = 3000\s*$/m);
+  assert.doesNotMatch(fly, /internal_port\s*=\s*3001/);
 });
 
 test("all future Airbnb action types refuse in the pilot", async () => {
