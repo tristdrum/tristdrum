@@ -557,6 +557,18 @@ test("adjacent bookings for one verified Airbnb profile remain a stayover", () =
     unitReports: classifyUnits([departing, arriving, otherUnit], date), weather: dryWeather });
   assert.match(mixed, /Unit 3\n- Continuing stay; no turnover cleaning\./);
   assert.match(mixed, /Unit 3\n- Undwendwe lusaqhubeka nokuhlala/);
+
+  const oldPlan = planDelivery({ targetDate: date,
+    unitReports: classifyUnits([departing, { ...arriving, guestProfileId: null }, otherUnit], date),
+    weather: dryWeather, ledgerRecords: [] });
+  const correction = planDelivery({ targetDate: date,
+    unitReports: classifyUnits([departing, arriving, otherUnit], date), weather: dryWeather,
+    ledgerRecords: [{ targetDate: "2026-09-21", messageHash: oldPlan.hash,
+      messageText: oldPlan.message, sentAt: "2026-09-20T11:31:00Z" }] });
+  assert.equal(correction.isUpdate, true);
+  assert.match(correction.message, /Unit 3\n- Continuing stay; no turnover cleaning\./);
+  assert.match(correction.message, /Unit 3\n- Undwendwe lusaqhubeka nokuhlala/);
+  assert.equal(Boolean(correction.duplicate), false);
 });
 
 test("a newer unidentified booking revision does not inherit an old profile ID", () => {
