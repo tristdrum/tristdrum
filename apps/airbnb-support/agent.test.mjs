@@ -448,13 +448,142 @@ test("an extension question can receive verified listing links while the host de
   const input = JSON.parse(captured.input[1].content[0].text);
   assert.equal(input.canonicalKnowledge.property.publicListingUrl, "https://www.airbnb.com/h/jasmine-studio-stay");
   assert.equal(input.canonicalKnowledge.knownProperties.length, 3);
-  assert.match(captured.input[0].content[0].text, /proactively share canonicalKnowledge\.property\.publicListingUrl/);
-  assert.match(captured.input[0].content[0].text, /never invent a URL or share a host-only/);
+  assert.match(captured.input[0].content[0].text, /verified public listing links may still help/);
+  assert.match(captured.input[0].content[0].text, /never host-only links/);
   assert.equal(result.autoReply, true);
   assert.equal(result.alertManagement, true);
   assert.equal(result.draft, draft);
   assert.equal(result.operationalRequest, null);
   assert.deepEqual(result.qualityIssues, []);
+});
+
+test("fresh exact Airbnb UI facts can answer booking and availability without changing the model or alert path", async () => {
+  const observedAt = "2026-09-24T10:04:00.000Z";
+  const stay = { listingName: "Jasmine Studio Stay", checkIn: "2026-10-05", checkOut: "2026-10-07" };
+  const liveWebsiteFacts = {
+    source: "airbnb_ui", providerThreadId: "airbnb-thread-1", observedAt, requestedStay: stay,
+    reservation: { ...stay, status: "confirmed", verified: true, complete: true },
+    calendar: { ...stay, status: "available", verified: true, complete: true },
+  };
+  const result = await decideGuestResponse({
+    guestMessage: "Is my booking confirmed for 5-7 October, and is Jasmine available then?",
+    guestName: "Guest", providerThreadId: "airbnb-thread-1", listingName: stay.listingName,
+    now: new Date("2026-09-24T10:05:00.000Z"), liveWebsiteFacts,
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecision({
+      replyNeeded: true, sendReply: true, alertManagement: false,
+      summary: "Verified booking and calendar answer.", managementSummary: null,
+      draft: "Your Jasmine Studio Stay booking for 5-7 October is confirmed. The calendar also shows those dates as available, but that does not create another booking.",
+      roomTimingRequest: null, officeStorageArrangement: null,
+    }, (request) => {
+      const input = JSON.parse(request.input[1].content[0].text);
+      assert.equal(request.model, "gpt-5.6-sol");
+      assert.equal(request.reasoning.effort, "xhigh");
+      assert.equal(input.liveWebsiteFacts.freshness, "fresh");
+      assert.deepEqual(input.liveWebsiteFacts.reservation, liveWebsiteFacts.reservation);
+      assert.deepEqual(input.liveWebsiteFacts.calendar, liveWebsiteFacts.calendar);
+      assert.match(request.input[0].content[0].text, /A calendar opening is not a confirmed booking/);
+    }),
+  });
+  assert.equal(result.autoReply, true);
+  assert.equal(result.alertManagement, false);
+  assert.deepEqual(result.qualityIssues, []);
+});
+
+test("partial or stale UI facts cannot authorize a booking or vacancy claim", async () => {
+  const stay = { listingName: "Jasmine Studio Stay", checkIn: "2026-10-05", checkOut: "2026-10-07" };
+  for (const liveWebsiteFacts of [
+    { source: "airbnb_ui", providerThreadId: "airbnb-thread-1", observedAt: "2026-09-24T09:59:00.000Z",
+      reservation: { ...stay, status: "confirmed", verified: true, complete: true } },
+    { source: "airbnb_ui", providerThreadId: "airbnb-thread-1", observedAt: "2026-09-24T10:04:00.000Z", requestedStay: stay,
+      reservation: { ...stay, status: "confirmed", verified: false, complete: true },
+      calendar: { ...stay, status: "available", verified: true, complete: false } },
+  ]) {
+    let calls = 0;
+    const unsafe = {
+      replyNeeded: true, sendReply: true, alertManagement: false,
+      summary: "Unsupported answer.", managementSummary: null,
+      draft: "Your booking is confirmed and Jasmine is available for those dates.",
+      roomTimingRequest: null, officeStorageArrangement: null,
+    };
+    const result = await decideGuestResponse({
+      guestMessage: "Is my booking confirmed and is Jasmine available?",
+      providerThreadId: "airbnb-thread-1", listingName: stay.listingName,
+      now: new Date("2026-09-24T10:05:00.000Z"),
+      liveWebsiteFacts, env: { OPENAI_API_KEY: "test-key" },
+      fetchFn: modelDecisionSequence([unsafe, unsafe], (request, index) => {
+        calls += 1;
+        const input = JSON.parse(request.input[1].content[0].text);
+        assert.equal(input.liveWebsiteFacts, null);
+        if (index === 1) assert.ok(input.revisionFeedback.length >= 2);
+      }),
+    });
+    assert.equal(calls, 2);
+    assert.equal(result.autoReply, false);
+    assert.equal(result.alertManagement, true);
+    assert.ok(result.qualityIssues.some((issue) => /booking status/.test(issue)));
+    assert.ok(result.qualityIssues.some((issue) => /availability/.test(issue)));
+  }
+});
+
+test("a wrong UI status is revised; an unresolved real question can be acknowledged and alerted", async () => {
+  const stay = { listingName: "Jasmine Studio Stay", checkIn: "2026-10-05", checkOut: "2026-10-07" };
+  const pending = await decideGuestResponse({
+    guestMessage: "Is the booking confirmed?", providerThreadId: "airbnb-thread-1", listingName: stay.listingName,
+    now: new Date("2026-09-24T10:05:00.000Z"),
+    liveWebsiteFacts: { source: "airbnb_ui", providerThreadId: "airbnb-thread-1",
+      observedAt: "2026-09-24T10:04:00.000Z",
+      reservation: { ...stay, status: "pending", verified: true, complete: true } },
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecisionSequence([
+      { replyNeeded: true, sendReply: true, alertManagement: false, summary: "Status answer.",
+        draft: "Your booking is confirmed.", roomTimingRequest: null, officeStorageArrangement: null },
+      { replyNeeded: true, sendReply: true, alertManagement: false, summary: "Status answer.",
+        draft: "The Jasmine Studio Stay request for 5-7 October is pending, not confirmed yet.",
+        roomTimingRequest: null, officeStorageArrangement: null },
+    ]),
+  });
+  assert.equal(pending.autoReply, true);
+  assert.equal(pending.qualityRevisionCount, 1);
+
+  const uncertain = await decideGuestResponse({
+    guestMessage: "Is Jasmine available for 5-7 October?", listingName: stay.listingName,
+    now: new Date("2026-09-24T10:05:00.000Z"), env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecision({ replyNeeded: true, sendReply: true, alertManagement: true,
+      summary: "Availability needs a current check.",
+      managementSummary: "A guest asks whether Jasmine is available for 5-7 October; the calendar needs checking before anyone can answer.",
+      draft: "I'll double-check the calendar for 5-7 October and get back to you.",
+      roomTimingRequest: null, officeStorageArrangement: null }),
+  });
+  assert.equal(uncertain.autoReply, true);
+  assert.equal(uncertain.alertManagement, true);
+  assert.ok(uncertain.managementSummary);
+
+  const courtesy = await decideGuestResponse({
+    guestMessage: "Thanks, I'll wait.", listingName: stay.listingName,
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecision({ replyNeeded: false, sendReply: false, alertManagement: false,
+      summary: "No new need.", managementSummary: null, draft: null,
+      roomTimingRequest: null, officeStorageArrangement: null }),
+  });
+  assert.equal(courtesy.replyNeeded, false);
+  assert.equal(courtesy.alertManagement, false);
+});
+
+test("a promise to check cannot mask an unsupported availability assertion later in the draft", async () => {
+  const unsafe = {
+    replyNeeded: true, sendReply: true, alertManagement: false,
+    summary: "Unverified availability.", managementSummary: null,
+    draft: "I'll check whether Jasmine is available. Jasmine is available now.",
+    roomTimingRequest: null, officeStorageArrangement: null,
+  };
+  const result = await decideGuestResponse({
+    guestMessage: "Is Jasmine available?", listingName: "Jasmine Studio Stay",
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecisionSequence([unsafe, unsafe]),
+  });
+  assert.equal(result.autoReply, false);
+  assert.ok(result.qualityIssues.some((issue) => /availability/.test(issue)));
 });
 
 test("post-stay collection does not become a new check-in permission", async () => {

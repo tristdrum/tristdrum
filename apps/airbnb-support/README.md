@@ -12,7 +12,7 @@ Private Fly worker for Tristan's Airbnb conversation stream.
 - Post-stay collection or office-storage questions do not inherit early-check-in or late-checkout rules. Use current collection facts and the conversation instead of granting new room entry.
 - Post-stay replies are checked for contradictory future tense and clear name/emoji tone misses. The same model gets one natural revision attempt; a still-inconsistent draft is held and alerted instead of being sent.
 - The small canonical knowledge module holds stable hosting policy and anonymized precedents. Current property facts remain the source for Wi-Fi, access, directions, parking, and other details that can change.
-- Canonical knowledge includes the verified public Airbnb links for all three studios. When live availability is unknown, the adaptive agent offers relevant listing links instead of only promising to check, while leaving any real reservation decision unresolved. Links are not vacancy evidence or permission to change a booking. Host-only links never belong in guest replies.
+- Canonical knowledge includes the verified public Airbnb links for all three studios. When live availability is unknown, the adaptive agent may offer relevant listing links, but they are not vacancy evidence or permission to change a booking. A genuine unresolved guest question may instead receive a short promise to double-check plus a Management alert through the existing paired WhatsApp/Ping path. Thanks and unchanged follow-ups do not create alerts. Host-only links never belong in guest replies.
 - Arrival from 15:00 (including late evening or after midnight within the booked stay) and departure by 10:00 are self-service. Ordinary ETAs, early departures and checkout confirmations do not need Management, Ping, readiness prompts or staff attendance. The same full-context decision distinguishes these from genuine early entry, late checkout, lockouts and other mixed issues. Midnight arrival is grounded in the booked dates, not interpreted as an automatic early-check-in request.
 - Version 3 decisions receive previously delivered Management summaries and can keep thanks or unchanged follow-ups quiet without declaring the underlying issue resolved. The model writes a nullable `managementSummary`: one or two natural sentences naming the guest, known stay dates and the actual issue/action. No headings, field labels, default links or access credentials. Legacy/transport alerts retain a short factual fallback without inventing dates.
 - Reply-route availability is supplied to that same decision. An initial inquiry without an email route retains its useful guest draft and a natural Management summary explaining the question and need to reply in Airbnb; the final route guard remains authoritative.
@@ -34,6 +34,59 @@ Private Fly worker for Tristan's Airbnb conversation stream.
 - Existing classifier-era drafts can never become autonomous replies after deployment. Only a fresh versioned adaptive-agent decision or an explicit cleaner-readiness decision may enter the guarded delivery queue automatically.
 - Guest replies contain no AI disclaimer or automated-reply footer.
 - An OpenAI failure creates a private human-review decision and no guest send. Keep the schedule dormant whenever the Tristan/Jane host-reply round-trip evidence is incomplete.
+
+## Optional live Airbnb UI facts
+
+`runSupport({ loadLiveWebsiteFacts })` accepts an optional, read-only async function
+called with `{ candidate, now }` only when making a new decision. It defaults to
+no reader, does not revisit stored decisions, and does not add a browser action,
+new guest-message trigger, or delivery path. The parent browser pilot can return
+`null` on an incomplete/failed read or this typed `liveWebsiteFacts` payload:
+
+```js
+{
+  source: "airbnb_ui",
+  providerThreadId: "the candidate's exact Airbnb conversation ID",
+  observedAt: "2026-09-24T10:04:00.000Z", // UTC time of the oldest included UI observation
+  reservation: {
+    listingName: "Jasmine Studio Stay", checkIn: "2026-10-05", checkOut: "2026-10-07",
+    status: "confirmed", verified: true, complete: true,
+  },
+  requestedStay: {
+    listingName: "Jasmine Studio Stay", checkIn: "2026-10-05", checkOut: "2026-10-07",
+  },
+  calendar: {
+    listingName: "Jasmine Studio Stay", checkIn: "2026-10-05", checkOut: "2026-10-07",
+    status: "available", verified: true, complete: true,
+  },
+}
+```
+
+`providerThreadId` must match the candidate conversation exactly. `reservation`
+and `calendar` are independently optional. Each must describe the
+exact canonical listing and full date range shown in Airbnb UI, not an email or
+public listing page. `requestedStay` must be the guest's unambiguous asked dates;
+the calendar range must match it exactly. Only explicit status values
+(`confirmed`, `pending`, `cancelled`; `available`, `unavailable`) are accepted.
+`verified: true` means the browser reader actually checked that UI field;
+`complete: true` means the whole relevant status/date/listing or calendar range
+was visible. The support boundary drops a facet with missing or false flags,
+invalid/mismatched dates, wrong listing/thread, a future timestamp, or an observation
+older than five minutes. It sends only validated facts to the existing
+`gpt-5.6-sol` xhigh full-context decision. A draft that asserts unsupported or
+contradictory booking/availability claims gets one revision attempt, then is
+held for review. An opening does not confirm or alter a reservation. The
+Tristan/Jane reply veto and existing delivery guard still apply.
+
+`bookingApprovalDecision(evidence)` in `booking-approval.mjs` is a separate pure
+policy recommendation returning `approve` or `human_review`, never `decline`.
+It requires verified evidence, verified identity, clear capacity/date count,
+and explicit absence of negative-review, party, safety, or conflict concerns.
+An unrated first-time guest (`reviewCount: 0`, `rating: null`) or a reviewed guest
+rated at least 4.5 may be eligible. Missing/inconsistent evidence or a lower
+rating requires human review. This return value is not a production acceptance
+writer or permission to tell a guest their request was accepted. Any future
+typed browser action must independently recheck current UI state and authority.
 
 With the support schedule paused, `AIRBNB_SUPPORT_BACKFILL_CONFIRMATION=RUN_WITH_SUPPORT_SCHEDULE_PAUSED node backfill.mjs` imports historical Airbnb conversation evidence from Tristan and Jane in bounded batches. It writes no guest or WhatsApp messages and is safe to rerun.
 

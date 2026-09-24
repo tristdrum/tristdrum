@@ -4,6 +4,7 @@ import {
   supportTimeRequestDecision,
 } from "@tristdrum/airbnb-core";
 import { normalizedClock, supportKnowledgeForListing } from "./knowledge.mjs";
+import { verifiedLiveWebsiteFacts } from "./live-website-facts.mjs";
 
 const STAY_MONTHS = Object.freeze(new Map([
   ["JAN", 1], ["FEB", 2], ["MAR", 3], ["APR", 4], ["MAY", 5], ["JUN", 6],
@@ -221,6 +222,45 @@ function reservationChangeQualityIssues({ draft, guestMessage }) {
     : [];
 }
 
+function liveWebsiteClaimQualityIssues(draft, liveWebsiteFacts) {
+  const text = String(draft ?? "");
+  const reservation = liveWebsiteFacts?.reservation;
+  const calendar = liveWebsiteFacts?.calendar;
+  const issues = [];
+  const reservationClaim = /\b(?:booking|reservation)\b[^.!?]{0,65}\b(?:is|was|has been|isn't|wasn't|hasn't been|appears|looks)\s+(?:not\s+)?(?:confirmed|pending|cancelled|canceled|approved)\b|\b(?:you are|you're) booked\b|\b(?:I|we) can confirm (?:your|the) (?:booking|reservation)\b/i.test(text);
+  if (reservationClaim && !reservation) {
+    issues.push("Do not claim a booking status without fresh, complete, verified Airbnb UI reservation details for this listing.");
+  } else if (reservationClaim && reservation) {
+    const claimsConfirmed = /\b(?:booking|reservation)\b[^.!?]{0,65}\b(?:is|was|has been|appears|looks)\s+confirmed\b|\b(?:you are|you're) booked\b|\b(?:I|we) can confirm (?:your|the) (?:booking|reservation)\b/i.test(text);
+    const claimsCancelled = /\b(?:booking|reservation)\b[^.!?]{0,65}\b(?:is|was|has been|appears|looks)\s+(?:cancelled|canceled)\b/i.test(text);
+    const claimsPending = /\b(?:booking|reservation)\b[^.!?]{0,65}\b(?:is|was|has been|appears|looks)\s+pending\b/i.test(text);
+    const deniesConfirmation = /\b(?:booking|reservation)\b[^.!?]{0,65}\b(?:is|was|has been)\s+not\s+confirmed\b|\b(?:booking|reservation)\b[^.!?]{0,65}\b(?:isn't|wasn't|hasn't been)\s+confirmed\b/i.test(text);
+    const claimsApproval = /\b(?:booking|reservation)\b[^.!?]{0,65}\b(?:is|was|has been)\s+approved\b/i.test(text);
+    if ((claimsConfirmed && reservation.status !== "confirmed")
+      || (claimsCancelled && reservation.status !== "cancelled")
+      || (claimsPending && reservation.status !== "pending")
+      || (deniesConfirmation && reservation.status === "confirmed")
+      || claimsApproval) {
+      issues.push("Match the exact verified Airbnb UI reservation status; do not infer approval or a change from it.");
+    }
+  }
+
+  const unavailabilityPattern = /\b(?:(?:not|isn't|aren't)\s+(?:currently\s+)?available|unavailable|fully booked|already booked)\b/i;
+  const unavailableClaim = unavailabilityPattern.test(text);
+  const availableClaim = text.split(/[.!?;]+/).some((sentence) => (
+    !unavailabilityPattern.test(sentence)
+    && !/\b(?:check|see|find out|confirm)\b[^.!?]{0,80}\b(?:whether|if)\b[^.!?]{0,80}\bavailable\b/i.test(sentence)
+    && /\b(?:is|are|shows?|showing|appears?|looks?|may be|might be|could be)\s+(?:currently\s+|still\s+|as\s+)?available\b|\bshows?[^.!?]{0,40}\bas available\b|\bdates? (?:are|is) open\b|\b(?:studio|unit|place) is free\b/i.test(sentence)
+  ));
+  if ((availableClaim || unavailableClaim) && !calendar) {
+    issues.push("Do not claim availability without a fresh, complete, verified Airbnb UI calendar check for the exact asked listing and dates.");
+  } else if ((availableClaim && calendar.status !== "available")
+    || (unavailableClaim && calendar.status !== "unavailable")) {
+    issues.push("Match the exact verified Airbnb UI calendar result for the asked listing and dates.");
+  }
+  return issues;
+}
+
 function checkoutTaskQualityIssues({ draft, guestMessage, facts }) {
   const request = String(guestMessage ?? "");
   const asksForDetails = (
@@ -390,6 +430,7 @@ function requestInput({
   bagDropPolicyDecision,
   knowledge,
   verifiedFacts,
+  liveWebsiteFacts,
   revisionFeedback = [],
 }) {
   return {
@@ -410,6 +451,7 @@ function requestInput({
     bagDropPolicyDecision,
     canonicalKnowledge: knowledge,
     verifiedPropertyFacts: verifiedFacts,
+    liveWebsiteFacts,
     revisionFeedback,
   };
 }
@@ -450,7 +492,7 @@ async function requestDecision({ model, effort, input, env, fetchFn }) {
               "Include declarative room ETAs and departures in roomTimingRequest when they need a timing answer, using explicit check-in or check-out wording (for example 'Check-in on 2026-09-22 at 16:20', 'Late check-in on 2026-09-22, time unspecified', or 'Early check-out on 2026-09-24 at 05:00'). Preserve whether a time is after/before an estimate; never invent a clock. Resolve the actual local YYYY-MM-DD date from the conversation timestamps in Africa/Johannesburg, not from evaluation time. bookedStay supplies the dated access boundaries. After-midnight arrival on the night already booked is ordinary self check-in, not early check-in; midnight before the booked arrival day's 15:00 access is genuine early entry subject to the conditional 13:00 policy. If the night/date is ambiguous, ask which date before granting access. A date outside the booked stay needs a host decision. Do not infer a new timing request from a mere thanks or acknowledgement of an unchanged arrangement.",
               "When the guest accepts a host's timing offer, that acceptance is their current room-timing request even if it only says 'I will take that' or 'that works'. Extract the accepted offered time from the conversation, not the earlier time that the host could not offer. For a newly accepted conditional early check-in, return roomTimingRequest with the accepted clock and confirm it briefly subject to cleaning readiness, so the durable cleaning-team instruction can be recorded. Do not infer acceptance from unrelated courtesy or create a new request for a mere acknowledgement of an unchanged activeTimeRequest. If the offer or acceptance is ambiguous, ask one concise clarification instead of inventing an arrangement.",
               "When bagDropPolicyDecision has action accept_after_checkout, its checkout condition, usual time, late-departure condition, and luggage-only boundary apply to studio storage only. Office storage permission takes precedence for the office. Preserve genuine early studio-entry requests and their readiness requirements independently.",
-              "For reservation or date-change requests, do not tell the guest to cancel, avoid cancelling, rebook, or make another booking unless current reservation status is explicitly supplied and verified. When live availability is unknown, proactively share canonicalKnowledge.property.publicListingUrl so the guest can check their dates; offer the verified links in canonicalKnowledge.knownProperties when other studios would help. Do not stop at a vague promise to check and get back to them. These links do not prove vacancy or approve an extension; alert Management separately when a host decision is still needed. Use only the supplied public links, never invent a URL or share a host-only dashboard/conversation link with a guest.",
+              "liveWebsiteFacts contains only fresh, complete, verified Airbnb UI observations for this listing, or null. Reservation status applies only to its exact listed dates; calendar availability applies only to the exact asked dates shown there. Do not use conversation history, a public link, missing/partial UI data, or a booking-approval recommendation as proof that a reservation is confirmed or dates are available. A calendar opening is not a confirmed booking, extension, price, or permission to accept a request. If the verified UI answers the question, answer with the exact status, listing and dates without implying an unperformed booking action. If it does not, a genuine unanswered booking or availability question can receive an honest 'I'll double-check and get back to you' and a Management alert; do not alert for thanks, unchanged follow-ups, or a question that the verified facts fully answer. When availability is unknown, verified public listing links may still help, but do not give only a blind link in place of an answer or a needed check. Never instruct the guest to cancel, delay cancelling, rebook, or make another booking without a separate host decision. Use only supplied public links, never host-only links.",
               "When canonicalKnowledge.approvedResponsePatterns.generalPostStayImprovementFeedback applies, a warm thank-you is eligible for automatic delivery: appreciate the guest's time, take the feedback on board, apologise gently for anything not up to scratch, and commit to learning and making it right next time without inventing hidden review details.",
               "Use stayPhase for tense. For after_stay, acknowledge the completed stay rather than talking as if it is still ahead.",
               "After a stay, an arrival or collection time may refer to lost property or office luggage storage, not a new check-in. Use the conversation and verified collection policy; do not turn that time into room-entry permission or invent office staffing.",
@@ -485,6 +527,7 @@ async function requestDecision({ model, effort, input, env, fetchFn }) {
 export async function decideGuestResponse({
   guestMessage,
   guestName = null,
+  providerThreadId = null,
   listingName,
   facts,
   stayLabel = null,
@@ -493,6 +536,7 @@ export async function decideGuestResponse({
   conversationContext = [],
   priorManagementAlerts = [],
   replyRouteAvailable = true,
+  liveWebsiteFacts = null,
   now = new Date(),
   env = process.env,
   fetchFn = fetch,
@@ -501,6 +545,7 @@ export async function decideGuestResponse({
   const effort = reasoningEffort(env);
   const verifiedFacts = facts && typeof facts === "object" ? facts : {};
   const knowledge = supportKnowledgeForListing({ listingName, propertyFacts: verifiedFacts });
+  const verifiedWebsiteFacts = verifiedLiveWebsiteFacts(liveWebsiteFacts, { providerThreadId, listingName, now });
   const evaluatedAt = latestEventAt ?? now;
   const stayPhase = supportStayPhase({ stayLabel, at: evaluatedAt, facts: verifiedFacts });
   const bookedStay = stayRange(stayLabel, evaluatedAt);
@@ -554,6 +599,7 @@ export async function decideGuestResponse({
     bagDropPolicyDecision: bagDropPolicyVerified ? bagDropPolicyDecision : null,
     knowledge,
     verifiedFacts,
+    liveWebsiteFacts: verifiedWebsiteFacts,
   });
   let raw = await requestDecision({ model, effort, input, env, fetchFn });
   ({ decision: timePolicyDecision, verified: timePolicyVerified, blocked: timePolicyBlocked } = timePolicy(raw));
@@ -572,6 +618,7 @@ export async function decideGuestResponse({
       ...bagDropQualityIssues(draft, bagDropPolicyDecision),
       ...managementAlertQualityIssues(draft, requiresManagement),
       ...reservationChangeQualityIssues({ draft, guestMessage }),
+      ...liveWebsiteClaimQualityIssues(draft, verifiedWebsiteFacts),
       ...checkoutTaskQualityIssues({ draft, guestMessage, facts: verifiedFacts }),
     ]
     : [];
@@ -600,6 +647,7 @@ export async function decideGuestResponse({
       ...bagDropQualityIssues(draft, bagDropPolicyDecision),
       ...managementAlertQualityIssues(draft, requiresManagement),
       ...reservationChangeQualityIssues({ draft, guestMessage }),
+      ...liveWebsiteClaimQualityIssues(draft, verifiedWebsiteFacts),
       ...checkoutTaskQualityIssues({ draft, guestMessage, facts: verifiedFacts }),
       ...(timePolicyBlocked ? ["The timing request is not backed by a verified operational path."] : []),
       ...(bagDropPolicyBlocked ? ["The bag-drop request is not backed by a verified operational path."] : []),

@@ -37,10 +37,13 @@ receipts in its operational record, not in this document.
 ## Helpful Replies and Links
 
 The adaptive support decision can answer ordinary factual questions without a
-separate topic approval. Unknown live availability is not a reason to leave a
-guest with only a promise to check: share the verified public listing URL and,
-when useful, the other studio links. A link neither proves vacancy nor approves
-an extension. Keep any genuinely unresolved host decision in the host alert.
+separate topic approval. Fresh, complete, verified Airbnb UI observations may
+answer an exact booking-status or asked-date availability question. Otherwise,
+the verified public listing URL and other studio links may help, but a link
+neither proves vacancy nor approves an extension. A genuinely unresolved guest
+need may receive a short promise to double-check and a Management alert; thanks
+and unchanged follow-ups must not create a new alert. Keep any host decision
+separate from the guest-facing acknowledgement.
 
 Guest replies use public listing URLs from the canonical support knowledge.
 Management alerts and their paired Normal Ping use the same one- or two-sentence

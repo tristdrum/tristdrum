@@ -192,6 +192,7 @@ export async function runSupport({
   collectMessages = collectConversationMessages,
   collectLifecycleMessages = collectBookingLifecycleMessages,
   decide = decideGuestResponse,
+  loadLiveWebsiteFacts = null,
   processDelivery = processDeliveryGuard,
   notifyManagement = notifySupportManagement,
   retryManagementPings = retryPendingManagementPings,
@@ -368,9 +369,21 @@ export async function runSupport({
       if (existingDecision) {
         decision = existingDecision;
       } else try {
+        // The optional reader is only consulted for a new decision. It never
+        // reopens a stored reply or bypasses the existing mail/delivery guards.
+        let liveWebsiteFacts = null;
+        if (typeof loadLiveWebsiteFacts === "function") {
+          try {
+            liveWebsiteFacts = await loadLiveWebsiteFacts({ candidate, now: startedAt });
+          } catch {
+            // A read failure supplies no live evidence and cannot itself create
+            // a new Management alert or authorize a factual guest claim.
+          }
+        }
         decision = await decide({
           guestMessage: candidate.guestMessage,
           guestName: candidate.guestDisplayName,
+          providerThreadId: candidate.providerThreadId,
           listingName: candidate.listingName,
           facts: candidate.facts,
           stayLabel: candidate.stayLabel,
@@ -379,6 +392,7 @@ export async function runSupport({
           conversationContext: candidate.conversationContext,
           priorManagementAlerts: candidate.priorManagementAlerts ?? [],
           replyRouteAvailable: candidate.replyCapable !== false,
+          liveWebsiteFacts,
           now: startedAt,
           env,
         });

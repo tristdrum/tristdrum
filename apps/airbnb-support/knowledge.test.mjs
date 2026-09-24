@@ -65,7 +65,8 @@ test("each known studio supplies its verified public listing link without implyi
     assert.equal(knowledge.property.publicListingUrl, url);
     assert.deepEqual(Object.fromEntries(knowledge.knownProperties.map((p) => [p.listingName, p.publicListingUrl])), expected);
     assert.match(knowledge.policies.join(" "), /link is not evidence of vacancy/);
-    assert.match(knowledge.policies.join(" "), /instead of only promising to check/);
+    assert.match(knowledge.policies.join(" "), /fresh, complete, verified Airbnb UI observations/);
+    assert.match(knowledge.policies.join(" "), /genuine unresolved question.*Management alert/);
     assert.ok(Object.isFrozen(knowledge.property));
   }
 });

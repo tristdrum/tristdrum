@@ -38,7 +38,7 @@ export const SUPPORT_KNOWLEDGE = deepFreeze({
     "Use runtime property facts for exact address, directions, parking, Wi-Fi, access instructions, and current amenities.",
     "Never guess availability, prices, refunds, reservation changes, exceptions, safety details, or an unverified amenity.",
     "When a fact is missing or contradictory, say that it needs checking instead of choosing the most convenient answer.",
-    "When live availability cannot be verified, give the relevant verified public listing link so the guest can check their dates. Offer the other studio links when alternatives would help, instead of only promising to check and get back to them.",
+    "Answer exact booking-status and asked-date availability questions from fresh, complete, verified Airbnb UI observations when supplied. Otherwise, a verified public listing link may help the guest check dates, but a genuine unresolved question can also be acknowledged with a promise to double-check and a Management alert.",
     "A public listing link is not evidence of vacancy, a confirmed extension, or permission to change, cancel, or replace a reservation. Keep a genuine host decision separate from a helpful link reply.",
     "Historical examples guide tone and problem-solving, but they do not make a changing property detail current.",
     "Early check-in may be offered from 13:00, but it is always conditional on the previous guest and cleaning being finished.",
@@ -69,7 +69,7 @@ export const SUPPORT_KNOWLEDGE = deepFreeze({
     },
     {
       situation: "A guest asks about availability, a booking decision, or a reservation change.",
-      approach: "Answer from current verified facts. If live availability is unknown, share the relevant public listing links for checking dates; do not stop at a vague promise to check. Alert hosts for a genuine unresolved decision without claiming a booking or extension is approved.",
+      approach: "Answer from fresh, complete, verified Airbnb UI facts for the exact listing and dates. If live facts are missing, a public listing link may help, or acknowledge that a genuine question needs checking and alert Management. Never claim a booking or extension is approved from a calendar opening.",
     },
     {
       situation: "A guest asks for a distance or travel time.",

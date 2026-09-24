@@ -109,6 +109,54 @@ test("empty Jane mailbox resumes from a successful scan instead of repeating fir
   assert.equal(database.receipts[0].supplementalSearchSince, receipt.supplementalSearchSince);
 });
 
+test("a new support decision receives optional live facts without a browser action or guest send", async () => {
+  const candidate = {
+    id: "thread-1", providerThreadId: "airbnb-thread-1", sourceFingerprint: "fingerprint-1",
+    latestEventAt: "2026-09-24T10:00:00.000Z", guestMessage: "Is my booking confirmed?",
+    guestDisplayName: "Guest", listingName: "Jasmine Studio Stay", facts: {},
+    stayLabel: "Oct 5 - 7, 2026", replyCapable: true,
+    existingDecision: null, conversationContext: [],
+  };
+  const websiteFacts = { source: "airbnb_ui", providerThreadId: "airbnb-thread-1",
+    observedAt: "2026-09-24T10:04:00.000Z",
+    reservation: { listingName: "Jasmine Studio Stay", checkIn: "2026-10-05",
+      checkOut: "2026-10-07", status: "confirmed", verified: true, complete: true } };
+  const database = emptyMailboxDatabase();
+  const originalSql = database.sql;
+  database.sql = async (strings, ...values) => {
+    const query = strings.join("?");
+    if (query.includes("from airbnb.guest_threads thread")) return [candidate];
+    if (query.includes("insert into airbnb.reply_deliveries")) return [{ id: "delivery-1", status: "needs_approval" }];
+    return originalSql(strings, ...values);
+  };
+  database.sql.begin = async (callback) => callback(database.sql);
+  database.sql.json = (value) => value;
+  let readerCalls = 0;
+  let decisionCalls = 0;
+  const receipt = await runSupport({
+    database, now: () => new Date("2026-09-24T10:05:00.000Z"),
+    collectMessages: async () => ({ messages: [], envelopesFound: 0 }),
+    collectLifecycleMessages: async () => ({ messages: [], envelopesFound: 0 }),
+    loadLiveWebsiteFacts: async ({ candidate: selected }) => {
+      readerCalls += 1;
+      assert.equal(selected.id, candidate.id);
+      return websiteFacts;
+    },
+    decide: async ({ liveWebsiteFacts, providerThreadId }) => {
+      decisionCalls += 1;
+      assert.equal(providerThreadId, candidate.providerThreadId);
+      assert.deepEqual(liveWebsiteFacts, websiteFacts);
+      return { topic: "adaptive_support", riskTier: "low", replyNeeded: true,
+        summary: "Verified answer.", draft: "The booking is confirmed.",
+        decisionSource: "adaptive_agent", decisionVersion: 3,
+        autoReply: true, status: "approved_for_guard", alertManagement: false };
+    },
+  });
+  assert.equal(readerCalls, 1);
+  assert.equal(decisionCalls, 1);
+  assert.equal(receipt.deliveredReplyCount, 0);
+});
+
 test("Ping retries run without new guest mail and cannot send in shadow mode", async () => {
   for (const mode of ["shadow", "live"]) {
     const database = emptyMailboxDatabase();
