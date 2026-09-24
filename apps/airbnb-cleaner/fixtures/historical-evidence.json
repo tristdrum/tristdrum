@@ -340,8 +340,8 @@
         { "confirmationCode": "HMINC002", "unitId": 3, "checkIn": "2026-08-13", "checkOut": "2026-08-15", "guestName": "Sierra Stay", "guests": "2 adults" }
       ],
       "actions": ["empty", "empty", "stayover"],
-      "messageIncludes": ["No Airbnb units need cleaning.", "Please do not come unless Jane or Tristan says otherwise."],
-      "messageExcludes": ["HMINC001"]
+      "messageIncludes": ["No Airbnb units need cleaning."],
+      "messageExcludes": ["HMINC001", "Please do not come unless Jane or Tristan says otherwise."]
     }
   }
 ]

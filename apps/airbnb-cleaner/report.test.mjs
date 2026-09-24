@@ -551,6 +551,22 @@ test("reproduces the July 28 checkout-only and turnover timeline", () => {
   assert.doesNotMatch(updatedMessage, /tomorrow|ngomso/i);
 });
 
+test("a no-work room plan never assigns or cancels a cleaner's shift", () => {
+  for (const [date, checkIn, checkOut] of [
+    ["2026-07-28", "2026-07-27", "2026-07-29"],
+    ["2026-09-24", "2026-09-22", "2026-09-25"],
+  ]) {
+    const target = parseISODate(date);
+    const stays = [1, 2, 3].map((unitId) => reservation({
+      unitId, guestName: `Guest ${unitId}`, guests: "1 adult", checkIn, checkOut,
+    }));
+    const message = buildMessage({ targetDate: target, unitReports: classifyUnits(stays, target), weather: dryWeather });
+    assert.match(message, /No Airbnb units need cleaning/);
+    assert.match(message, /Akukho zi-unit ze-Airbnb ekufuneka zenziwe/);
+    assert.doesNotMatch(message, /please .*come|still come|normal Tuesday work|umsebenzi wangoLwesibini/i);
+  }
+});
+
 test("accepted timing and bag-drop notes appear beneath the correct unit in English and Xhosa", () => {
   const unitReports = classifyUnits(turnoverReservations(), targetDate);
   const operationalNotes = [

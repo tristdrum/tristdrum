@@ -983,12 +983,9 @@ export function buildXhosaSummary(unitReports, weather, targetDate, operationalN
   const lines = ["*Xhosa:*"];
   const anyWork = hasAirbnbWork(unitReports);
   const anyStayover = hasStayovers(unitReports);
-  const isTuesday = targetDate.getDay() === 2;
 
   if (anyWork) {
     lines.push("- Kukho ii-unit ekufuneka zenziwe.");
-  } else if (isTuesday) {
-    lines.push("- Akukho zi-unit ze-Airbnb ekufuneka zenziwe, kodwa kusekho umsebenzi wangoLwesibini.");
   } else if (anyStayover) {
     lines.push("- Iindwendwe zisahleli kuphela. Akukho zi-unit ze-Airbnb ekufuneka zenziwe.");
   } else {
@@ -1032,7 +1029,6 @@ export function buildXhosaSummary(unitReports, weather, targetDate, operationalN
 }
 
 export function buildMessage({ targetDate, unitReports, weather, operationalNotes = [], isUpdate = false }) {
-  const isTuesday = targetDate.getDay() === 2;
   const anyWork = hasAirbnbWork(unitReports);
   const anyStayover = hasStayovers(unitReports);
   const lines = [];
@@ -1050,15 +1046,8 @@ export function buildMessage({ targetDate, unitReports, weather, operationalNote
   lines.push("");
 
   lines.push("*English:*");
-  if (!anyWork && isTuesday) {
+  if (!anyWork) {
     lines.push("- No Airbnb units need cleaning.");
-    lines.push("- Tuesday: please still come for the normal Tuesday work.");
-  } else if (!anyWork && anyStayover) {
-    lines.push("- No Airbnb units need cleaning.");
-    lines.push("- Please do not come unless Jane or Tristan says otherwise.");
-  } else if (!anyWork) {
-    lines.push("- No Airbnb units need cleaning.");
-    lines.push("- Please do not come unless Jane or Tristan says otherwise.");
   }
 
   for (const report of unitReports) {
