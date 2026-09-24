@@ -543,6 +543,13 @@ test("adjacent bookings for one verified Airbnb profile remain a stayover", () =
     const changed = classifyUnits([departing, { ...arriving, guestProfileId: unverified }], date);
     assert.equal(changed[2].action, "turnover");
   }
+  for (const changedDetails of [
+    { guests: "1 adult" },
+    { guestName: "Different Guest" },
+    { guests: "" },
+  ]) {
+    assert.equal(classifyUnits([departing, { ...arriving, ...changedDetails }], date)[2].action, "turnover");
+  }
   const moved = classifyUnits([departing, { ...arriving, unitId: 2 }], date);
   assert.equal(moved[2].action, "checkout");
   assert.equal(moved[1].action, "arrival");
