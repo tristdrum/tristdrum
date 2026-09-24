@@ -1,4 +1,4 @@
-import { propertyForListing } from "@tristdrum/airbnb-core";
+import { AIRBNB_PROPERTIES } from "@tristdrum/airbnb-core";
 
 const MAX_AGE_MS = 5 * 60 * 1000;
 
@@ -15,7 +15,7 @@ export function liveWebsiteObservationIsFresh(observedAt, now = new Date()) {
  *   checkIn: string, checkOut: string, verified: boolean, complete: boolean }} WebsiteReservation
  * @typedef {{ listingName: string, checkIn: string, checkOut: string,
  *   status: 'available'|'unavailable', verified: boolean, complete: boolean }} WebsiteCalendar
- * @typedef {{ source: 'airbnb_ui', providerThreadId: string, observedAt: string, requestedStay?: WebsiteStay,
+ * @typedef {{ source: 'airbnb_ui', providerThreadId: string, observedAt: string,
  *   reservation?: WebsiteReservation, calendar?: WebsiteCalendar }} LiveWebsiteFacts
  */
 
@@ -37,11 +37,12 @@ function stay(value, expectedListing) {
 
 /** Keep only fresh, complete, explicitly verified UI observations bound to this listing. */
 export function verifiedLiveWebsiteFacts(value, {
-  providerThreadId, reservationCode, listingName, now = new Date(),
+  providerThreadId, reservationCode, listingName, requestedCheckIn, requestedCheckOut,
+  now = new Date(),
 } = {}) {
   if (!value || typeof value !== "object" || value.source !== "airbnb_ui") return null;
   if (!providerThreadId || value.providerThreadId !== providerThreadId) return null;
-  const property = propertyForListing(listingName);
+  const property = AIRBNB_PROPERTIES.find((item) => item.listingName === listingName);
   if (!property || !liveWebsiteObservationIsFresh(value.observedAt, now)) return null;
   const observedAt = new Date(value.observedAt);
 
@@ -56,7 +57,9 @@ export function verifiedLiveWebsiteFacts(value, {
     ? { ...reservationStay, reservationCode, status: value.reservation.status, verified: true, complete: true }
     : null;
 
-  const requestedStay = stay(value.requestedStay, property.listingName);
+  const requestedStay = stay({
+    listingName, checkIn: requestedCheckIn, checkOut: requestedCheckOut,
+  }, property.listingName);
   const calendarStay = stay(value.calendar, property.listingName);
   const calendar = value.calendar?.verified === true
     && value.calendar?.complete === true

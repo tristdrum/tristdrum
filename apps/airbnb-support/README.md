@@ -40,8 +40,11 @@ Private Fly worker for Tristan's Airbnb conversation stream.
 `live-website-facts.mjs` is an unused pure validator for future Airbnb UI
 observations. Reservation status requires the exact conversation, reservation
 code, canonical listing, stay dates, explicit verified/complete status, and an
-observation no older than five minutes. Calendar availability requires a complete
-match to the guest's requested listing and dates. `booking-approval.mjs` is an
+observation no older than five minutes. The caller must supply the exact
+canonical listing name, plus `requestedCheckIn` and `requestedCheckOut` for
+calendar availability; dates repeated inside the UI payload are not request
+authority. Missing or mismatched caller dates make calendar status unusable.
+`booking-approval.mjs` is an
 unused pure policy recommendation (`approve` or `human_review`, never decline).
 Neither module is imported by the support agent, runner, delivery, or
 Management/Ping path. No browser read, acceptance write, or new guest-send path
