@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Airbnb Cloud Sign-In</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; color: #20262a; background: #f4f6f5; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header, footer { display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: #fff; border-bottom: 1px solid #d9dfdc; }
+    footer { border-top: 1px solid #d9dfdc; border-bottom: 0; flex-wrap: wrap; }
+    h1 { font-size: 16px; margin: 0 20px 0 0; font-weight: 650; }
+    main { max-width: 1320px; margin: 0 auto; padding: 12px; }
+    input, button { font: inherit; min-height: 36px; }
+    input { border: 1px solid #adbab3; border-radius: 4px; padding: 6px 10px; background: #fff; min-width: 190px; }
+    button { border: 1px solid #87968e; border-radius: 4px; padding: 6px 12px; background: #fff; cursor: pointer; }
+    button:hover { background: #e9f1ed; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    #start { color: #fff; background: #246b52; border-color: #246b52; }
+    #status { margin-left: auto; font-size: 13px; color: #4a5951; }
+    #screen { display: block; width: 100%; aspect-ratio: 8 / 5; object-fit: contain; background: #111; border: 1px solid #64736a; cursor: crosshair; }
+    #entry { flex: 1; min-width: 240px; }
+    @media (max-width: 600px) { header { flex-wrap: wrap; } #status { width: 100%; margin-left: 0; } }
+  </style>
+  <script src="/ui.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>Airbnb Cloud Sign-In</h1>
+    <button id="connect">Reconnect</button>
+    <button id="start" disabled>Start</button>
+    <button id="stop" disabled>Stop</button>
+    <span id="status" role="status">Disconnected</span>
+  </header>
+  <main><img id="screen" alt="Cloud browser view" draggable="false"></main>
+  <footer>
+    <input id="entry" type="password" autocomplete="off" spellcheck="false" aria-label="Text for cloud browser" placeholder="Type into focused cloud field">
+    <button id="type" disabled>Type</button>
+    <button data-key="Tab" disabled>Tab</button>
+    <button data-key="Enter" disabled>Enter</button>
+    <button data-key="Backspace" disabled>Backspace</button>
+    <button data-key="Escape" disabled>Escape</button>
+  </footer>
+</body>
+</html>
