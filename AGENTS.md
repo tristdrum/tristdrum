@@ -10,6 +10,7 @@ consolidated here; Min.cool supplies the scoped WhatsApp transport.
 | --- | --- |
 | Personal website and private dashboards, including `/dashboard/airbnb` | [web](web/README.md) |
 | Confirmed-reservation cleaner plans and delivery | [airbnb-cleaner](apps/airbnb-cleaner/README.md) |
+| Read-only Airbnb host-website browser pilot | [airbnb-browser](apps/airbnb-browser/README.md) |
 | Stock evidence, forecasts, and Management alerts | [airbnb-stock](apps/airbnb-stock/README.md) |
 | Guest conversations and guarded replies | [airbnb-support](apps/airbnb-support/README.md) |
 | Shared Airbnb parsing, domain logic, and providers | [airbnb-core](packages/airbnb-core/) |
@@ -38,6 +39,10 @@ is deployed, enabled, or healthy now.
 - Preserve cleaner confirmed-reservation checks, the shared delivery ledger,
   stable idempotency, and exact destination readback. Do not revive old Min
   schedules or duplicate the active personal delivery path.
+- Keep the browser pilot read-only until a fresh cloud login, complete live
+  calendar and conversation observations, cost measurements, and a single-writer
+  cutover are verified. Its synthetic fixtures and local rendering probes are
+  not evidence of an authenticated cloud booking or guest-action path.
 - Cleaning plans authorize communication of room work, not staffing decisions.
   Follow [cleaning-team authority](docs/AIRBNB_CLEANING_TEAM_AUTHORITY.md) before
   responding to an individual about attendance, shifts, or temporary cover.
@@ -57,6 +62,7 @@ is deployed, enabled, or healthy now.
 Run commands from the repository root. Select the tests for the changed area:
 
 - Cleaner: `npm run airbnb:cleaner:test`; shared logic: `npm run airbnb:core:test`.
+- Browser pilot: `npm --prefix apps/airbnb-browser test`.
 - Database access unit tests: `npm run airbnb:db:unit-test`.
 - Stock: `npm run airbnb:stock:test`; support: `npm run airbnb:support:test`.
 - Dashboard: `npm run airbnb:web:test`; finance: `npm run finance:test`.
