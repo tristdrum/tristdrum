@@ -26,9 +26,14 @@ test("configuration fixes the three listing URLs and rejects foreign hosts", () 
   };
   assert.equal(loadConfig(env).calendarUrls[3], "https://www.airbnb.co.za/multicalendar/103");
   assert.equal(loadConfig(env).bootstrapEnabled, false);
-  const bootstrap = loadConfig({ ...env, AIRBNB_BROWSER_BOOTSTRAP_ENABLED: "true" });
+  const blocked = loadConfig({ ...env, AIRBNB_BROWSER_BOOTSTRAP_ENABLED: "true" });
+  assert.equal(blocked.bootstrapEnabled, false);
+  assert.equal(blocked.bootstrapBlocked, true);
+  const bootstrap = loadConfig({ ...env, AIRBNB_BROWSER_BOOTSTRAP_ENABLED: "true",
+    AIRBNB_BROWSER_AUTH_POST_URLS: JSON.stringify(["https://www.airbnb.co.za/api/v2/auth/synthetic-mfa"]) });
   assert.equal(bootstrap.bootstrapHost, "fly-local-6pn");
   assert.equal(bootstrap.bootstrapPort, 3001);
+  assert.equal(bootstrap.authPostUrls.length, 1);
   assert.throws(() => loadConfig({ ...env, AIRBNB_BROWSER_OPERATOR_TOKEN: env.AIRBNB_BROWSER_MCP_TOKEN }), /distinct/);
   assert.throws(() => loadConfig({ ...env, AIRBNB_BROWSER_CALENDAR_URLS: JSON.stringify({
     1: "https://evil.example/multicalendar/101", 2: env.AIRBNB_BROWSER_MESSAGES_URL, 3: "https://www.airbnb.co.za/multicalendar/103",

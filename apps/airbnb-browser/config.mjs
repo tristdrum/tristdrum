@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { validateAuthPostUrls } from "./bootstrap-network.mjs";
 
 export const LISTINGS = Object.freeze([
   { unitNumber: 1, name: "Bougainvillea Courtyard Studio" },
@@ -36,6 +37,11 @@ export function loadConfig(env = process.env) {
     if (typeof urls?.[unitNumber] !== "string") throw new Error(`Missing calendar URL for unit ${unitNumber}`);
     return [unitNumber, airbnbUrl(urls[unitNumber], "/multicalendar/")];
   }));
+  const bootstrapRequested = env.AIRBNB_BROWSER_BOOTSTRAP_ENABLED === "true";
+  let authPostUrls;
+  try { authPostUrls = validateAuthPostUrls(JSON.parse(env.AIRBNB_BROWSER_AUTH_POST_URLS ?? "[]")); }
+  catch { throw new Error("AIRBNB_BROWSER_AUTH_POST_URLS must contain exact reviewed login/MFA URLs"); }
+  const bootstrapEnabled = bootstrapRequested && authPostUrls.length > 0;
   return Object.freeze({
     dataKey,
     mcpToken,
@@ -44,7 +50,9 @@ export function loadConfig(env = process.env) {
     messagesUrl: airbnbUrl(env.AIRBNB_BROWSER_MESSAGES_URL ?? "https://www.airbnb.co.za/hosting/messages", "/hosting/messages"),
     statePath: resolve(env.AIRBNB_BROWSER_STATE_PATH ?? "/data/browser-state.enc"),
     port: Number(env.PORT ?? 3000),
-    bootstrapEnabled: env.AIRBNB_BROWSER_BOOTSTRAP_ENABLED === "true",
+    bootstrapEnabled,
+    bootstrapBlocked: bootstrapRequested && !bootstrapEnabled,
+    authPostUrls,
     bootstrapPort: 3001,
     bootstrapHost: "fly-local-6pn",
   });

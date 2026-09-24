@@ -3,21 +3,22 @@ let active = false;
 let expiresAt = null;
 let frameUrl = null;
 let frameBusy = false;
+let outcome = null;
 const element = (id) => document.getElementById(id);
 
 function update() {
   element("start").disabled = !connected || active;
-  element("finish").disabled = !active;
   element("stop").disabled = !active;
   element("type").disabled = !active;
   for (const button of document.querySelectorAll("[data-key]")) button.disabled = !active;
-  element("status").textContent = !connected ? "Disconnected" : !active ? "Ready" :
+  element("status").textContent = !connected ? "Disconnected" : !active ?
+    outcome === "saved" ? "Saved" : outcome === "unavailable" ? "Sign-in not saved" : "Ready" :
     `Session active - ${Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000))}s remaining`;
 }
 
 async function api(path, { method = "GET", body, image = false } = {}) {
   const response = await fetch(`/api/${path}`, { method, cache: "no-store",
-    credentials: "omit", headers: body ? { "Content-Type": "application/json" } : {},
+    credentials: "same-origin", headers: body ? { "Content-Type": "application/json" } : {},
     ...(body ? { body: JSON.stringify(body) } : {}) });
   if (!response.ok) throw new Error("unavailable");
   return image ? response.blob() : response.json();
@@ -41,6 +42,7 @@ async function connect() {
     connected = true;
     active = status.active;
     expiresAt = status.expiresAt;
+    outcome = status.outcome;
   } catch { connected = false; active = false; }
   update();
 }
@@ -52,18 +54,10 @@ element("start").addEventListener("click", async () => {
     const result = await api("start", { method: "POST" });
     active = result.active;
     expiresAt = result.expiresAt;
+    outcome = result.outcome;
     update();
     await frame();
   } catch { element("status").textContent = "Start unavailable"; }
-});
-
-element("finish").addEventListener("click", async () => {
-  try {
-    await api("finish", { method: "POST" });
-    active = false;
-    update();
-    element("status").textContent = "Saved";
-  } catch { element("status").textContent = "Sign-in not verified"; }
 });
 
 element("stop").addEventListener("click", async () => {
@@ -98,6 +92,6 @@ for (const button of document.querySelectorAll("[data-key]")) button.addEventLis
   catch { element("status").textContent = "Input unavailable"; }
 });
 
-setInterval(() => { if (active) { update(); void frame(); } }, 1000);
+setInterval(() => { void connect().then(() => { if (active) void frame(); }); }, 1000);
 update();
 void connect();

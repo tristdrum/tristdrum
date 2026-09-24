@@ -5,6 +5,7 @@ import { BootstrapController, createBootstrapApp } from "./bootstrap.mjs";
 
 try {
   const config = loadConfig();
+  if (config.bootstrapBlocked) process.stderr.write("Auth viewer disabled: exact login/MFA POST URLs have not been reviewed.\n");
   if (config.bootstrapEnabled && process.env.FLY_APP_NAME !== "tristdrum-airbnb-browser-pilot") {
     throw new Error("Bootstrap requires the pilot Fly runtime");
   }
@@ -13,7 +14,7 @@ try {
   const server = createApp(service, { mcpToken: config.mcpToken, operatorToken: config.operatorToken }).listen(config.port, "0.0.0.0");
   let bootstrapController; let bootstrapServer;
   if (config.bootstrapEnabled) {
-    bootstrapController = new BootstrapController(service);
+    bootstrapController = new BootstrapController(service, { authPostUrls: config.authPostUrls });
     bootstrapServer = createBootstrapApp(bootstrapController, config.operatorToken).listen(config.bootstrapPort, config.bootstrapHost);
   }
   service.startPolling();

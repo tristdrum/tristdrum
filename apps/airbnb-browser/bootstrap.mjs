@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import express from "express";
 import { chromium } from "playwright";
 import { persistFreshCloudLogin } from "./auth-state.mjs";
-import { allowedBootstrapRequest, installBootstrapNavigationGate, startBootstrapEgressProxy } from "./bootstrap-network.mjs";
+import { allowedBootstrapRequest, installBootstrapNavigationGate, startBootstrapEgressProxy,
+  validateAuthPostUrls } from "./bootstrap-network.mjs";
 
 const TTL_MS = 10 * 60_000;
 const MAX_INPUT_ACTIONS = 300;
@@ -14,7 +15,8 @@ const UI_SCRIPT = readFileSync(new URL("./bootstrap-ui.js", import.meta.url), "u
 export class BootstrapController {
   constructor(service, { launch = chromium.launch.bind(chromium), proxyFactory = startBootstrapEgressProxy,
     gateFactory = installBootstrapNavigationGate, now = () => Date.now(), setTimer = setTimeout,
-    clearTimer = clearTimeout, ttlMs = TTL_MS, env = process.env } = {}) {
+    clearTimer = clearTimeout, setPoll = setInterval, clearPoll = clearInterval,
+    ttlMs = TTL_MS, env = process.env, authPostUrls = [] } = {}) {
     this.service = service;
     this.launch = launch;
     this.proxyFactory = proxyFactory;
@@ -22,16 +24,21 @@ export class BootstrapController {
     this.now = now;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
+    this.setPoll = setPoll;
+    this.clearPoll = clearPoll;
     if (!Number.isInteger(ttlMs) || ttlMs < 1_000) throw new Error("Invalid bootstrap TTL");
     this.ttlMs = Math.min(ttlMs, TTL_MS);
     this.env = env;
+    this.authPostUrls = validateAuthPostUrls(authPostUrls);
     this.session = null;
     this.starting = false;
     this.closing = null;
+    this.lastOutcome = null;
   }
 
   status() {
-    return { active: Boolean(this.session), expiresAt: this.session?.expiresAt ?? null };
+    return { active: Boolean(this.session), expiresAt: this.session?.expiresAt ?? null,
+      outcome: this.lastOutcome };
   }
 
   #active() {
@@ -58,9 +65,28 @@ export class BootstrapController {
       await session.page.locator('a[href*="/users/profile/about"]').count() > 0;
   }
 
+  async #captureSignedIn(session) {
+    if (this.session !== session || session.capturePromise || session.locked) return session.capturePromise;
+    if (!await this.#signedIn(session)) return null;
+    if (this.session !== session || session.capturePromise || this.now() >= session.expiresAt) return null;
+    session.locked = true;
+    session.capturePromise = (async () => {
+      try {
+        if (await session.page.locator('iframe[src*="captcha" i], iframe[src*="recaptcha" i], iframe[src*="hcaptcha" i]').count()) {
+          throw new Error("challenge_detected");
+        }
+        await persistFreshCloudLogin(session.context, this.service, this.env);
+        this.lastOutcome = "saved";
+      } catch { this.lastOutcome = "unavailable"; }
+      finally { await this.#closeSession(session); }
+    })();
+    return session.capturePromise;
+  }
+
   async start() {
     if (this.session || this.starting || this.closing) throw new Error("session_active");
     this.starting = true;
+    this.lastOutcome = null;
     let acquired = false;
     let proxy; let browser; let context; let page; let removeGate;
     const typedValues = new Set();
@@ -78,15 +104,21 @@ export class BootstrapController {
         if (frame === page.mainFrame() && !allowedBootstrapRequest(frame.url(), "GET", "Document")) void this.stop();
       });
       removeGate = await this.gateFactory(context, page, {
-        policy: (url, method, type) => allowedBootstrapRequest(url, method, type) &&
+        policy: (url, method, type) => allowedBootstrapRequest(url, method, type, this.authPostUrls) &&
           ![...typedValues].some((value) => url.includes(value) || url.includes(encodeURIComponent(value))),
         onBlock: () => { void this.stop(); },
       });
       const expiresAt = this.now() + this.ttlMs;
-      this.session = { proxy, browser, context, page, removeGate, typedValues, expiresAt, actions: 0, frames: 0,
-        timer: this.setTimer(() => { void this.stop(); }, this.ttlMs), inputQueue: Promise.resolve() };
+      const session = { proxy, browser, context, page, removeGate, typedValues, expiresAt, actions: 0, frames: 0,
+        timer: this.setTimer(() => { void this.stop(); }, this.ttlMs), poll: null,
+        inputQueue: Promise.resolve(), locked: false, capturePromise: null };
+      this.session = session;
       await page.goto("https://www.airbnb.co.za/hosting", { waitUntil: "domcontentloaded", timeout: 20_000 });
-      return { active: true, expiresAt };
+      await this.#captureSignedIn(session);
+      if (this.session === session) {
+        session.poll = this.setPoll(() => { void this.#captureSignedIn(session).catch(() => this.stop()); }, 250);
+      }
+      return this.status();
     } catch {
       if (this.session) await this.stop();
       else {
@@ -100,6 +132,9 @@ export class BootstrapController {
   async frame() {
     const session = this.#active();
     await this.#rejectChallenge(session);
+    if (session.locked) throw new Error("session_unavailable");
+    await this.#captureSignedIn(session);
+    if (session.locked) throw new Error("session_unavailable");
     if (++session.frames > MAX_FRAMES) { await this.stop(); throw new Error("session_unavailable"); }
     return session.page.screenshot({ type: "jpeg", quality: 75, animations: "disabled", timeout: 5_000 });
   }
@@ -110,7 +145,9 @@ export class BootstrapController {
     const run = async () => {
       this.#active();
       await this.#rejectChallenge(session);
-      if (await this.#signedIn(session)) throw new Error("sign_in_ready_to_finish");
+      if (session.locked) throw new Error("session_unavailable");
+      await this.#captureSignedIn(session);
+      if (session.locked) throw new Error("session_unavailable");
       if (action?.kind === "click" && Number.isInteger(action.x) && Number.isInteger(action.y) &&
           action.x >= 0 && action.x < 1280 && action.y >= 0 && action.y < 800) {
         await session.page.mouse.click(action.x, action.y);
@@ -120,6 +157,7 @@ export class BootstrapController {
       } else if (action?.kind === "key" && ["Enter", "Tab", "Shift+Tab", "Escape", "Backspace", "ArrowUp", "ArrowDown"].includes(action.key)) {
         await session.page.keyboard.press(action.key);
       } else throw new Error("invalid_input");
+      await this.#captureSignedIn(session);
     };
     const result = session.inputQueue.then(run);
     session.inputQueue = result.catch(() => {});
@@ -127,36 +165,26 @@ export class BootstrapController {
     return { ok: true };
   }
 
-  async finish() {
-    const session = this.#active();
-    await session.inputQueue;
-    try {
-      await this.#rejectChallenge(session);
-      await session.page.goto("https://www.airbnb.co.za/hosting", { waitUntil: "domcontentloaded", timeout: 15_000 });
-      await session.page.locator('a[href*="/calendar-router"]').first().waitFor({ state: "visible", timeout: 5_000 });
-      if (!await this.#signedIn(session)) {
-        throw new Error("not_authenticated");
-      }
-      await persistFreshCloudLogin(session.context, this.service, this.env);
-      await this.stop();
-      return { saved: true };
-    } catch {
-      throw new Error("sign_in_not_verified");
-    }
-  }
-
-  async stop() {
+  async #closeSession(session) {
     if (this.closing) return this.closing;
-    const session = this.session;
+    if (this.session !== session) return;
     this.session = null;
-    if (!session) return;
+    session.locked = true;
     session.typedValues.clear();
     this.clearTimer(session.timer);
+    if (session.poll !== null) this.clearPoll(session.poll);
     this.closing = (async () => {
       await Promise.allSettled([session.removeGate?.(), session.context.close(), session.browser.close(), session.proxy.close()]);
       await this.service.endBootstrap();
     })();
     try { await this.closing; } finally { this.closing = null; }
+  }
+
+  async stop() {
+    const session = this.session;
+    if (!session) return this.closing;
+    if (session.capturePromise) return session.capturePromise;
+    return this.#closeSession(session);
   }
 }
 
@@ -195,10 +223,6 @@ export function createBootstrapApp(controller, operatorToken) {
   app.post("/api/input", async (request, response) => {
     try { response.json(await controller.input(request.body)); }
     catch { response.status(400).json({ error: "input_unavailable" }); }
-  });
-  app.post("/api/finish", async (_request, response) => {
-    try { response.json(await controller.finish()); }
-    catch { response.status(409).json({ error: "sign_in_not_verified" }); }
   });
   app.post("/api/stop", async (_request, response) => { await controller.stop(); response.json({ stopped: true }); });
   app.use((error, _request, response, _next) => { if (!response.headersSent) response.status(400).json({ error: "invalid_request" }); });

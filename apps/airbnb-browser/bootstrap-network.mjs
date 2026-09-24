@@ -8,16 +8,38 @@ export function allowedBootstrapHost(hostname) {
     host === "muscache.com" || host.endsWith(".muscache.com");
 }
 
-export function allowedBootstrapRequest(value, method, resourceType) {
+const AUTH_POST_PATH = /^\/(?:api\/v\d+\/)?(?:auth|login|authenticate|verification|verify|identity|mfa)(?:\/[a-z0-9_-]+)*$/;
+const FORBIDDEN_AUTH_SEGMENT = /message|reservation|booking|calendar|guest|approve|cancel|payout|payment|thread/;
+
+export function validateAuthPostUrls(value) {
+  if (!Array.isArray(value) || value.length > 12 || new Set(value).size !== value.length) {
+    throw new Error("AIRBNB_BROWSER_AUTH_POST_URLS must be a list of distinct exact URLs");
+  }
+  for (const entry of value) {
+    let url;
+    try { url = new URL(entry); } catch { throw new Error("Invalid auth POST URL"); }
+    if (typeof entry !== "string" || url.href !== entry || url.protocol !== "https:" ||
+        url.hostname !== "www.airbnb.co.za" || url.port || url.search || url.hash ||
+        url.username || url.password || !AUTH_POST_PATH.test(url.pathname) ||
+        FORBIDDEN_AUTH_SEGMENT.test(url.pathname)) {
+      throw new Error("Auth POST URL must be an exact reviewed Airbnb login/MFA endpoint");
+    }
+  }
+  return Object.freeze([...value]);
+}
+
+export function allowedBootstrapRequest(value, method, resourceType, authPostUrls = []) {
   let url;
   try { url = new URL(value); } catch { return false; }
   if (url.protocol !== "https:" || url.username || url.password || url.hash ||
       !allowedBootstrapHost(url.hostname) || !["GET", "HEAD", "OPTIONS", "POST"].includes(method)) return false;
   if ([...url.searchParams.keys()].some((key) => /pass|otp|token|code|secret|credential|pin/i.test(key))) return false;
+  if (method === "POST" && (url.search || !authPostUrls.includes(url.href))) return false;
   if (resourceType === "Document" || resourceType === "document") {
     return url.hostname === "www.airbnb.co.za" &&
       (url.pathname === "/" || url.pathname === "/hosting" ||
-        /^\/(?:login|signup|auth|authenticate|verify|verification|identity)(?:\/|$)/.test(url.pathname));
+        /^\/(?:login|signup|auth|authenticate|verify|verification|identity)(?:\/|$)/.test(url.pathname) ||
+        method === "POST" && authPostUrls.includes(url.href));
   }
   return true;
 }
