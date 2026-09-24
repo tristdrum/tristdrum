@@ -16,6 +16,10 @@ reservation evidence supplies the current dates and guest count. A stored row at
 the notice's timestamp is not proof that the alteration was reconciled. Preserve
 the original notice and link the later verified evidence to the same booking.
 
+Adjacent confirmed bookings in the same studio form a continuing stay only when
+the verified Airbnb reservation snapshots carry the same nonempty guest profile
+ID. A shared name without that identity is not enough to suppress turnover work.
+
 Scheduled attempts reuse a content-occurrence WhatsApp idempotency key, so
 retries remain stable while a later `B -> C -> B` reversion gets a new key. Final
 failure alerts are sent only to the private destination and count as delivered

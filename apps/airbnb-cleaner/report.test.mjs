@@ -519,6 +519,32 @@ test("a date-less cancellation removes the matching active confirmation", () => 
   assert.deepEqual(mergeReservations([active, cancellation]), []);
 });
 
+test("adjacent bookings for one verified Airbnb profile remain a stayover", () => {
+  const date = parseISODate("2026-09-21");
+  const departing = {
+    ...reservation({ unitId: 3, guestName: "Example Guest", guests: "2 adults", checkIn: "2026-09-20", checkOut: "2026-09-21" }),
+    confirmationCode: "HMEXTEND01", guestProfileId: "123456789",
+  };
+  const arriving = {
+    ...reservation({ unitId: 3, guestName: "Example Guest", guests: "2 adults", checkIn: "2026-09-21", checkOut: "2026-09-22" }),
+    confirmationCode: "HMEXTEND02", guestProfileId: "123456789",
+  };
+  const reports = classifyUnits([departing, arriving], date);
+  assert.equal(reports[2].action, "stayover");
+  assert.equal(reports[2].arrivals.length, 0);
+  assert.equal(reports[2].checkouts.length, 0);
+  assert.equal(reports[2].stayovers.length, 1);
+  assert.match(buildMessage({ targetDate: date, unitReports: reports, weather: dryWeather }), /No Airbnb units need cleaning/);
+
+  for (const unverified of [null, "987654321"]) {
+    const changed = classifyUnits([departing, { ...arriving, guestProfileId: unverified }], date);
+    assert.equal(changed[2].action, "turnover");
+  }
+  const moved = classifyUnits([departing, { ...arriving, unitId: 2 }], date);
+  assert.equal(moved[2].action, "checkout");
+  assert.equal(moved[1].action, "arrival");
+});
+
 test("reproduces the July 28 checkout-only and turnover timeline", () => {
   const checkoutReports = classifyUnits(checkoutReservations(), targetDate);
   assert.deepEqual(checkoutReports.map((report) => report.action), ["checkout", "checkout", "checkout"]);
