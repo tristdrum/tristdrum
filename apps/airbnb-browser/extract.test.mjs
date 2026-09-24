@@ -1,86 +1,54 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { chromium } from "playwright";
-import { ExtractionError, extractCalendarMonth, extractInbox, extractReservation, extractThread, isoDate } from "./extract.mjs";
+import { ExtractionError, extractInbox, extractReservation, extractThread, isoDate } from "./extract.mjs";
 
 const listing = { unitNumber: 2, name: "The Spekboom Studio" };
+const barSummary = "Reservation Synthetic Guest Checkin on Sep 24, 2026, checkout on Sep 27, 2026.";
 
 async function withPage(run) {
   const browser = await chromium.launch();
-  try {
-    const page = await browser.newPage();
-    await run(page);
-  } finally { await browser.close(); }
+  try { await run(await browser.newPage()); }
+  finally { await browser.close(); }
 }
 
-function calendarHtml({ missingDay = false, unknown = false } = {}) {
-  const cells = Array.from({ length: missingDay ? 29 : 30 }, (_, index) => {
-    const date = `2026-09-${String(index + 1).padStart(2, "0")}`;
-    const status = index === 1 ? "reserved" : unknown && index === 2 ? "mystery" : "available";
-    return `<div role="gridcell" data-date="${date}" data-status="${status}">${date}</div>`;
-  }).join("");
-  return `<h1>The Spekboom Studio</h1><h2>September 2026</h2><div role="grid">${cells}</div><a href="https://www.airbnb.com/hosting/reservations/details/123">Reservation</a>`;
+function detailHtml(code, profile = "") {
+  return `<title>Edit calendar for 'The Spekboom Studio' - Airbnb</title>${profile}
+    <div><div id="hosting-details-reservation-info-row-confirmation-code-row-title">Confirmation code</div><div>${code}</div></div>
+    <span data-testid="guestFirstName">Synthetic</span>`;
 }
 
-test("calendar extractor records every day and reservation link", async () => withPage(async (page) => {
-  await page.setContent(calendarHtml());
-  const month = await extractCalendarMonth(page, listing.name);
-  assert.equal(month.month, "2026-09");
-  assert.equal(month.days.length, 30);
-  assert.equal(month.days[1].status, "reserved");
-  assert.equal(month.reservationUrls.length, 1);
-}));
-
-test("calendar layout changes and partial months fail closed", async () => withPage(async (page) => {
-  await page.setContent(calendarHtml({ missingDay: true }));
-  await assert.rejects(extractCalendarMonth(page, listing.name), ExtractionError);
-  await page.setContent(calendarHtml({ unknown: true }));
-  await assert.rejects(extractCalendarMonth(page, listing.name), ExtractionError);
-  await page.setContent(calendarHtml().replace("The Spekboom Studio", "Wrong listing"));
-  await assert.rejects(extractCalendarMonth(page, listing.name), ExtractionError);
-}));
-
-test("reservation extractor requires exact labelled booking fields", async () => withPage(async (page) => {
-  const html = `<a data-testid="guest-profile-link" href="https://www.airbnb.com/users/show/000000001">View guest profile</a>
-    <dl><dt>Confirmation code</dt><dd>TESTCODE1</dd><dt>Guest</dt><dd>Synthetic Guest</dd>
-    <dt>Listing</dt><dd>The Spekboom Studio</dd><dt>Check-in</dt><dd>24 Sep 2026</dd>
-    <dt>Check-out</dt><dd>27 Sep 2026</dd><dt>Status</dt><dd>Confirmed</dd></dl>`;
-  await page.setContent(html);
-  assert.deepEqual(await extractReservation(page, listing), {
-    confirmationCode: "TESTCODE1", unitNumber: 2, listingName: listing.name, guestName: "Synthetic Guest", guestProfileId: "000000001",
-    checkIn: "2026-09-24", checkOut: "2026-09-27", status: "confirmed",
+test("reservation code is cross-checked against route and guest profile link", async () => withPage(async (page) => {
+  await page.route("https://www.airbnb.co.za/**", (route) => route.fulfill({ contentType: "text/html", body: detailHtml("TESTCODE1", '<a href="https://www.airbnb.co.za/users/profile/000000001">Profile</a>') }));
+  await page.goto("https://www.airbnb.co.za/multicalendar/102/reservation/TESTCODE1");
+  assert.deepEqual(await extractReservation(page, listing, barSummary), {
+    confirmationCode: "TESTCODE1", unitNumber: 2, listingName: listing.name, guestName: "Synthetic",
+    guestProfileId: "000000001", checkIn: "2026-09-24", checkOut: "2026-09-27", status: "calendar_reservation",
   });
-  await page.setContent(html.replace("TESTCODE1", ""));
-  await assert.rejects(extractReservation(page, listing), ExtractionError);
+  await page.setContent(detailHtml("WRONGCODE", ""));
+  await assert.rejects(extractReservation(page, listing, barSummary), ExtractionError);
   assert.throws(() => isoDate("31 Sep 2026"), ExtractionError);
 }));
 
-test("adjacent synthetic bookings share identity only through a visible profile link", async () => withPage(async (page) => {
-  const detail = (code, link = "") => `${link}<dl><dt>Confirmation code</dt><dd>${code}</dd><dt>Guest</dt><dd>Same Display Name</dd>
-    <dt>Listing</dt><dd>The Spekboom Studio</dd><dt>Check-in</dt><dd>24 Sep 2026</dd>
-    <dt>Check-out</dt><dd>25 Sep 2026</dd><dt>Status</dt><dd>Confirmed</dd></dl>`;
-  const link = '<a data-testid="guest-profile-link" href="https://www.airbnb.com/users/show/000000001">View guest profile</a>';
-  await page.setContent(detail("TESTCODE1", link));
-  const first = await extractReservation(page, listing);
-  await page.setContent(detail("TESTCODE2", link));
-  const second = await extractReservation(page, listing);
-  assert.equal(first.guestProfileId, second.guestProfileId);
-  await page.setContent(detail("TESTCODE3"));
-  assert.equal((await extractReservation(page, listing)).guestProfileId, null);
-  await page.setContent(detail("TESTCODE4", '<a data-testid="guest-profile-link" style="display:none" href="https://www.airbnb.com/users/show/000000001">Hidden profile</a>'));
-  assert.equal((await extractReservation(page, listing)).guestProfileId, null);
-  await page.setContent(detail("TESTCODE5", `${link}<a data-testid="guest-profile-link" href="https://www.airbnb.com/users/show/000000002">Other profile</a>`));
-  assert.equal((await extractReservation(page, listing)).guestProfileId, null);
+test("same guest identity is link-derived, never display-name-derived", async () => withPage(async (page) => {
+  await page.route("https://www.airbnb.co.za/**", (route) => route.fulfill({ contentType: "text/html", body: detailHtml("TESTCODE1") }));
+  await page.goto("https://www.airbnb.co.za/multicalendar/102/reservation/TESTCODE1");
+  const link = '<a href="https://www.airbnb.co.za/users/profile/000000001">Profile</a>';
+  await page.setContent(detailHtml("TESTCODE1", link));
+  assert.equal((await extractReservation(page, listing, barSummary)).guestProfileId, "000000001");
+  await page.setContent(detailHtml("TESTCODE1"));
+  assert.equal((await extractReservation(page, listing, barSummary)).guestProfileId, null);
+  await page.setContent(detailHtml("TESTCODE1", `<div style="display:none">${link}</div>`));
+  assert.equal((await extractReservation(page, listing, barSummary)).guestProfileId, null);
+  await page.setContent(detailHtml("TESTCODE1", `${link}<a href="https://www.airbnb.co.za/users/profile/000000002">Other profile</a>`));
+  assert.equal((await extractReservation(page, listing, barSummary)).guestProfileId, null);
 }));
 
-test("inbox and thread extraction reject unbounded pagination or missing message fields", async () => withPage(async (page) => {
-  await page.setContent(`<h1>Messages</h1><a href="https://www.airbnb.com/hosting/messages/123">Thread</a>`);
-  assert.deepEqual(await extractInbox(page), ["https://www.airbnb.com/hosting/messages/123"]);
-  await page.setContent(`<h1>Messages</h1><button aria-label="Load more">More</button><a href="https://www.airbnb.com/hosting/messages/123">Thread</a>`);
+test("real-shape inbox IDs are scoped; uncalibrated message history fails closed", async () => withPage(async (page) => {
+  await page.setContent('<h1>Messages</h1><div id="list_inbox" aria-label="List of Conversations"><div data-listrow><div data-testid="inbox_list_123"></div></div></div>');
+  assert.deepEqual(await extractInbox(page), ["https://www.airbnb.co.za/hosting/messages/123"]);
+  await page.setContent('<h1>Messages</h1><div id="list_inbox" aria-label="List of Conversations"><div data-testid="inbox_list_123"></div></div><button aria-label="Load more">More</button>');
   await assert.rejects(extractInbox(page), ExtractionError);
-  const thread = `<h1>The Spekboom Studio</h1><article data-message-id="m1" data-sender="Guest"><time datetime="2026-09-24T08:00:00Z"></time><p>Can I arrive at 15:00?</p></article>`;
-  await page.setContent(thread);
-  assert.equal((await extractThread(page, "https://www.airbnb.com/hosting/messages/123")).messages[0].body, "Can I arrive at 15:00?");
-  await page.setContent(thread.replace("data-sender=\"Guest\"", ""));
-  await assert.rejects(extractThread(page, "https://www.airbnb.com/hosting/messages/123"), ExtractionError);
+  await page.setContent('<div data-testid="message-list"><div data-testid="MessageOuterRegistryWrapperSpacingProps"><div data-testid="html-rich-text-container">Synthetic text</div></div></div>');
+  await assert.rejects(extractThread(page, "https://www.airbnb.co.za/hosting/messages/123"), /need live calibration/);
 }));

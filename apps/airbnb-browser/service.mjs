@@ -1,5 +1,5 @@
-import { MAX_AGE_MS, INTERVAL_MS } from "./config.mjs";
-import { budgetStatus, currentBudget, addTransfer } from "./budget.mjs";
+import { MAX_AGE_MS } from "./config.mjs";
+import { budgetStatus, currentBudget, addTransfer, reserveEventModelCost } from "./budget.mjs";
 import { EncryptedStore } from "./encrypted-store.mjs";
 import { readCalendars, readMessages, AuthExpiredError } from "./browser.mjs";
 import { ExtractionError } from "./extract.mjs";
@@ -42,7 +42,6 @@ export class BrowserPilotService {
     this.now = now;
     this.state = null;
     this.inFlight = Promise.resolve();
-    this.timers = [];
   }
 
   async init() {
@@ -50,16 +49,6 @@ export class BrowserPilotService {
     this.state = { auth: stored.auth ?? null, snapshots: stored.snapshots ?? {}, attempts: stored.attempts ?? {},
       budget: currentBudget(stored.budget, this.now()), counts: stored.counts ?? { refreshes: 0, failures: 0 } };
   }
-
-  start() {
-    if (!this.state) throw new Error("Initialize service before starting");
-    if (this.state.auth) void this.refresh("all").catch(() => {});
-    for (const kind of ["messages", "calendar"]) {
-      this.timers.push(setInterval(() => { void this.refresh(kind).catch(() => {}); }, INTERVAL_MS[kind]));
-    }
-  }
-
-  stop() { for (const timer of this.timers) clearInterval(timer); this.timers = []; }
 
   refresh(kind, { force = false } = {}) {
     if (!["calendar", "messages", "all"].includes(kind)) throw new Error("Unknown refresh kind");
@@ -131,6 +120,23 @@ export class BrowserPilotService {
     const result = this.inFlight.then(run);
     this.inFlight = result.catch(() => {});
     return result;
+  }
+
+  reserveAgentCost(maxUsd) {
+    const run = async () => {
+      this.state.budget = reserveEventModelCost(this.state.budget, maxUsd, this.now());
+      await this.store.write(this.state);
+      return budgetStatus(this.state.budget, this.now());
+    };
+    const result = this.inFlight.then(run);
+    this.inFlight = result.catch(() => {});
+    return result;
+  }
+
+  ready() {
+    const status = this.status();
+    return status.auth === "configured" && !status.budget.exhausted &&
+      Object.values(status.kinds).every((kind) => kind.fresh);
   }
 
   status() {

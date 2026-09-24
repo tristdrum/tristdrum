@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { LISTINGS } from "./config.mjs";
 import { monthKey } from "./budget.mjs";
-import { ExtractionError, extractCalendarMonth, extractInbox, extractReservation, extractThread } from "./extract.mjs";
+import { ExtractionError, extractCalendarViewport, extractInbox, extractReservation, extractThread } from "./extract.mjs";
 
 const MAX_RESERVATIONS = 40;
 const MAX_THREADS = 30;
@@ -16,7 +16,8 @@ export function allowedReadRequest(url, method, resourceType) {
   let parsed;
   try { parsed = new URL(url); } catch { return false; }
   return parsed.protocol === "https:" &&
-    (parsed.hostname === "airbnb.com" || parsed.hostname.endsWith(".airbnb.com") ||
+    (parsed.hostname === "airbnb.co.za" || parsed.hostname.endsWith(".airbnb.co.za") ||
+      parsed.hostname === "airbnb.com" || parsed.hostname.endsWith(".airbnb.com") ||
       parsed.hostname === "muscache.com" || parsed.hostname.endsWith(".muscache.com")) &&
     ["GET", "HEAD", "OPTIONS"].includes(method) &&
     !["image", "font", "media", "websocket", "eventsource"].includes(resourceType);
@@ -35,22 +36,15 @@ export async function installReadOnlyNetwork(context, transferredBytes = () => 0
 
 async function visit(page, url) {
   const target = new URL(url);
-  if (target.hostname !== "www.airbnb.com" || !/^\/hosting\/(?:calendar(?:\/[A-Za-z0-9-]+)?|messages(?:\/\d+)?|reservations\/details\/[A-Za-z0-9-]+)\/?$/.test(target.pathname)) {
+  if (target.hostname !== "www.airbnb.co.za" || !/^\/(?:multicalendar\/\d+(?:\/reservation\/[A-Z0-9]{8,16})?|hosting\/messages(?:\/\d+)?)\/?$/.test(target.pathname)) {
     throw new ExtractionError("Browser navigation is outside the read-only allowlist");
   }
   const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20_000 });
   if (!response || response.status() >= 400) throw new ExtractionError("Airbnb page did not load");
   const current = new URL(page.url());
-  if (current.hostname !== "www.airbnb.com" || /\/login|\/authenticate/.test(current.pathname)) throw new AuthExpiredError();
-  await page.locator("body").waitFor({ state: "visible", timeout: 10_000 });
-}
-
-async function revealConfirmationCode(page) {
-  if (await page.getByText(/^confirmation code$/i).first().isVisible()) return;
-  const options = page.locator('button[aria-label="More options"], button[aria-label="More"], button[data-testid="reservation-options"]');
-  if (await options.count() !== 1) throw new ExtractionError("Reservation code control changed");
-  await options.click();
-  await page.getByText(/^confirmation code$/i).first().waitFor({ state: "visible", timeout: 7_000 });
+  if (current.hostname !== "www.airbnb.co.za" || /\/login|\/authenticate/.test(current.pathname)) throw new AuthExpiredError();
+  try { await page.locator("body").waitFor({ state: "visible", timeout: 10_000 }); }
+  catch { throw new ExtractionError("Airbnb host page did not render"); }
 }
 
 export async function withAirbnbBrowser(storageState, work, launch = chromium.launch.bind(chromium)) {
@@ -101,48 +95,32 @@ export async function readCalendars(config, storageState, launch) {
 export async function scanCalendars(context, config, navigate = visit, now = new Date()) {
     const listings = [];
     const seenCodes = new Map();
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Africa/Johannesburg", day: "2-digit" }).formatToParts(now);
+    const today = `${monthKey(now)}-${parts.find((part) => part.type === "day").value}`;
     for (const listing of LISTINGS) {
       const page = await context.newPage();
       try {
-        await navigate(page, config.calendarUrls[listing.unitNumber]);
-        const months = [];
-        const reservationUrls = new Set();
-        for (let index = 0; index < 3; index += 1) {
-          const month = await extractCalendarMonth(page, listing.name);
-          if (index === 0 && month.month !== monthKey(now)) throw new ExtractionError("Calendar does not start with the current SAST month");
-          if (months.length) {
-            const previous = months.at(-1).month;
-            const expected = new Date(`${previous}-01T00:00:00Z`);
-            expected.setUTCMonth(expected.getUTCMonth() + 1);
-            if (month.month !== expected.toISOString().slice(0, 7)) throw new ExtractionError("Calendar navigation skipped a month");
-          }
-          months.push({ month: month.month, days: month.days });
-          for (const url of month.reservationUrls) reservationUrls.add(url);
-          if (index < 2) {
-            const next = page.getByRole("button", { name: /^next month$/i });
-            if (await next.count() !== 1) throw new ExtractionError("Calendar next-month control changed");
-            const oldHeading = await page.evaluate(() => [...document.querySelectorAll('[data-testid="calendar-month"], h2, h3')]
-              .map((node) => node.textContent?.trim()).find((text) => /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}\b/i.test(text ?? "")));
-            await next.click();
-            await page.waitForFunction((previous) => [...document.querySelectorAll('[data-testid="calendar-month"], h2, h3')]
-              .map((node) => node.textContent?.trim()).some((text) =>
-                /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}\b/i.test(text ?? "") && text !== previous),
-            oldHeading, { timeout: 7_000 });
-          }
-        }
-        if (reservationUrls.size > MAX_RESERVATIONS) throw new ExtractionError("Reservation scan limit exceeded");
+        const calendarUrl = config.calendarUrls[listing.unitNumber];
+        await navigate(page, calendarUrl);
+        try { await page.locator('[role="grid"][aria-label]').nth(2).waitFor({ state: "attached", timeout: 10_000 }); }
+        catch { throw new ExtractionError("Three-month calendar did not render"); }
+        const { months, barTargets } = await extractCalendarViewport(page, listing.name, today);
+        if (barTargets.length > MAX_RESERVATIONS) throw new ExtractionError("Reservation scan limit exceeded");
         const reservations = [];
-        for (const url of reservationUrls) {
-          const detail = await context.newPage();
-          try {
-            await navigate(detail, url);
-            await revealConfirmationCode(detail);
-            const reservation = await extractReservation(detail, listing);
-            const previous = seenCodes.get(reservation.confirmationCode);
-            if (previous && JSON.stringify(previous) !== JSON.stringify(reservation)) throw new ExtractionError("Conflicting booking code details");
-            seenCodes.set(reservation.confirmationCode, reservation);
-            reservations.push(reservation);
-          } finally { await detail.close(); }
+        for (const { selector, summary } of barTargets) {
+          await navigate(page, calendarUrl);
+          const bar = page.locator(`[data-testid="reservation-bar"][data-selector="${selector}"]`).first();
+          await bar.waitFor({ state: "visible", timeout: 10_000 });
+          await bar.click();
+          await page.waitForURL(/\/multicalendar\/\d+\/reservation\/[A-Z0-9]{8,16}\/?$/, { timeout: 7_000 });
+          await page.locator('#hosting-details-reservation-info-row-confirmation-code-row-title').waitFor({ state: "visible", timeout: 7_000 });
+          const route = new URL(page.url()).pathname;
+          if (!route.startsWith(`${new URL(calendarUrl).pathname}/reservation/`)) throw new ExtractionError("Reservation belongs to another listing");
+          const reservation = await extractReservation(page, listing, summary);
+          const previous = seenCodes.get(reservation.confirmationCode);
+          if (previous && JSON.stringify(previous) !== JSON.stringify(reservation)) throw new ExtractionError("Conflicting booking code details");
+          seenCodes.set(reservation.confirmationCode, reservation);
+          if (!previous) reservations.push(reservation);
         }
         listings.push({ unitNumber: listing.unitNumber, listingName: listing.name, months, reservations });
       } finally { await page.close(); }

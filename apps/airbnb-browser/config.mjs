@@ -6,14 +6,13 @@ export const LISTINGS = Object.freeze([
   { unitNumber: 3, name: "Jasmine Studio Stay" },
 ]);
 
-export const INTERVAL_MS = Object.freeze({ messages: 5 * 60_000, calendar: 15 * 60_000 });
 export const MAX_AGE_MS = Object.freeze({ messages: 5 * 60_000, calendar: 15 * 60_000 });
 
 export function airbnbUrl(value, pathPrefix) {
   const url = new URL(value);
-  if (url.protocol !== "https:" || url.hostname !== "www.airbnb.com" ||
-      url.username || url.password || url.hash || !url.pathname.startsWith(pathPrefix) ||
-      !/^\/hosting\/(?:calendar(?:\/[A-Za-z0-9-]+)?|messages)\/?$/.test(url.pathname)) {
+  if (url.protocol !== "https:" || url.hostname !== "www.airbnb.co.za" ||
+      url.username || url.password || url.hash || url.search || !url.pathname.startsWith(pathPrefix) ||
+      !/^\/(?:multicalendar\/\d+|hosting\/messages)\/?$/.test(url.pathname)) {
     throw new Error("Expected an HTTPS Airbnb hosting URL");
   }
   return url.href;
@@ -31,13 +30,13 @@ export function loadConfig(env = process.env) {
   catch { throw new Error("AIRBNB_BROWSER_CALENDAR_URLS must be JSON for units 1, 2 and 3"); }
   const calendarUrls = Object.fromEntries(LISTINGS.map(({ unitNumber }) => {
     if (typeof urls?.[unitNumber] !== "string") throw new Error(`Missing calendar URL for unit ${unitNumber}`);
-    return [unitNumber, airbnbUrl(urls[unitNumber], "/hosting/calendar")];
+    return [unitNumber, airbnbUrl(urls[unitNumber], "/multicalendar/")];
   }));
   return Object.freeze({
     dataKey,
     mcpToken,
     calendarUrls,
-    messagesUrl: airbnbUrl(env.AIRBNB_BROWSER_MESSAGES_URL ?? "https://www.airbnb.com/hosting/messages", "/hosting/messages"),
+    messagesUrl: airbnbUrl(env.AIRBNB_BROWSER_MESSAGES_URL ?? "https://www.airbnb.co.za/hosting/messages", "/hosting/messages"),
     statePath: resolve(env.AIRBNB_BROWSER_STATE_PATH ?? "/data/browser-state.enc"),
     port: Number(env.PORT ?? 3000),
   });

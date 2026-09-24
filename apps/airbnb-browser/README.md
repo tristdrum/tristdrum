@@ -1,63 +1,37 @@
 # Airbnb browser pilot
 
-Read-only host-website evidence service for the three personal studios: Bougainvillea, Spekboom and Jasmine. It is deliberately separate from the cleaner, support and booking-truth workers. No Airbnb or OpenAI model write operation exists in this pilot. `actions.mjs` contains typed future-action contracts that always refuse execution.
+Read-only, fail-closed host-website evidence code for Bougainvillea, Spekboom and Jasmine. This branch is **not a viable live source yet**. It was not deployed, logged in to a cloud browser, or used to send/change anything on Airbnb. All committed tests use synthetic guest, booking and profile data.
 
-## Boundary and source
+## Observed host UI
 
-- Playwright launches Chromium on each refresh, visits only configured `www.airbnb.com/hosting/calendar...` URLs and the fixed hosting Messages page, and closes the browser. It blocks non-GET/HEAD/OPTIONS requests, third-party hosts, images, fonts, media and service workers. **Airbnb may use POST GraphQL/XHR for read-only rendering. We could not inspect the signed-in host network without a fresh authorized cloud login.** An offline POST-dependent fixture proves the request is blocked and the calendar fails closed, not that the live UI works. Do not loosen the rule without a separate write-risk review and a signed-in end-to-end check.
-- Three listing names are fixed in `config.mjs`. Operators must configure **three exact host-calendar URLs** for the signed-in account; no listing IDs are guessed. The UI must visibly identify each selected listing. Each refresh reads three months of date statuses and follows at most 40 reservation-detail links per listing to read the labelled confirmation code, guest, status and check-in/out dates. Messages scan at most 30 threads and 100 messages per thread. A missing page, changed layout, pagination, cap or ambiguous field makes the whole snapshot unavailable.
-- For current/upcoming stays the code may be behind the reservation options menu; the browser only opens that menu and reads the label, never clicking Copy or another action. This follows [Airbnb's host confirmation-code steps](https://www.airbnb.com/help/article/4174).
-- Reservation snapshots include `guestProfileId` only when a single visible Airbnb guest-profile link exposes a numeric ID. Missing, hidden or ambiguous links yield `null`; display-name matches never establish identity. The live host-page link shape is unverified, so same-guest stayover classification remains unsupported until authenticated calibration confirms this field on both bookings.
-- Complete snapshots and Playwright storage state share one AES-256-GCM encrypted, owner-only file on a 1 GB Fly volume. A failed refresh retains prior evidence on disk but makes it unavailable to MCP until a new complete refresh succeeds. Calendar TTL is 15 minutes; messages TTL is 5 minutes. The server polls on those intervals and `refresh_before_plan` triggers both on demand (reusing a successful result from the last minute).
-- Opening a Messages thread can have site-side read-receipt effects even with network writes blocked. The pilot must be calibrated against the authenticated UI and consented account before claiming the browser flow has no observable side effect. This code was not deployed or logged in during implementation.
+Read-only inspection of the existing signed-in personal browser on 2026-09-24 established the actual host origin and DOM shape; no browser cookies or guest content were copied into this repository or the cloud:
 
-## Configuration
+- Calendar URLs are `https://www.airbnb.co.za/multicalendar/<listingId>`. The page renders three simultaneous `div[role="grid"][aria-label="Month YYYY"]` month grids. Date buttons are inside grid cells and carry `data-date`; reservation bars are `div[data-testid="reservation-bar"]` inside clickable rows, not links. Clicking a bar opens `/multicalendar/<listingId>/reservation/<code>` and a sidebar with a labelled confirmation code, `guestFirstName`, and a visible `/users/profile/<id>` guest link.
+- The Messages index is `https://www.airbnb.co.za/hosting/messages`, with thread IDs in `inbox_list_<id>` test IDs; detail URLs are `/hosting/messages/<threadId>`. The current message-list DOM does **not** expose the sender, timestamp and stable message ID contract used by the synthetic thread fixture. The extractor deliberately refuses that real layout, so Messages readiness remains false until those fields and history completeness are calibrated without causing read receipts.
+- The observed signed-in Jasmine calendar reload made 159 GET and four first-party POST requests (tracking/client configuration). The pilot still blocks non-GET/HEAD/OPTIONS requests. An offline POST-dependent fixture proves this fails closed, but **does not prove the live calendar renders with POST blocked**. No live GET-only browser run with a fresh cloud login has occurred. Do not loosen network methods without a separate write-risk review.
 
-Required runtime values (Fly secrets, never source control):
+The calendar parser validates all three rendered months, each month's day count, the current SAST month, and date-status evidence. It marks past unbooked days as `past`, never available. It opens at most 40 distinct reservation bars per listing, cross-checks the route code against the visible label, and takes check-in/out dates from the same bar. `status: "calendar_reservation"` means visible calendar occupancy, **not a verified confirmed lifecycle state**. `guestProfileId` is a numeric ID from one visible guest-profile link, or `null` if missing/ambiguous; display-name equality never establishes guest identity. The live selector path is grounded in inspected DOM, while the full scan and same-guest continuity still require a signed-in cloud end-to-end check.
 
-| Variable | Purpose |
-| --- | --- |
-| `AIRBNB_BROWSER_DATA_KEY` | Random 32-byte base64 key for encrypted session and snapshots |
-| `AIRBNB_BROWSER_MCP_TOKEN` | Independent random bearer token, at least 32 characters |
-| `AIRBNB_BROWSER_CALENDAR_URLS` | JSON object mapping `1`, `2`, `3` to exact Airbnb host-calendar URLs |
+## Storage and auth blocker
 
-Optional: `AIRBNB_BROWSER_MESSAGES_URL` defaults to `https://www.airbnb.com/hosting/messages`; `AIRBNB_BROWSER_STATE_PATH` defaults to `/data/browser-state.enc`; `PORT` defaults to 3000. Only HTTPS `www.airbnb.com` hosting URLs are accepted. Do not put credential values or guest data in URLs, logs, or repository files.
+Complete snapshots and Playwright storage state use one AES-256-GCM encrypted, owner-only file on a 1 GB Fly volume. A failed/partial/expired refresh keeps prior evidence for diagnosis but makes it unavailable through MCP until a complete new refresh succeeds. Calendar TTL is 15 minutes; Messages TTL is 5 minutes.
 
-**Rollout blocker: fresh cloud login.** No local Chrome-cookie copy, plaintext storage-state import, automated login, challenge bypass or production session is provided. A later authorized bootstrap must let a human sign in to a Playwright browser **running inside the pilot Fly app**, then call `persistFreshCloudLogin` on that same browser context. That helper accepts state only in the pilot Fly runtime, validates Airbnb cookie domains/origins and writes it directly to the encrypted store without a plaintext file. A secure way for the human to view/control that cloud browser has not been built or approved. Stop the polling service during bootstrap and restart it afterward to avoid stale in-memory state overwriting the new login. Subsequent successful refreshes persist rotated session state encrypted on the volume.
+No local Chrome-cookie copy, plaintext auth import, automated login, challenge bypass or production session is provided. **Fresh cloud login is a rollout blocker:** a separately authorized bootstrap must let a human sign in to a Playwright browser running inside the pilot Fly app, then call `persistFreshCloudLogin` on that same context. The helper validates `.airbnb.co.za` state and encrypts it directly, without a plaintext file. A secure human view/control path for that cloud browser has not been built or approved. Stop the service during bootstrap and restart it afterward; successful later refreshes persist rotated state encrypted.
 
-## API and Agents API
+Required Fly secrets/config: `AIRBNB_BROWSER_DATA_KEY` (32 random bytes, base64), `AIRBNB_BROWSER_MCP_TOKEN` (separate random bearer token, 32+ characters), and `AIRBNB_BROWSER_CALENDAR_URLS` (JSON map from units `1`, `2`, `3` to their exact `/multicalendar/<listingId>` URLs). Keep real IDs, cookies, credentials and guest data out of Git and logs. `AIRBNB_BROWSER_MESSAGES_URL` defaults to `https://www.airbnb.co.za/hosting/messages`; `AIRBNB_BROWSER_STATE_PATH` defaults to `/data/browser-state.enc`.
 
-`POST /mcp` is an authenticated stateless Streamable HTTP MCP endpoint. `GET /metrics` uses the same bearer token and contains only freshness, auth and budget metadata. `GET /healthz` is liveness only. MCP offers exactly `get_calendar_snapshot`, `list_message_threads`, `get_message_snapshot` (one thread ID required), `refresh_before_plan`, and `get_pilot_status`; there is no arbitrary URL, browser command, reservation mutation or send tool. Tool results are limited to 256 KiB and counted against the transfer budget. Use `Authorization: Bearer <AIRBNB_BROWSER_MCP_TOKEN>` over HTTPS; never pass it in a URL.
+## Refresh, health and budget
 
-Agents API session configuration can use this service without a sandbox:
+The Fly config uses **`min_machines_running = 0`**. Chromium launches only for a refresh, and the Machine may stop between requests. An **external authenticated HTTP scheduler, not included in this branch**, must POST `/refresh/messages` every 5 minutes and `/refresh/calendar` every 15 minutes; these requests can wake the Machine. `refresh_before_plan` also forces both kinds from MCP. Without that scheduler, interval freshness is not delivered. All refresh routes use the same bearer token as MCP.
 
-```json
-{
-  "environment": { "type": "none" },
-  "agent": {
-    "model": "<approved-model>",
-    "tools": [{
-      "type": "mcp",
-      "server_label": "airbnb_browser",
-      "transport": {
-        "type": "http",
-        "server_url": "https://<pilot-host>/mcp",
-        "authorization": "Bearer <secret supplied at session creation>"
-      },
-      "connection_origin": "service",
-      "required": true,
-      "allowed_tools": ["get_calendar_snapshot", "list_message_threads", "get_message_snapshot", "refresh_before_plan", "get_pilot_status"]
-    }]
-  }
-}
-```
+`GET /healthz` is liveness (HTTP 200) and includes `ready`; it does not claim authenticated source health. Authenticated `GET /readyz` returns 503 until auth, both snapshots and budget are current. Authenticated `GET /metrics` exposes freshness/auth/budget metadata without guest data.
 
-`agents-adapter.mjs` builds this narrow connection object for callers to put under `agent.tools`, along with `environment: {type: "none"}`. This follows [OpenAI Agents API MCP connections](https://developers.openai.com/api/docs/guides/agents-api/tools/mcp) and the [Agents API quickstart's environment-none option](https://developers.openai.com/api/docs/guides/agents-api/quickstart). The adapter/protocol tests exercise tool discovery and calls locally; no OpenAI API session or model call is created by this service. Future reasoning must be event-triggered, not polling-triggered.
+The service reserves US$8.50 per SAST month as a conservative infrastructure allowance and blocks activity at US$10 estimated added spend or 2 GiB counted transfer. Browser runs cap at 50 MiB; MCP results cap at 256 KiB. The service itself makes zero model calls. **Agents API spend is also incremental:** a future caller must POST `/budget/reserve-agent` with a worst-case `maxUsd` *before* every event-driven Agents API call. No caller or actual API usage reconciliation is implemented here, so neither the software meter nor scale-to-zero Fly config guarantees the account's US$10 added-bill cap. Obtain a live region quote and account-level spending alert before any rollout. [Fly pricing](https://fly.io/docs/about/pricing/) is the pricing reference.
 
-Guest text returned by the tools is untrusted content for any downstream agent; it is evidence, not instructions or authority to act.
+## Agents API
 
-## Budget and deployment handoff
+`POST /mcp` is a bearer-authenticated stateless Streamable HTTP MCP endpoint. It exposes only `get_calendar_snapshot`, `list_message_threads`, `get_message_snapshot`, `refresh_before_plan`, and `get_pilot_status`. There is no arbitrary URL/browser executor or Airbnb write tool; typed future actions always return `READ_ONLY_PILOT`. Guest text is untrusted data, not instructions.
 
-`fly.toml` specifies one shared-CPU 1 GB Machine in `jnb`, one 1 GB volume and no HA. The budget gate reserves US$8.50 per SAST calendar month for infrastructure and stops refreshes at US$10 estimated incremental usage or 2 GiB counted transfer (browser response bodies plus conservatively doubled MCP result payloads); each browser run is capped at 50 MiB. The read-only pilot makes zero model calls. This is a **software activity cap, not an invoice guarantee**: Fly region pricing, outbound traffic, IPs, storage snapshots and taxes are outside the meter. Confirm the region's live quote and set an account-level alert before deployment. The estimate assumes one Machine, no dedicated IPv4 and no other additions. [Fly pricing](https://fly.io/docs/about/pricing/) lists per-second Machine billing and volume charges.
+`agents-adapter.mjs` constructs a service-origin HTTP MCP connection with `environment: {type: "none"}`, `required: true` and this five-tool allowlist, following the [official OpenAI Agents API MCP guide](https://developers.openai.com/api/docs/guides/agents-api/tools/mcp) and [environment-none quickstart](https://developers.openai.com/api/docs/guides/agents-api/quickstart). Unit tests exercise the MCP protocol locally; no OpenAI session or model call was created.
 
-Build context is the repository root; the app-local Dockerfile uses the pinned official Playwright image, whose version matches the package. Use only `/Users/tristdrum/.local/bin/fly-personal` after checking personal account identity and app status. This branch does **not** authorize app creation, volume creation, secrets, login, deployment or guest messaging. A later authorized rollout must implement the fresh cloud-login bootstrap and validate the live Airbnb selectors, network methods, booking-code details, message completeness, read-receipt behavior and actual cost before trusting data in operations. Run `npm --prefix apps/airbnb-browser test` for local tests.
+Build context is the repo root; `Dockerfile` pins the official Playwright image to the package version. Future Fly operations must use only `/Users/tristdrum/.local/bin/fly-personal` after confirming personal-account identity. This branch authorizes no app/volume/secrets creation, deployment, login or guest communication. Run `npm --prefix apps/airbnb-browser test` for local synthetic tests.

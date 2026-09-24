@@ -29,114 +29,105 @@ export function isoDate(value) {
   return result;
 }
 
-export async function extractCalendarMonth(page, listing) {
+export async function extractCalendarViewport(page, listingName, today) {
   const raw = await page.evaluate((name) => {
-    const selected = [...document.querySelectorAll('[data-testid="selected-listing"], [aria-current="page"], h1, h2')]
-      .map((node) => node.textContent?.trim()).filter(Boolean);
-    const heading = [...document.querySelectorAll('[data-testid="calendar-month"], h2, h3')]
-      .map((node) => node.textContent?.trim()).find((value) => /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}\b/i.test(value));
-    const cells = [...document.querySelectorAll('[data-date], [role="gridcell"][aria-label]')].map((node) => ({
-      date: node.getAttribute("data-date")?.slice(0, 10) ?? node.getAttribute("datetime")?.slice(0, 10) ??
-        /\b\d{4}-\d{2}-\d{2}\b/.exec(node.getAttribute("aria-label") ?? "")?.[0] ?? null,
-      status: node.getAttribute("data-status") ?? node.getAttribute("aria-label") ?? node.textContent ?? "",
+    const grids = [...document.querySelectorAll('[role="grid"][aria-label]')].map((grid) => ({
+      heading: grid.getAttribute("aria-label"),
+      cells: [...grid.querySelectorAll('[role="gridcell"] button[data-date]')].map((button) => {
+        const described = document.getElementById(button.getAttribute("aria-describedby") ?? "");
+        return { date: button.getAttribute("data-date"), disabled: button.disabled,
+          description: described?.textContent ?? "", text: button.innerText };
+      }),
     }));
-    const reservationUrls = [...document.querySelectorAll('a[href*="/hosting/reservations/"]')]
-      .map((node) => node.href).filter((href) => /^\/hosting\/reservations\/details\/[A-Za-z0-9-]+\/?$/.test(new URL(href).pathname));
-    return { listingSelected: selected.some((value) => value === name), heading, cells, reservationUrls };
-  }, listing);
-  if (!raw.listingSelected || !raw.heading || raw.cells.length < 28) {
-    throw new ExtractionError("Calendar layout or listing identity changed");
-  }
-  const monthMatch = /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\b/i.exec(raw.heading);
-  const month = MONTHS[monthMatch[1].slice(0, 3).toLowerCase()];
-  const year = Number(monthMatch[2]);
-  const monthKey = `${year}-${String(month).padStart(2, "0")}`;
-  const days = new Map();
-  for (const cell of raw.cells) {
-    if (!cell.date?.startsWith(`${monthKey}-`)) continue;
-    const date = isoDate(cell.date);
-    const source = cell.status.toLowerCase();
-    const status = /reserved|booked/.test(source) ? "reserved" :
-      /blocked|unavailable/.test(source) ? "blocked" : /available/.test(source) ? "available" : null;
-    if (!status || (days.has(date) && days.get(date) !== status)) throw new ExtractionError("Unknown or conflicting calendar day status");
-    days.set(date, status);
-  }
-  const expectedDays = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  if (days.size !== expectedDays) throw new ExtractionError("Calendar month is incomplete");
-  const reservationUrls = [...new Set(raw.reservationUrls)];
-  if ([...days.values()].includes("reserved") && !reservationUrls.length) {
-    throw new ExtractionError("Reserved nights lack reservation detail links");
-  }
-  for (const url of reservationUrls) {
-    if (new URL(url).hostname !== "www.airbnb.com") throw new ExtractionError("Unexpected reservation URL");
-  }
-  return { month: monthKey, days: [...days].sort(([a], [b]) => a.localeCompare(b)).map(([date, status]) => ({ date, status })), reservationUrls };
-}
-
-async function labeledValues(page) {
-  return page.evaluate(() => {
-    const result = {};
-    for (const label of document.querySelectorAll("dt, th, [data-testid='detail-label']")) {
-      const key = label.textContent?.trim().toLowerCase().replace(/[:\s]+/g, " ");
-      const sibling = label.nextElementSibling;
-      if (key && sibling) result[key] = sibling.textContent?.trim();
+    const bars = [...document.querySelectorAll('[data-testid="reservation-bar"]')]
+      .map((bar) => ({ selector: bar.getAttribute("data-selector"), summary: bar.textContent?.trim() }))
+      .filter((bar) => /^reservation-bar-\d{4}-\d{2}-\d{2}$/.test(bar.selector ?? "") && bar.summary);
+    return { listingSelected: document.title.includes(name), grids, bars };
+  }, listingName);
+  if (!raw.listingSelected || raw.grids.length !== 3) throw new ExtractionError("Three-month calendar layout or listing identity changed");
+  const months = [];
+  for (const grid of raw.grids) {
+    const match = /^(January|February|March|April|May|June|July|August|September|October|November|December) (\d{4})$/.exec(grid.heading ?? "");
+    if (!match) throw new ExtractionError("Calendar month heading changed");
+    const month = MONTHS[match[1].slice(0, 3).toLowerCase()];
+    const year = Number(match[2]);
+    const key = `${year}-${String(month).padStart(2, "0")}`;
+    const days = new Map();
+    for (const cell of grid.cells) {
+      if (!cell.date?.startsWith(`${key}-`)) continue;
+      const date = isoDate(cell.date);
+      const description = cell.description.toLowerCase();
+      const status = /\breservation\b/.test(description) ? "reserved" :
+        /blocked|unavailable|closed/.test(description) ? "blocked" :
+          cell.disabled && date < today ? "past" :
+            !cell.disabled && !description && /nightly price/i.test(cell.text) ? "available" : null;
+      if (!status || days.has(date)) throw new ExtractionError("Calendar day status is missing or duplicated");
+      days.set(date, status);
     }
-    return { labels: result, body: document.body.innerText };
-  });
-}
-
-function field(raw, labels, fallback) {
-  for (const label of labels) if (raw.labels[label]) return raw.labels[label];
-  return fallback?.exec(raw.body)?.[1]?.trim() ?? null;
-}
-
-export async function extractReservation(page, listing) {
-  const raw = await labeledValues(page);
-  const guestProfileId = await page.evaluate(() => {
-    const candidates = [...document.querySelectorAll('a[data-testid="guest-profile-link"], a[aria-label*="guest profile" i], [data-testid="guest-details"] a[href*="/users/"]')]
-      .filter((link) => link.getClientRects().length > 0 && getComputedStyle(link).visibility !== "hidden")
-      .map((link) => {
-        const url = new URL(link.href);
-        if (url.hostname !== "www.airbnb.com") return null;
-        return /^\/users\/(?:show|profile)\/(\d+)\/?$/.exec(url.pathname)?.[1] ?? null;
-      }).filter(Boolean);
-    const distinct = [...new Set(candidates)];
-    return distinct.length === 1 ? distinct[0] : null;
-  });
-  const code = field(raw, ["confirmation code"], /Confirmation code\s*[:\n]\s*([A-Z0-9]{8,16})/i)?.toUpperCase();
-  const checkInText = field(raw, ["check-in", "check in"], /Check[- ]in\s*[:\n]\s*([^\n]+)/i);
-  const checkOutText = field(raw, ["checkout", "check-out", "check out"], /Check[- ]out\s*[:\n]\s*([^\n]+)/i);
-  const guestName = field(raw, ["guest", "guest name"], /Guest(?: name)?\s*[:\n]\s*([^\n]+)/i);
-  const listingName = field(raw, ["listing"], /Listing\s*[:\n]\s*([^\n]+)/i);
-  const status = field(raw, ["status"], /Status\s*[:\n]\s*([^\n]+)/i)?.toLowerCase();
-  if (!/^[A-Z0-9]{8,16}$/.test(code ?? "") || !guestName || listingName !== listing.name ||
-      !["confirmed", "pending", "cancelled", "canceled"].includes(status)) {
-    throw new ExtractionError("Reservation detail is incomplete or mismatched");
+    if (days.size !== new Date(Date.UTC(year, month, 0)).getUTCDate()) throw new ExtractionError("Calendar month is incomplete");
+    months.push({ month: key, days: [...days].sort(([a], [b]) => a.localeCompare(b)).map(([date, status]) => ({ date, status })) });
   }
-  const checkIn = isoDate(checkInText);
-  const checkOut = isoDate(checkOutText);
+  for (let index = 1; index < months.length; index += 1) {
+    const expected = new Date(`${months[index - 1].month}-01T00:00:00Z`);
+    expected.setUTCMonth(expected.getUTCMonth() + 1);
+    if (months[index].month !== expected.toISOString().slice(0, 7)) throw new ExtractionError("Calendar months are not consecutive");
+  }
+  if (!months.some(({ month }) => month === today.slice(0, 7))) throw new ExtractionError("Current SAST month is not visible");
+  if (months.some((month) => month.days.some((day) => day.status === "reserved")) && !raw.bars.length) {
+    throw new ExtractionError("Reserved nights lack reservation bars");
+  }
+  const uniqueBars = new Map();
+  for (const bar of raw.bars) if (!uniqueBars.has(bar.summary)) uniqueBars.set(bar.summary, bar);
+  return { months, barTargets: [...uniqueBars.values()] };
+}
+
+export async function extractReservation(page, listing, barSummary) {
+  const route = new URL(page.url());
+  const match = /^\/multicalendar\/(\d+)\/reservation\/([A-Z0-9]{8,16})\/?$/.exec(route.pathname);
+  if (route.hostname !== "www.airbnb.co.za" || !match) throw new ExtractionError("Reservation detail route changed");
+  const dates = /Checkin on ([A-Za-z]{3,9} \d{1,2},? \d{4}), checkout on ([A-Za-z]{3,9} \d{1,2},? \d{4})\./i.exec(barSummary ?? "");
+  if (!dates) throw new ExtractionError("Reservation bar dates are missing");
+  const raw = await page.evaluate(() => {
+    const label = document.getElementById("hosting-details-reservation-info-row-confirmation-code-row-title");
+    const profileIds = [...document.querySelectorAll('a[href*="/users/profile/"]')]
+      .filter((link) => link.getClientRects().length > 0 && getComputedStyle(link).visibility !== "hidden")
+      .map((link) => { const url = new URL(link.href); return url.hostname === "www.airbnb.co.za" ? /^\/users\/profile\/(\d+)\/?$/.exec(url.pathname)?.[1] : null; })
+      .filter(Boolean);
+    return { title: document.title, code: /\b[A-Z0-9]{8,16}\b/.exec(label?.nextElementSibling?.textContent ?? "")?.[0] ?? null,
+      guestName: document.querySelector('[data-testid="guestFirstName"]')?.textContent?.trim() ?? null,
+      guestProfileId: [...new Set(profileIds)].length === 1 ? profileIds[0] : null };
+  });
+  const code = match[2];
+  if (!raw.title.includes(listing.name) || raw.code !== code || !raw.guestName) {
+    throw new ExtractionError("Reservation code or guest detail is incomplete");
+  }
+  const checkIn = isoDate(dates[1]);
+  const checkOut = isoDate(dates[2]);
   if (checkIn >= checkOut) throw new ExtractionError("Reservation date order is invalid");
-  return { confirmationCode: code, unitNumber: listing.unitNumber, listingName, guestName, guestProfileId,
-    checkIn, checkOut, status: status === "canceled" ? "cancelled" : status };
+  return { confirmationCode: code, unitNumber: listing.unitNumber, listingName: listing.name,
+    guestName: raw.guestName, guestProfileId: raw.guestProfileId, checkIn, checkOut,
+    status: "calendar_reservation" };
 }
 
 export async function extractInbox(page) {
   const raw = await page.evaluate(() => ({
     hasHeading: [...document.querySelectorAll("h1, h2")].some((node) => /messages/i.test(node.textContent ?? "")),
+    hasList: Boolean(document.querySelector('#list_inbox[aria-label="List of Conversations"]')),
     empty: Boolean(document.querySelector('[data-testid="empty-inbox"]')),
-    links: [...document.querySelectorAll('a[href*="/hosting/messages/"]')].map((node) => node.href)
-      .filter((href) => /\/hosting\/messages\/\d+\/?$/.test(new URL(href).pathname)),
+    ids: [...document.querySelectorAll('#list_inbox [data-testid^="inbox_list_"]')]
+      .map((node) => /^inbox_list_(\d+)$/.exec(node.getAttribute("data-testid") ?? "")?.[1]).filter(Boolean),
     more: Boolean(document.querySelector('[aria-label*="Load more"], [aria-label*="Next page"], [data-testid="load-more"]')),
   }));
-  if (!raw.hasHeading || (!raw.empty && !raw.links.length) || raw.more) {
+  if (!raw.hasHeading || !raw.hasList || (!raw.empty && !raw.ids.length) || raw.more) {
     throw new ExtractionError("Messages inbox layout or pagination changed");
   }
-  const links = [...new Set(raw.links)];
-  if (links.some((href) => new URL(href).hostname !== "www.airbnb.com")) throw new ExtractionError("Unexpected message URL");
-  return links;
+  return [...new Set(raw.ids)].map((id) => `https://www.airbnb.co.za/hosting/messages/${id}`);
 }
 
 export async function extractThread(page, url) {
+  if (await page.locator('[data-testid="message-list"]').count()) {
+    throw new ExtractionError("Airbnb message sender, timestamp and history structure need live calibration");
+  }
   const raw = await page.evaluate(() => {
     const listingName = document.querySelector('[data-testid="thread-listing"]')?.textContent?.trim() ??
       [...document.querySelectorAll("h1, h2")].map((node) => node.textContent?.trim())

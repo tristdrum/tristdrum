@@ -31,13 +31,16 @@ function fixtureService() {
 test("complete snapshots are fresh only within their distinct TTLs", async () => {
   const { service, setClock } = fixtureService();
   await service.init();
+  assert.equal(service.ready(), false);
   assert.deepEqual(await service.refresh("all"), {
     messages: { ok: true, reason: null, fetchedAt: "2026-09-24T10:00:00.000Z" },
     calendar: { ok: true, reason: null, fetchedAt: "2026-09-24T10:00:00.000Z" },
   });
   assert.equal(service.read("calendar").listings.length, 3);
+  assert.equal(service.ready(), true);
   assert.equal(service.read("messages", { threadId: "123" }).threads.length, 1);
   setClock("2026-09-24T10:06:00Z");
+  assert.equal(service.ready(), false);
   assert.throws(() => service.read("messages"), SnapshotUnavailableError);
   assert.equal(service.read("calendar").listings.length, 3);
   setClock("2026-09-24T10:16:00Z");
@@ -98,4 +101,13 @@ test("MCP output counts toward the same persistent monthly cap", async () => {
   service.state.budget.transferredBytes = 2 * 1024 ** 3 - 100;
   await assert.rejects(service.recordMcpOutput(200), SnapshotUnavailableError);
   assert.equal(storage.budget.transferredBytes, 2 * 1024 ** 3 + 100);
+});
+
+test("Agents API spend must be reserved against the same monthly cap", async () => {
+  const { service, storage } = fixtureService();
+  await service.init();
+  await service.reserveAgentCost(0.5);
+  assert.equal(storage.budget.modelUsd, 0.5);
+  await assert.rejects(service.reserveAgentCost(1.1), /budget exhausted/);
+  assert.equal(storage.budget.modelUsd, 0.5);
 });

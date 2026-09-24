@@ -73,12 +73,24 @@ export function createApp(service, token) {
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "64kb" }));
-  app.get("/healthz", (_request, response) => response.json({ alive: true, pilot: "read_only" }));
+  app.get("/healthz", (_request, response) => response.json({ alive: true, ready: service.ready(), pilot: "read_only" }));
   app.use((request, response, next) => {
     if (request.get("origin") || !authorized(request, token)) return response.sendStatus(401);
     next();
   });
+  app.get("/readyz", (_request, response) => response.status(service.ready() ? 200 : 503).json({ ready: service.ready() }));
   app.get("/metrics", (_request, response) => response.json(service.status()));
+  app.post("/refresh/:kind", async (request, response) => {
+    if (!["messages", "calendar"].includes(request.params.kind)) return response.sendStatus(404);
+    try {
+      const result = await service.refresh(request.params.kind);
+      return response.status(result[request.params.kind].ok ? 200 : 503).json(result[request.params.kind]);
+    } catch { return response.status(503).json({ ok: false, reason: "refresh_failed" }); }
+  });
+  app.post("/budget/reserve-agent", async (request, response) => {
+    try { return response.json({ reserved: true, budget: await service.reserveAgentCost(request.body?.maxUsd) }); }
+    catch { return response.status(402).json({ reserved: false, reason: "budget_unavailable" }); }
+  });
   app.post("/mcp", async (request, response) => {
     const server = createMcpServer(service);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });

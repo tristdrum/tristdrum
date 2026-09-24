@@ -3,12 +3,12 @@ export function validateStorageState(value) {
     throw new Error("Invalid Playwright storage state");
   }
   for (const cookie of value.cookies) {
-    if (!/^(?:\.|www\.)?airbnb\.com$/.test(cookie.domain) || !cookie.name || typeof cookie.value !== "string") {
+    if (!/^(?:\.|www\.)?airbnb\.co\.za$/.test(cookie.domain) || !cookie.name || typeof cookie.value !== "string") {
       throw new Error("Storage state contains an unexpected cookie");
     }
   }
   for (const origin of value.origins) {
-    if (origin.origin !== "https://www.airbnb.com") throw new Error("Storage state contains an unexpected origin");
+    if (origin.origin !== "https://www.airbnb.co.za") throw new Error("Storage state contains an unexpected origin");
   }
   return value;
 }

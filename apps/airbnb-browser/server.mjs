@@ -6,9 +6,8 @@ try {
   const config = loadConfig();
   const service = new BrowserPilotService(config);
   await service.init();
-  const server = createApp(service, config.mcpToken).listen(config.port, "0.0.0.0", () => service.start());
+  const server = createApp(service, config.mcpToken).listen(config.port, "0.0.0.0");
   for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => {
-    service.stop();
     server.close();
   });
 } catch (error) {

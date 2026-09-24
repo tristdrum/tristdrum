@@ -18,14 +18,14 @@ test("configuration fixes the three listing URLs and rejects foreign hosts", () 
     AIRBNB_BROWSER_DATA_KEY: key.toString("base64"),
     AIRBNB_BROWSER_MCP_TOKEN: "x".repeat(32),
     AIRBNB_BROWSER_CALENDAR_URLS: JSON.stringify({
-      1: "https://www.airbnb.com/hosting/calendar?listingId=1",
-      2: "https://www.airbnb.com/hosting/calendar?listingId=2",
-      3: "https://www.airbnb.com/hosting/calendar?listingId=3",
+      1: "https://www.airbnb.co.za/multicalendar/101",
+      2: "https://www.airbnb.co.za/multicalendar/102",
+      3: "https://www.airbnb.co.za/multicalendar/103",
     }),
   };
-  assert.equal(loadConfig(env).calendarUrls[3], "https://www.airbnb.com/hosting/calendar?listingId=3");
+  assert.equal(loadConfig(env).calendarUrls[3], "https://www.airbnb.co.za/multicalendar/103");
   assert.throws(() => loadConfig({ ...env, AIRBNB_BROWSER_CALENDAR_URLS: JSON.stringify({
-    1: "https://evil.example/hosting/calendar", 2: env.AIRBNB_BROWSER_MESSAGES_URL, 3: "https://www.airbnb.com/hosting/calendar",
+    1: "https://evil.example/multicalendar/101", 2: env.AIRBNB_BROWSER_MESSAGES_URL, 3: "https://www.airbnb.co.za/multicalendar/103",
   }) }), /Airbnb hosting URL/);
 });
 
@@ -46,7 +46,7 @@ test("state and guest snapshots are encrypted and tampering fails", async () => 
 });
 
 test("in-memory cloud login capture accepts only Airbnb-owned state", async () => {
-  const valid = { cookies: [{ domain: ".airbnb.com", name: "session", value: "secret" }], origins: [{ origin: "https://www.airbnb.com", localStorage: [] }] };
+  const valid = { cookies: [{ domain: ".airbnb.co.za", name: "session", value: "synthetic" }], origins: [{ origin: "https://www.airbnb.co.za", localStorage: [] }] };
   assert.equal(validateStorageState(valid), valid);
   assert.throws(() => validateStorageState({ ...valid, cookies: [{ ...valid.cookies[0], domain: ".evil.example" }] }));
   assert.throws(() => validateStorageState({ ...valid, origins: [{ origin: "https://evil.example" }] }));
@@ -60,11 +60,11 @@ test("in-memory cloud login capture accepts only Airbnb-owned state", async () =
 });
 
 test("browser requests have a fixed read-only host and method boundary", () => {
-  assert.equal(allowedReadRequest("https://www.airbnb.com/hosting/calendar", "GET", "document"), true);
+  assert.equal(allowedReadRequest("https://www.airbnb.co.za/multicalendar/101", "GET", "document"), true);
   assert.equal(allowedReadRequest("https://a0.muscache.com/app.js", "GET", "script"), true);
-  assert.equal(allowedReadRequest("https://www.airbnb.com/api", "POST", "fetch"), false);
+  assert.equal(allowedReadRequest("https://www.airbnb.co.za/api", "POST", "fetch"), false);
   assert.equal(allowedReadRequest("https://evil.example/", "GET", "document"), false);
-  assert.equal(allowedReadRequest("https://www.airbnb.com/photo.jpg", "GET", "image"), false);
+  assert.equal(allowedReadRequest("https://www.airbnb.co.za/photo.jpg", "GET", "image"), false);
 });
 
 test("monthly meter resets, caps transfer and gates future event costs", () => {
