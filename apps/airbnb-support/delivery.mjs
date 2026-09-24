@@ -3,8 +3,6 @@ import {
   parseAirbnbConversationEmail,
   withAutomatedReplyFooter,
 } from "@tristdrum/airbnb-core";
-import { liveWebsiteAnswerNeedsHumanReview, liveWebsiteClaimQualityIssues } from "./agent.mjs";
-import { liveWebsiteObservationIsFresh } from "./live-website-facts.mjs";
 import {
   collectConversationMessages,
   findSentThreadEvidence,
@@ -212,15 +210,6 @@ export async function processDeliveryGuard({
       const decision = { action: "cancel", reason: "Conversation held or changed during delivery verification." };
       await applyDecision(sql, { householdId, deliveryId, decision, now: now() });
       return decision;
-    }
-
-    const websiteFacts = claimed.classification?.liveWebsiteFacts ?? null;
-    if ((claimed.approvedBy == null && liveWebsiteAnswerNeedsHumanReview(claimed.guestMessage))
-      || (websiteFacts && !liveWebsiteObservationIsFresh(websiteFacts.observedAt, now()))
-      || liveWebsiteClaimQualityIssues(finalText, websiteFacts).length) {
-      throw Object.assign(new Error("Live Airbnb website claim needs a fresh guarded decision."), {
-        code: "LIVE_WEBSITE_FACTS_NEED_REVIEW",
-      });
     }
 
     smtpStarted = true;

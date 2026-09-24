@@ -170,58 +170,6 @@ test("stable canonical thread sends exactly once without the automated footer", 
   ]);
 });
 
-test("live website facts must still be fresh immediately before SMTP", async () => {
-  const currentEmail = conversationEmail([{ name: "Guest Alpha", role: "Guest", text: "Hello" }]);
-  const websiteFacts = { observedAt: "2026-08-21T12:04:00.000Z",
-    reservation: { listingName: "Jasmine Studio Stay", checkIn: "2026-08-22",
-      checkOut: "2026-08-23", status: "confirmed" }, calendar: null };
-  for (const [sendAt, expected] of [
-    ["2026-08-21T12:08:00.000Z", "sent"],
-    ["2026-08-21T12:10:00.000Z", "guard_error"],
-  ]) {
-    const setup = harness(currentEmail);
-    const claim = setup.options.claimDelivery;
-    setup.options.claimDelivery = async () => ({ ...await claim(),
-      classification: { liveWebsiteFacts: websiteFacts },
-      draftText: "Your Jasmine Studio Stay booking for 22-23 August is confirmed." });
-    setup.options.now = () => new Date(sendAt);
-    const result = await processDeliveryGuard(setup.options);
-    assert.equal(result.action, expected);
-    assert.equal(setup.calls.some(([name]) => name === "send"), expected === "sent");
-    if (expected === "guard_error") assert.equal(setup.calls.at(-1)[0], "guard-failed");
-  }
-});
-
-test("a final-text edit cannot add an unsupported vacancy or acceptance claim", async () => {
-  const currentEmail = conversationEmail([{ name: "Guest Alpha", role: "Guest", text: "Hello" }]);
-  for (const finalText of ["We have availability.",
-    "We have accepted your Jasmine reservation for 12-14 October."]) {
-    const setup = harness(currentEmail);
-    const claim = setup.options.claimDelivery;
-    setup.options.claimDelivery = async () => ({ ...await claim(), finalText });
-    const result = await processDeliveryGuard(setup.options);
-    assert.equal(result.action, "guard_error", finalText);
-    assert.equal(setup.calls.some(([name]) => name === "send"), false);
-  }
-});
-
-test("older autonomous booking drafts stop at the final guard; human approval and parking still pass", async () => {
-  const currentEmail = conversationEmail([{ name: "Guest Alpha", role: "Guest", text: "Hello" }]);
-  for (const [guestMessage, approvedBy, expected] of [
-    ["Is my booking confirmed?", null, "guard_error"],
-    ["Is my booking confirmed?", "reviewed-owner", "sent"],
-    ["Is parking available?", null, "sent"],
-  ]) {
-    const setup = harness(currentEmail);
-    const claim = setup.options.claimDelivery;
-    setup.options.claimDelivery = async () => ({ ...await claim(), guestMessage, approvedBy,
-      draftText: "I'll double-check and get back to you." });
-    const result = await processDeliveryGuard(setup.options);
-    assert.equal(result.action, expected, guestMessage);
-    assert.equal(setup.calls.some(([name]) => name === "send"), expected === "sent");
-  }
-});
-
 test("newer host or guest activity prevents an autonomous reply", async () => {
   const hostEmail = conversationEmail([
     { name: "Guest Alpha", role: "Guest", text: "Hello" },

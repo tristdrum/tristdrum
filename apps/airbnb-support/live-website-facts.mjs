@@ -11,7 +11,7 @@ export function liveWebsiteObservationIsFresh(observedAt, now = new Date()) {
 
 /**
  * @typedef {{ listingName: string, checkIn: string, checkOut: string }} WebsiteStay
- * @typedef {{ status: 'confirmed'|'pending'|'cancelled', listingName: string,
+ * @typedef {{ reservationCode: string, status: 'confirmed'|'pending'|'cancelled', listingName: string,
  *   checkIn: string, checkOut: string, verified: boolean, complete: boolean }} WebsiteReservation
  * @typedef {{ listingName: string, checkIn: string, checkOut: string,
  *   status: 'available'|'unavailable', verified: boolean, complete: boolean }} WebsiteCalendar
@@ -36,7 +36,9 @@ function stay(value, expectedListing) {
 }
 
 /** Keep only fresh, complete, explicitly verified UI observations bound to this listing. */
-export function verifiedLiveWebsiteFacts(value, { providerThreadId, listingName, now = new Date() } = {}) {
+export function verifiedLiveWebsiteFacts(value, {
+  providerThreadId, reservationCode, listingName, now = new Date(),
+} = {}) {
   if (!value || typeof value !== "object" || value.source !== "airbnb_ui") return null;
   if (!providerThreadId || value.providerThreadId !== providerThreadId) return null;
   const property = propertyForListing(listingName);
@@ -44,11 +46,14 @@ export function verifiedLiveWebsiteFacts(value, { providerThreadId, listingName,
   const observedAt = new Date(value.observedAt);
 
   const reservationStay = stay(value.reservation, property.listingName);
-  const reservation = value.reservation?.verified === true
+  const reservation = typeof reservationCode === "string"
+    && /^[A-Za-z0-9-]{4,64}$/.test(reservationCode)
+    && value.reservation?.reservationCode === reservationCode
+    && value.reservation?.verified === true
     && value.reservation?.complete === true
     && ["confirmed", "pending", "cancelled"].includes(value.reservation.status)
     && reservationStay
-    ? { ...reservationStay, status: value.reservation.status, verified: true, complete: true }
+    ? { ...reservationStay, reservationCode, status: value.reservation.status, verified: true, complete: true }
     : null;
 
   const requestedStay = stay(value.requestedStay, property.listingName);

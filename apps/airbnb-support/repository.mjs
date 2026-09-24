@@ -1222,9 +1222,6 @@ export async function claimDeliveryForGuard(sql, { householdId, deliveryId, now 
         delivery.source_last_event_at,
         delivery.draft_text,
         delivery.final_text,
-        delivery.classification,
-        delivery.approved_by,
-        latest_guest.body_normalized as guest_message,
         delivery.outbound_message_id,
         delivery.send_attempt_count,
         delivery.send_attempted_at,
@@ -1252,15 +1249,6 @@ export async function claimDeliveryForGuard(sql, { householdId, deliveryId, now 
       join airbnb.guest_threads thread
         on thread.household_id = delivery.household_id
        and thread.id = delivery.thread_id
-      left join lateral (
-        select message.body_normalized
-        from airbnb.guest_messages message
-        where message.household_id = thread.household_id
-          and message.thread_id = thread.id
-          and message.direction = 'guest'
-        order by message.provider_sent_at desc
-        limit 1
-      ) latest_guest on true
       where delivery.household_id = ${householdId}
         and delivery.id = ${deliveryId}
         and delivery.status = 'approved'

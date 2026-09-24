@@ -12,8 +12,7 @@ import {
   retryPendingManagementPings,
   sanitizedError,
 } from "@tristdrum/airbnb-db";
-import { decideGuestResponse, liveWebsiteAnswerNeedsHumanReview } from "./agent.mjs";
-import { liveWebsiteObservationIsFresh } from "./live-website-facts.mjs";
+import { decideGuestResponse } from "./agent.mjs";
 import { processDeliveryGuard } from "./delivery.mjs";
 import {
   collectBookingLifecycleMessages,
@@ -143,14 +142,10 @@ function fallbackDecision(error) {
   };
 }
 
-export function canReuseStoredDecision(decision, mode, candidate = null, at = new Date()) {
+export function canReuseStoredDecision(decision, mode, candidate = null) {
   return Boolean(
     decision?.decisionVersion === 3
     && decision?.decisionSource === "adaptive_agent"
-    && !(candidate && liveWebsiteAnswerNeedsHumanReview(candidate.guestMessage)
-      && (decision.websiteReplyPolicyVersion !== 1 || decision.autoReply === true))
-    && (!decision?.liveWebsiteFacts
-      || liveWebsiteObservationIsFresh(decision.liveWebsiteFacts.observedAt, at))
     && !(mode === "live" && decision?.shadowMode === true)
     && !(
       decision?.deterministicGuard === "initial_inquiry_requires_airbnb_ui"
@@ -197,7 +192,6 @@ export async function runSupport({
   collectMessages = collectConversationMessages,
   collectLifecycleMessages = collectBookingLifecycleMessages,
   decide = decideGuestResponse,
-  loadLiveWebsiteFacts = null,
   processDelivery = processDeliveryGuard,
   notifyManagement = notifySupportManagement,
   retryManagementPings = retryPendingManagementPings,
@@ -368,28 +362,15 @@ export async function runSupport({
     let decisionFailureCount = 0;
     const decideAndStore = async (candidate) => {
       let decision;
-      const existingDecision = canReuseStoredDecision(candidate.existingDecision, mode, candidate, now())
+      const existingDecision = canReuseStoredDecision(candidate.existingDecision, mode, candidate)
         ? candidate.existingDecision
         : null;
       if (existingDecision) {
         decision = existingDecision;
       } else try {
-        // The optional reader is only consulted for a new decision. It never
-        // reopens a stored reply or bypasses the existing mail/delivery guards.
-        let liveWebsiteFacts = null;
-        if (typeof loadLiveWebsiteFacts === "function") {
-          try {
-            liveWebsiteFacts = await loadLiveWebsiteFacts({ candidate, now: now() });
-          } catch {
-            // A read failure supplies no live evidence and cannot itself create
-            // a new Management alert or authorize a factual guest claim.
-          }
-        }
-        const decisionAt = now();
         decision = await decide({
           guestMessage: candidate.guestMessage,
           guestName: candidate.guestDisplayName,
-          providerThreadId: candidate.providerThreadId,
           listingName: candidate.listingName,
           facts: candidate.facts,
           stayLabel: candidate.stayLabel,
@@ -398,8 +379,7 @@ export async function runSupport({
           conversationContext: candidate.conversationContext,
           priorManagementAlerts: candidate.priorManagementAlerts ?? [],
           replyRouteAvailable: candidate.replyCapable !== false,
-          liveWebsiteFacts,
-          now: decisionAt,
+          now: startedAt,
           env,
         });
       } catch (error) {

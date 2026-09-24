@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { collectBookingLifecycleMessages, collectConversationMessages } from "./gmail.mjs";
-import { verifiedLiveWebsiteFacts } from "./live-website-facts.mjs";
 
 import {
   actionableOperationalRequests,
@@ -108,60 +107,6 @@ test("empty Jane mailbox resumes from a successful scan instead of repeating fir
   assert.equal(imports.find((item) => item.mailboxScope === "tristan").since, "2026-06-13T13:20:00.000Z");
   assert.equal(receipt.supplementalSearchSince, "2026-09-11T07:15:00.000Z");
   assert.equal(database.receipts[0].supplementalSearchSince, receipt.supplementalSearchSince);
-});
-
-test("a new support decision receives optional live facts without a browser action or guest send", async () => {
-  const candidate = {
-    id: "thread-1", providerThreadId: "airbnb-thread-1", sourceFingerprint: "fingerprint-1",
-    latestEventAt: "2026-09-24T10:00:00.000Z", guestMessage: "Is my booking confirmed?",
-    guestDisplayName: "Guest", listingName: "Jasmine Studio Stay", facts: {},
-    stayLabel: "Oct 5 - 7, 2026", replyCapable: true,
-    existingDecision: null, conversationContext: [],
-  };
-  const websiteFacts = { source: "airbnb_ui", providerThreadId: "airbnb-thread-1",
-    observedAt: "2026-09-24T10:04:00.000Z",
-    reservation: { listingName: "Jasmine Studio Stay", checkIn: "2026-10-05",
-      checkOut: "2026-10-07", status: "confirmed", verified: true, complete: true } };
-  const database = emptyMailboxDatabase();
-  const originalSql = database.sql;
-  database.sql = async (strings, ...values) => {
-    const query = strings.join("?");
-    if (query.includes("from airbnb.guest_threads thread")) return [candidate];
-    if (query.includes("insert into airbnb.reply_deliveries")) return [{ id: "delivery-1", status: "needs_approval" }];
-    return originalSql(strings, ...values);
-  };
-  database.sql.begin = async (callback) => callback(database.sql);
-  database.sql.json = (value) => value;
-  let readerCalls = 0;
-  let decisionCalls = 0;
-  let clockCalls = 0;
-  const receipt = await runSupport({
-    database, now: () => new Date(clockCalls++ === 0
-      ? "2026-09-24T10:00:00.000Z" : "2026-09-24T10:05:00.000Z"),
-    collectMessages: async () => ({ messages: [], envelopesFound: 0 }),
-    collectLifecycleMessages: async () => ({ messages: [], envelopesFound: 0 }),
-    loadLiveWebsiteFacts: async ({ candidate: selected, now }) => {
-      readerCalls += 1;
-      assert.equal(selected.id, candidate.id);
-      assert.equal(now.toISOString(), "2026-09-24T10:05:00.000Z");
-      return websiteFacts;
-    },
-    decide: async ({ liveWebsiteFacts, providerThreadId, now }) => {
-      decisionCalls += 1;
-      assert.equal(providerThreadId, candidate.providerThreadId);
-      assert.deepEqual(liveWebsiteFacts, websiteFacts);
-      assert.equal(now.toISOString(), "2026-09-24T10:05:00.000Z");
-      assert.ok(verifiedLiveWebsiteFacts(liveWebsiteFacts,
-        { providerThreadId, listingName: candidate.listingName, now }));
-      return { topic: "adaptive_support", riskTier: "low", replyNeeded: true,
-        summary: "Verified answer.", draft: "The booking is confirmed.",
-        decisionSource: "adaptive_agent", decisionVersion: 3,
-        autoReply: true, status: "approved_for_guard", alertManagement: false };
-    },
-  });
-  assert.equal(readerCalls, 1);
-  assert.equal(decisionCalls, 1);
-  assert.equal(receipt.deliveredReplyCount, 0);
 });
 
 test("Ping retries run without new guest mail and cannot send in shadow mode", async () => {
@@ -301,21 +246,6 @@ test("only successful adaptive decisions from the same runtime mode are cached",
     ...liveDecision,
     deterministicGuard: "initial_inquiry_requires_airbnb_ui",
   }, "live", { replyCapable: true }), false);
-  const withWebsiteFacts = { ...liveDecision, liveWebsiteFacts: {
-    observedAt: "2026-09-24T10:00:00.000Z",
-  } };
-  assert.equal(canReuseStoredDecision(withWebsiteFacts, "live", null,
-    new Date("2026-09-24T10:04:59.000Z")), true);
-  assert.equal(canReuseStoredDecision(withWebsiteFacts, "live", null,
-    new Date("2026-09-24T10:05:01.000Z")), false);
-  const bookingCandidate = { guestMessage: "Is my booking confirmed?" };
-  assert.equal(canReuseStoredDecision(liveDecision, "live", bookingCandidate), false);
-  assert.equal(canReuseStoredDecision({ ...liveDecision, websiteReplyPolicyVersion: 1,
-    autoReply: false }, "live", bookingCandidate), true);
-  assert.equal(canReuseStoredDecision({ ...liveDecision, websiteReplyPolicyVersion: 1,
-    autoReply: true }, "live", bookingCandidate), false);
-  assert.equal(canReuseStoredDecision(liveDecision, "live",
-    { guestMessage: "Is parking available?" }), true);
 });
 
 test("initial inquiries without an SMTP reply route are held and escalated", () => {
