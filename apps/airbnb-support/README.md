@@ -35,6 +35,31 @@ Private Fly worker for Tristan's Airbnb conversation stream.
 - Guest replies contain no AI disclaimer or automated-reply footer.
 - An OpenAI failure creates a private human-review decision and no guest send. Keep the schedule dormant whenever the Tristan/Jane host-reply round-trip evidence is incomplete.
 
+## Live Website Work (Disabled)
+
+`live-website-facts.mjs` is an unused pure validator for future Airbnb UI
+observations. Reservation status requires the exact conversation, reservation
+code, canonical listing, stay dates, explicit verified/complete status, and an
+observation no older than five minutes. The caller must supply the exact
+canonical listing name, plus `requestedCheckIn` and `requestedCheckOut` for
+calendar availability; dates repeated inside the UI payload are not request
+authority. Missing or mismatched caller dates make calendar status unusable.
+`booking-approval.mjs` is an
+unused pure policy recommendation (`approve` or `human_review`, never decline).
+Neither module is imported by the support agent, runner, delivery, or
+Management/Ping path. No browser read, acceptance write, or new guest-send path
+is enabled by this work.
+
+The integration gap remains: the single full-context decision needs typed
+`requiresLiveBookingFact`, requested reservation code/listing/dates, and reason
+output; a browser reader must return an exact current observation; and a final
+guard must mechanically bind any affirmative guest claim to that observation.
+Free-form draft text cannot be made safe by a keyword/topic classifier or a
+collection of claim regexes. Until that contract and its final-guard tests exist,
+keep these helpers inert and leave the current guarded reply and durable paired
+Management notification behavior unchanged. Do not wire the approval helper to
+Management/Ping or an Airbnb action without a real, deduplicated booking request.
+
 With the support schedule paused, `AIRBNB_SUPPORT_BACKFILL_CONFIRMATION=RUN_WITH_SUPPORT_SCHEDULE_PAUSED node backfill.mjs` imports historical Airbnb conversation evidence from Tristan and Jane in bounded batches. It writes no guest or WhatsApp messages and is safe to rerun.
 
 For a recovery, keep both schedules paused while reconciling UI-only host replies,
