@@ -75,9 +75,10 @@ export class BootstrapController {
         if (await session.page.locator('iframe[src*="captcha" i], iframe[src*="recaptcha" i], iframe[src*="hcaptcha" i]').count()) {
           throw new Error("challenge_detected");
         }
-        await persistFreshCloudLogin(session.context, this.service, this.env);
+        await persistFreshCloudLogin(session.context, this.service, this.env, { signal: session.captureAbort.signal });
+        if (session.captureAbort.signal.aborted) throw new Error("Browser auth capture cancelled");
         this.lastOutcome = "saved";
-      } catch { this.lastOutcome = "unavailable"; }
+      } catch { if (!session.captureAbort.signal.aborted) this.lastOutcome = "unavailable"; }
       finally { await this.#closeSession(session); }
     })();
     return session.capturePromise;
@@ -111,7 +112,7 @@ export class BootstrapController {
       const expiresAt = this.now() + this.ttlMs;
       const session = { proxy, browser, context, page, removeGate, typedValues, expiresAt, actions: 0, frames: 0,
         timer: this.setTimer(() => { void this.stop(); }, this.ttlMs), poll: null,
-        inputQueue: Promise.resolve(), locked: false, capturePromise: null };
+        inputQueue: Promise.resolve(), locked: false, capturePromise: null, captureAbort: new AbortController() };
       this.session = session;
       await page.goto("https://www.airbnb.co.za/hosting", { waitUntil: "domcontentloaded", timeout: 20_000 });
       await this.#captureSignedIn(session);
@@ -183,7 +184,8 @@ export class BootstrapController {
   async stop() {
     const session = this.session;
     if (!session) return this.closing;
-    if (session.capturePromise) return session.capturePromise;
+    session.captureAbort.abort();
+    this.lastOutcome = "cancelled";
     return this.#closeSession(session);
   }
 }

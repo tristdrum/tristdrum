@@ -5,12 +5,15 @@ import { chromium } from "playwright";
 import { BootstrapController, createBootstrapApp } from "./bootstrap.mjs";
 import { createLocalOperatorProxy } from "./operator-proxy.mjs";
 
-function fakeBootstrap({ ttlMs = 5_000, saveFailure = false } = {}) {
+function fakeBootstrap({ ttlMs = 5_000, saveFailure = false, deferCapture = false } = {}) {
   const calls = { begin: 0, end: 0, saved: null, input: [], gatePolicy: null };
   let clock = 1_000;
   let expiry;
   let poll;
   let signedIn = false;
+  let releaseCapture;
+  let markCaptureStarted;
+  const captureStarted = new Promise((resolve) => { markCaptureStarted = resolve; });
   const auth = { cookies: [{ domain: ".airbnb.co.za", name: "synthetic", value: "fixture" }], origins: [] };
   const page = {
     goto: async () => {},
@@ -28,7 +31,15 @@ function fakeBootstrap({ ttlMs = 5_000, saveFailure = false } = {}) {
   const service = {
     beginBootstrap: async () => { calls.begin += 1; },
     endBootstrap: async () => { calls.end += 1; },
-    saveFreshCloudLogin: async (savedContext) => {
+    saveFreshCloudLogin: async (savedContext, { signal } = {}) => {
+      if (deferCapture) {
+        markCaptureStarted();
+        await new Promise((resolve, reject) => {
+          releaseCapture = resolve;
+          signal.addEventListener("abort", () => reject(new Error("synthetic_capture_cancelled")), { once: true });
+        });
+      }
+      if (signal?.aborted) throw new Error("synthetic_capture_cancelled");
       if (saveFailure) throw new Error("synthetic_save_failure");
       calls.saved = await savedContext.storageState();
     },
@@ -47,7 +58,8 @@ function fakeBootstrap({ ttlMs = 5_000, saveFailure = false } = {}) {
     authPostUrls: ["https://www.airbnb.co.za/api/v2/auth/synthetic-mfa"],
   });
   return { controller, calls, page, setClock: (value) => { clock = value; }, expire: () => expiry?.(),
-    poll: () => poll?.(), setSignedIn: (value) => { signedIn = value; } };
+    poll: () => poll?.(), setSignedIn: (value) => { signedIn = value; },
+    captureStarted, releaseCapture: () => releaseCapture?.() };
 }
 
 test("bootstrap uses one fresh context, bounded input, and in-memory auth save", async () => {
@@ -86,6 +98,29 @@ test("bootstrap TTL closes the only active session without saving", async () => 
   assert.equal(calls.saved, null);
   assert.equal(calls.end, 1);
   await assert.rejects(controller.frame(), /session_unavailable/);
+});
+
+test("Stop and TTL cancel an in-flight capture promptly without a late auth save", async () => {
+  for (const mode of ["stop", "ttl"]) {
+    const fixture = fakeBootstrap({ deferCapture: true });
+    await fixture.controller.start();
+    fixture.setSignedIn(true);
+    fixture.poll();
+    await fixture.captureStarted;
+    if (mode === "ttl") { fixture.setClock(6_001); fixture.expire(); }
+    let timeout;
+    try {
+      await Promise.race([fixture.controller.stop(), new Promise((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error("Stop waited for capture")), 250);
+      })]);
+    } finally { clearTimeout(timeout); }
+    fixture.releaseCapture();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(fixture.calls.saved, null, mode);
+    assert.equal(fixture.calls.end, 1, mode);
+    assert.equal(fixture.controller.status().active, false, mode);
+    assert.equal(fixture.controller.status().outcome, "cancelled", mode);
+  }
 });
 
 test("automatic capture failure closes without claiming a saved sign-in", async () => {

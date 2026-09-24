@@ -1,5 +1,6 @@
 import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { renameSync } from "node:fs";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 const AAD = Buffer.from("airbnb-browser-pilot:v1");
@@ -32,10 +33,17 @@ export class EncryptedStore {
     }
   }
 
-  async write(value) {
+  async write(value, { signal } = {}) {
+    if (signal?.aborted) throw new Error("Browser auth capture cancelled");
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
     const temporaryPath = `${this.path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
-    await writeFile(temporaryPath, encryptJson(value, this.key), { mode: 0o600, flag: "wx" });
-    await rename(temporaryPath, this.path);
+    let committed = false;
+    try {
+      await writeFile(temporaryPath, encryptJson(value, this.key), { mode: 0o600, flag: "wx", signal });
+      if (signal?.aborted) throw new Error("Browser auth capture cancelled");
+      if (signal) renameSync(temporaryPath, this.path);
+      else await rename(temporaryPath, this.path);
+      committed = true;
+    } finally { if (!committed) await rm(temporaryPath, { force: true }); }
   }
 }

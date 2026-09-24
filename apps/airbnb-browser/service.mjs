@@ -18,6 +18,18 @@ function failureReason(error) {
   return "browser_failure";
 }
 
+async function storageStateUnlessCancelled(context, signal) {
+  if (signal?.aborted) throw new Error("Browser auth capture cancelled");
+  if (!signal) return context.storageState();
+  let onAbort;
+  const cancelled = new Promise((_resolve, reject) => {
+    onAbort = () => reject(new Error("Browser auth capture cancelled"));
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try { return await Promise.race([context.storageState(), cancelled]); }
+  finally { signal.removeEventListener("abort", onAbort); }
+}
+
 export function assertCompleteData(kind, data) {
   if (data?.source !== "airbnb_host_website") throw new ExtractionError("Unexpected snapshot source");
   if (kind === "calendar") {
@@ -107,13 +119,14 @@ export class BrowserPilotService {
     return result;
   }
 
-  saveFreshCloudLogin(context) {
+  saveFreshCloudLogin(context, { signal } = {}) {
     const run = async () => {
       if (!this.bootstrapActive) throw new Error("No active bootstrap session");
-      const auth = validateStorageState(await context.storageState());
+      const auth = validateStorageState(await storageStateUnlessCancelled(context, signal));
+      if (signal?.aborted) throw new Error("Browser auth capture cancelled");
       this.#accountRuntime(this.now());
       const next = { ...this.state, auth, snapshots: {}, attempts: {} };
-      await this.store.write(next);
+      await this.store.write(next, { signal });
       this.state = next;
     };
     const result = this.inFlight.then(run);

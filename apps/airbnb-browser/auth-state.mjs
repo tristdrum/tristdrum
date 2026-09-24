@@ -13,9 +13,9 @@ export function validateStorageState(value) {
   return value;
 }
 
-export async function persistFreshCloudLogin(context, service, env = process.env) {
+export async function persistFreshCloudLogin(context, service, env = process.env, { signal } = {}) {
   if (env.FLY_APP_NAME !== "tristdrum-airbnb-browser-pilot") {
     throw new Error("Fresh login must occur inside the pilot Fly app");
   }
-  return service.saveFreshCloudLogin(context);
+  return service.saveFreshCloudLogin(context, { signal });
 }

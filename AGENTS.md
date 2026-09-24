@@ -39,10 +39,16 @@ is deployed, enabled, or healthy now.
 - Preserve cleaner confirmed-reservation checks, the shared delivery ledger,
   stable idempotency, and exact destination readback. Do not revive old Min
   schedules or duplicate the active personal delivery path.
-- Keep the browser pilot read-only until a fresh cloud login, complete live
-  calendar and conversation observations, cost measurements, and a single-writer
-  cutover are verified. Its synthetic fixtures and local rendering probes are
-  not evidence of an authenticated cloud booking or guest-action path.
+- Do not deploy, log in through, or poll with the browser pilot under Airbnb's
+  current Terms, which prohibit automated platform access. The server has a
+  default-closed, code-pinned Airbnb-issued permission gate; owner approval or
+  an environment flag alone cannot open it. Require separately documented
+  Airbnb permission for this bespoke use before reconsidering that gate, then
+  still verify fresh cloud login, complete live calendar and conversation
+  observations, cost measurements, and a single-writer cutover. Its synthetic
+  fixtures and local rendering probes are not live proof. Official iCal export
+  or authorized software/API connectivity are distinct alternatives; see the
+  [browser pilot](apps/airbnb-browser/README.md) for the current hold.
 - Cleaning plans authorize communication of room work, not staffing decisions.
   Follow [cleaning-team authority](docs/AIRBNB_CLEANING_TEAM_AUTHORITY.md) before
   responding to an individual about attendance, shifts, or temporary cover.

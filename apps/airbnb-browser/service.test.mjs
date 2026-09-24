@@ -25,7 +25,7 @@ function fixtureService() {
     },
   };
   const service = new BrowserPilotService({}, { store, readers, now: () => clock });
-  return { service, setClock: (date) => { clock = new Date(date); }, setCalendar: (data) => { calendarResult = data; }, setMessages: (data) => { messageResult = data; }, storage };
+  return { service, store, setClock: (date) => { clock = new Date(date); }, setCalendar: (data) => { calendarResult = data; }, setMessages: (data) => { messageResult = data; }, storage };
 }
 
 test("complete snapshots are fresh only within their distinct TTLs", async () => {
@@ -168,4 +168,50 @@ test("fresh cloud auth wins over queued refresh and runtime checkpoints atomical
   service.startPolling();
   assert.equal(service.pollTimers.length, 2);
   service.stopPolling();
+});
+
+test("cancelling a pending cloud capture releases the queue without persisting auth", async () => {
+  const { service, storage } = fixtureService();
+  await service.init();
+  await service.beginBootstrap();
+  const original = structuredClone(storage.auth);
+  const abort = new AbortController();
+  let entered;
+  const started = new Promise((resolve) => { entered = resolve; });
+  let release;
+  const context = { storageState: () => { entered(); return new Promise((resolve) => { release = resolve; }); } };
+  const save = service.saveFreshCloudLogin(context, { signal: abort.signal });
+  await started;
+  abort.abort();
+  await assert.rejects(save, /cancelled/);
+  await service.endBootstrap();
+  release({ cookies: [{ domain: ".airbnb.co.za", name: "synthetic", value: "late" }], origins: [] });
+  await Promise.resolve();
+  assert.deepEqual(storage.auth, original);
+  assert.equal(service.bootstrapActive, false);
+});
+
+test("a cancellation reaching the store before commit keeps the prior auth", async () => {
+  const { service, store, storage } = fixtureService();
+  await service.init();
+  await service.beginBootstrap();
+  const original = structuredClone(storage.auth);
+  let enterWrite;
+  const writing = new Promise((resolve) => { enterWrite = resolve; });
+  let releaseWrite;
+  store.write = async (value, { signal } = {}) => {
+    enterWrite();
+    await new Promise((resolve) => { releaseWrite = resolve; });
+    if (signal?.aborted) throw new Error("Browser auth capture cancelled");
+    Object.assign(storage, structuredClone(value));
+  };
+  const abort = new AbortController();
+  const fresh = { cookies: [{ domain: ".airbnb.co.za", name: "synthetic", value: "late" }], origins: [] };
+  const save = service.saveFreshCloudLogin({ storageState: async () => fresh }, { signal: abort.signal });
+  await writing;
+  abort.abort();
+  releaseWrite();
+  await assert.rejects(save, /cancelled/);
+  await service.endBootstrap();
+  assert.deepEqual(storage.auth, original);
 });

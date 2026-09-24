@@ -46,6 +46,10 @@ test("state and guest snapshots are encrypted and tampering fails", async () => 
     const path = join(dir, "state.enc");
     const store = new EncryptedStore(path, key);
     await store.write({ marker: "SYNTHETIC_PRIVATE_MARKER", auth: { cookies: ["synthetic-cookie"] } });
+    const cancelled = new AbortController();
+    cancelled.abort();
+    await assert.rejects(store.write({ marker: "SYNTHETIC_UNWANTED_AUTH" }, { signal: cancelled.signal }), /cancelled/);
+    assert.equal((await store.read()).marker, "SYNTHETIC_PRIVATE_MARKER");
     const bytes = await readFile(path, "utf8");
     assert.doesNotMatch(bytes, /SYNTHETIC_PRIVATE_MARKER|synthetic-cookie/);
     assert.deepEqual(await store.read(), { marker: "SYNTHETIC_PRIVATE_MARKER", auth: { cookies: ["synthetic-cookie"] } });

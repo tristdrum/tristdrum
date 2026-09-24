@@ -2,8 +2,10 @@ import { loadConfig } from "./config.mjs";
 import { createApp } from "./mcp.mjs";
 import { BrowserPilotService } from "./service.mjs";
 import { BootstrapController, createBootstrapApp } from "./bootstrap.mjs";
+import { assertAirbnbAutomatedAccessAuthorized } from "./runtime-authorization.mjs";
 
 try {
+  await assertAirbnbAutomatedAccessAuthorized();
   const config = loadConfig();
   if (config.bootstrapBlocked) process.stderr.write("Auth viewer disabled: exact login/MFA POST URLs have not been reviewed.\n");
   if (config.bootstrapEnabled && process.env.FLY_APP_NAME !== "tristdrum-airbnb-browser-pilot") {
