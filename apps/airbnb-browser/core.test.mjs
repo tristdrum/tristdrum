@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { addTransfer, budgetStatus, currentBudget, reserveEventModelCost } from "./budget.mjs";
+import { addRuntime, addTransfer, budgetStatus, currentBudget, reserveEventModelCost } from "./budget.mjs";
 import { allowedReadRequest } from "./browser.mjs";
 import { loadConfig } from "./config.mjs";
 import { EncryptedStore, decryptJson, encryptJson } from "./encrypted-store.mjs";
@@ -17,6 +17,7 @@ test("configuration fixes the three listing URLs and rejects foreign hosts", () 
   const env = {
     AIRBNB_BROWSER_DATA_KEY: key.toString("base64"),
     AIRBNB_BROWSER_MCP_TOKEN: "x".repeat(32),
+    AIRBNB_BROWSER_OPERATOR_TOKEN: "y".repeat(32),
     AIRBNB_BROWSER_CALENDAR_URLS: JSON.stringify({
       1: "https://www.airbnb.co.za/multicalendar/101",
       2: "https://www.airbnb.co.za/multicalendar/102",
@@ -24,6 +25,7 @@ test("configuration fixes the three listing URLs and rejects foreign hosts", () 
     }),
   };
   assert.equal(loadConfig(env).calendarUrls[3], "https://www.airbnb.co.za/multicalendar/103");
+  assert.throws(() => loadConfig({ ...env, AIRBNB_BROWSER_OPERATOR_TOKEN: env.AIRBNB_BROWSER_MCP_TOKEN }), /distinct/);
   assert.throws(() => loadConfig({ ...env, AIRBNB_BROWSER_CALENDAR_URLS: JSON.stringify({
     1: "https://evil.example/multicalendar/101", 2: env.AIRBNB_BROWSER_MESSAGES_URL, 3: "https://www.airbnb.co.za/multicalendar/103",
   }) }), /Airbnb hosting URL/);
@@ -71,12 +73,15 @@ test("monthly meter resets, caps transfer and gates future event costs", () => {
   const now = new Date("2026-09-24T00:00:00Z");
   const budget = currentBudget({}, now);
   assert.equal(budgetStatus(budget, now).limitUsd, 10);
+  const running = addRuntime(budget, 3600, now);
+  assert.equal(budgetStatus(running, now).runtimeUsd, 0.02);
+  assert.equal(budgetStatus(running, now).reservedVolumeRootfsSnapshotsUsd, 1);
   const nearCap = addTransfer(budget, 2 * 1024 ** 3, now);
   assert.equal(budgetStatus(nearCap, now).exhausted, true);
   assert.equal(currentBudget(nearCap, new Date("2026-09-30T21:59:59Z")).transferredBytes, 2 * 1024 ** 3);
   assert.equal(currentBudget(nearCap, new Date("2026-09-30T22:00:00Z")).transferredBytes, 0);
   assert.equal(currentBudget(nearCap, new Date("2026-10-01T00:00:00Z")).transferredBytes, 0);
-  assert.throws(() => reserveEventModelCost(budget, 2, now), /budget exhausted/);
+  assert.throws(() => reserveEventModelCost(budget, 9, now), /budget exhausted/);
 });
 
 test("all future Airbnb action types refuse in the pilot", async () => {

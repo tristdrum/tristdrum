@@ -26,7 +26,7 @@ test("authenticated remote MCP exposes only read tools and calls them", async ()
     reserveAgentCost: async (maxUsd) => ({ modelUsd: maxUsd }),
     ready: () => false,
   };
-  const server = createApp(service, "a".repeat(40)).listen(0, "127.0.0.1");
+  const server = createApp(service, { mcpToken: "a".repeat(40), operatorToken: "b".repeat(40) }).listen(0, "127.0.0.1");
   await once(server, "listening");
   const url = new URL(`http://127.0.0.1:${server.address().port}/mcp`);
   try {
@@ -34,13 +34,17 @@ test("authenticated remote MCP exposes only read tools and calls them", async ()
     assert.equal(unauthorized.status, 401);
     const health = await fetch(new URL("/healthz", url));
     assert.deepEqual(await health.json(), { alive: true, ready: false, pilot: "read_only" });
-    const ready = await fetch(new URL("/readyz", url), { headers: { Authorization: `Bearer ${"a".repeat(40)}` } });
+    const mcpOnOperator = await fetch(new URL("/metrics", url), { headers: { Authorization: `Bearer ${"a".repeat(40)}` } });
+    assert.equal(mcpOnOperator.status, 401);
+    const operatorOnMcp = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${"b".repeat(40)}`, "Content-Type": "application/json" }, body: "{}" });
+    assert.equal(operatorOnMcp.status, 401);
+    const ready = await fetch(new URL("/readyz", url), { headers: { Authorization: `Bearer ${"b".repeat(40)}` } });
     assert.equal(ready.status, 503);
-    const scheduledRefresh = await fetch(new URL("/refresh/messages", url), { method: "POST", headers: { Authorization: `Bearer ${"a".repeat(40)}` } });
+    const scheduledRefresh = await fetch(new URL("/refresh/messages", url), { method: "POST", headers: { Authorization: `Bearer ${"b".repeat(40)}` } });
     assert.equal(scheduledRefresh.status, 200);
-    const reserve = await fetch(new URL("/budget/reserve-agent", url), { method: "POST", headers: { Authorization: `Bearer ${"a".repeat(40)}`, "Content-Type": "application/json" }, body: JSON.stringify({ maxUsd: 0.25 }) });
+    const reserve = await fetch(new URL("/budget/reserve-agent", url), { method: "POST", headers: { Authorization: `Bearer ${"b".repeat(40)}`, "Content-Type": "application/json" }, body: JSON.stringify({ maxUsd: 0.25 }) });
     assert.equal((await reserve.json()).budget.modelUsd, 0.25);
-    const metrics = await fetch(new URL("/metrics", url), { headers: { Authorization: `Bearer ${"a".repeat(40)}` } });
+    const metrics = await fetch(new URL("/metrics", url), { headers: { Authorization: `Bearer ${"b".repeat(40)}` } });
     assert.equal((await metrics.json()).pilot, "read_only");
     const client = new Client({ name: "pilot-test", version: "1.0.0" });
     const transport = new StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: `Bearer ${"a".repeat(40)}` } } });

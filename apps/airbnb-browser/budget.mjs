@@ -1,5 +1,7 @@
 const LIMIT_USD = 10;
-const RESERVED_INFRA_USD = 8.5;
+const VOLUME_ROOTFS_SNAPSHOT_RESERVE_USD = 1;
+const MACHINE_USD_PER_HOUR = 0.02;
+const UNMETERED_HEADROOM_USD = 0.25;
 const MAX_TRANSFER_BYTES = 2 * 1024 ** 3;
 const EGRESS_USD_PER_GB = 0.25;
 
@@ -10,22 +12,37 @@ export function monthKey(now = new Date()) {
 }
 
 export function currentBudget(stored = {}, now = new Date()) {
-  if (stored.month !== monthKey(now)) return { month: monthKey(now), transferredBytes: 0, modelUsd: 0 };
-  return { month: stored.month, transferredBytes: stored.transferredBytes ?? 0, modelUsd: stored.modelUsd ?? 0 };
+  if (stored.month !== monthKey(now)) return { month: monthKey(now), transferredBytes: 0, modelUsd: 0, startedSeconds: 0 };
+  return { month: stored.month, transferredBytes: stored.transferredBytes ?? 0,
+    modelUsd: stored.modelUsd ?? 0, startedSeconds: stored.startedSeconds ?? 0 };
 }
 
 export function budgetStatus(stored, now = new Date()) {
   const budget = currentBudget(stored, now);
-  const estimatedUsd = RESERVED_INFRA_USD + budget.modelUsd + budget.transferredBytes / 1024 ** 3 * EGRESS_USD_PER_GB;
+  const runtimeUsd = budget.startedSeconds / 3600 * MACHINE_USD_PER_HOUR;
+  const transferUsd = budget.transferredBytes / 1024 ** 3 * EGRESS_USD_PER_GB;
+  const estimatedUsd = VOLUME_ROOTFS_SNAPSHOT_RESERVE_USD + runtimeUsd + transferUsd + budget.modelUsd;
   return {
     month: budget.month,
     limitUsd: LIMIT_USD,
-    reservedInfraUsd: RESERVED_INFRA_USD,
+    reservedVolumeRootfsSnapshotsUsd: VOLUME_ROOTFS_SNAPSHOT_RESERVE_USD,
+    runtimeRateUsdPerHour: MACHINE_USD_PER_HOUR,
+    runtimeUsd: Number(runtimeUsd.toFixed(4)),
+    transferUsd: Number(transferUsd.toFixed(4)),
+    unmeteredHeadroomUsd: UNMETERED_HEADROOM_USD,
     estimatedUsd: Number(estimatedUsd.toFixed(4)),
+    startedSeconds: budget.startedSeconds,
     transferredBytes: budget.transferredBytes,
     modelUsd: budget.modelUsd,
-    exhausted: estimatedUsd >= LIMIT_USD || budget.transferredBytes >= MAX_TRANSFER_BYTES,
+    exhausted: estimatedUsd + UNMETERED_HEADROOM_USD >= LIMIT_USD || budget.transferredBytes >= MAX_TRANSFER_BYTES,
   };
+}
+
+export function addRuntime(stored, seconds, now = new Date()) {
+  if (!Number.isFinite(seconds) || seconds < 0) throw new Error("Invalid runtime duration");
+  const budget = currentBudget(stored, now);
+  budget.startedSeconds += seconds;
+  return budget;
 }
 
 export function addTransfer(stored, bytes, now = new Date()) {

@@ -60,6 +60,17 @@ test("partial refresh retains old evidence but blocks reads", async () => {
   assert.equal(service.status().kinds.calendar.fresh, false);
 });
 
+test("reservation snapshot without reconciled visible guest counts is incomplete", async () => {
+  const { service, setCalendar } = fixtureService();
+  await service.init();
+  setCalendar({ ...calendar, listings: [{ ...calendar.listings[0], reservations: [{
+    confirmationCode: "TESTCODE1", unitNumber: 1, checkIn: "2026-09-24", checkOut: "2026-09-25",
+    guestProfileId: "000000001", status: "upcoming_guests",
+  }] }, ...calendar.listings.slice(1)] });
+  assert.equal((await service.refresh("calendar")).calendar.reason, "layout_or_partial");
+  assert.throws(() => service.read("calendar"), SnapshotUnavailableError);
+});
+
 test("expired login makes message snapshot unavailable even when cached", async () => {
   const { service, setClock, setMessages } = fixtureService();
   await service.init();
@@ -108,6 +119,16 @@ test("Agents API spend must be reserved against the same monthly cap", async () 
   await service.init();
   await service.reserveAgentCost(0.5);
   assert.equal(storage.budget.modelUsd, 0.5);
-  await assert.rejects(service.reserveAgentCost(1.1), /budget exhausted/);
+  await assert.rejects(service.reserveAgentCost(9), /budget exhausted/);
   assert.equal(storage.budget.modelUsd, 0.5);
+});
+
+test("started runtime is metered and persisted without billing stopped gaps", async () => {
+  const { service, setClock, storage } = fixtureService();
+  await service.init();
+  setClock("2026-09-24T11:00:00Z");
+  assert.equal(service.status().budget.startedSeconds, 3600);
+  assert.equal(service.status().budget.runtimeUsd, 0.02);
+  await service.flushRuntime();
+  assert.equal(storage.budget.startedSeconds, 3600);
 });

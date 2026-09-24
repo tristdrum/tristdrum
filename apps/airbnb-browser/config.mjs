@@ -25,6 +25,10 @@ export function loadConfig(env = process.env) {
   }
   const mcpToken = env.AIRBNB_BROWSER_MCP_TOKEN ?? "";
   if (mcpToken.length < 32) throw new Error("AIRBNB_BROWSER_MCP_TOKEN must be at least 32 characters");
+  const operatorToken = env.AIRBNB_BROWSER_OPERATOR_TOKEN ?? "";
+  if (operatorToken.length < 32 || operatorToken === mcpToken) {
+    throw new Error("AIRBNB_BROWSER_OPERATOR_TOKEN must be distinct and at least 32 characters");
+  }
   let urls;
   try { urls = JSON.parse(env.AIRBNB_BROWSER_CALENDAR_URLS ?? ""); }
   catch { throw new Error("AIRBNB_BROWSER_CALENDAR_URLS must be JSON for units 1, 2 and 3"); }
@@ -35,6 +39,7 @@ export function loadConfig(env = process.env) {
   return Object.freeze({
     dataKey,
     mcpToken,
+    operatorToken,
     calendarUrls,
     messagesUrl: airbnbUrl(env.AIRBNB_BROWSER_MESSAGES_URL ?? "https://www.airbnb.co.za/hosting/messages", "/hosting/messages"),
     statePath: resolve(env.AIRBNB_BROWSER_STATE_PATH ?? "/data/browser-state.enc"),

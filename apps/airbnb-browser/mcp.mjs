@@ -69,15 +69,16 @@ export function createMcpServer(service) {
   return server;
 }
 
-export function createApp(service, token) {
+export function createApp(service, { mcpToken, operatorToken }) {
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "64kb" }));
   app.get("/healthz", (_request, response) => response.json({ alive: true, ready: service.ready(), pilot: "read_only" }));
-  app.use((request, response, next) => {
+  const requireToken = (token) => (request, response, next) => {
     if (request.get("origin") || !authorized(request, token)) return response.sendStatus(401);
     next();
-  });
+  };
+  app.use(["/readyz", "/metrics", "/refresh", "/budget"], requireToken(operatorToken));
   app.get("/readyz", (_request, response) => response.status(service.ready() ? 200 : 503).json({ ready: service.ready() }));
   app.get("/metrics", (_request, response) => response.json(service.status()));
   app.post("/refresh/:kind", async (request, response) => {
@@ -91,7 +92,7 @@ export function createApp(service, token) {
     try { return response.json({ reserved: true, budget: await service.reserveAgentCost(request.body?.maxUsd) }); }
     catch { return response.status(402).json({ reserved: false, reason: "budget_unavailable" }); }
   });
-  app.post("/mcp", async (request, response) => {
+  app.post("/mcp", requireToken(mcpToken), async (request, response) => {
     const server = createMcpServer(service);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     try {
