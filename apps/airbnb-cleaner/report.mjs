@@ -722,7 +722,11 @@ export function classifyUnits(reservations, targetDate) {
       && Boolean(arrivals[0].confirmationCode && checkouts[0].confirmationCode)
       && arrivals[0].confirmationCode !== checkouts[0].confirmationCode
       && Boolean(arrivals[0].guestProfileId)
-      && arrivals[0].guestProfileId === checkouts[0].guestProfileId;
+      && arrivals[0].guestProfileId === checkouts[0].guestProfileId
+      && Boolean(arrivals[0].guestName && checkouts[0].guestName)
+      && cleanName(arrivals[0].guestName) === cleanName(checkouts[0].guestName)
+      && Boolean(arrivals[0].guests && checkouts[0].guests)
+      && arrivals[0].guests === checkouts[0].guests;
 
     let action = "empty";
     if (continuousStay) action = "stayover";
