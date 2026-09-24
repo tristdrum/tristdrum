@@ -534,7 +534,10 @@ test("adjacent bookings for one verified Airbnb profile remain a stayover", () =
   assert.equal(reports[2].arrivals.length, 0);
   assert.equal(reports[2].checkouts.length, 0);
   assert.equal(reports[2].stayovers.length, 1);
-  assert.match(buildMessage({ targetDate: date, unitReports: reports, weather: dryWeather }), /No Airbnb units need cleaning/);
+  const noWork = buildMessage({ targetDate: date, unitReports: reports, weather: dryWeather });
+  assert.match(noWork, /No Airbnb units need cleaning/);
+  assert.match(noWork, /Unit 3\n- Continuing stay; no turnover cleaning\./);
+  assert.match(noWork, /Unit 3\n- Undwendwe lusaqhubeka nokuhlala/);
 
   for (const unverified of [null, "987654321"]) {
     const changed = classifyUnits([departing, { ...arriving, guestProfileId: unverified }], date);
@@ -543,6 +546,32 @@ test("adjacent bookings for one verified Airbnb profile remain a stayover", () =
   const moved = classifyUnits([departing, { ...arriving, unitId: 2 }], date);
   assert.equal(moved[2].action, "checkout");
   assert.equal(moved[1].action, "arrival");
+
+  const overlap = reservation({ unitId: 3, guestName: "Third Guest", guests: "1 adult",
+    checkIn: "2026-09-20", checkOut: "2026-09-22" });
+  assert.equal(classifyUnits([departing, arriving, overlap], date)[2].action, "turnover");
+
+  const otherUnit = reservation({ unitId: 1, guestName: "Arrival Elsewhere", guests: "1 adult",
+    checkIn: "2026-09-21", checkOut: "2026-09-22" });
+  const mixed = buildMessage({ targetDate: date,
+    unitReports: classifyUnits([departing, arriving, otherUnit], date), weather: dryWeather });
+  assert.match(mixed, /Unit 3\n- Continuing stay; no turnover cleaning\./);
+  assert.match(mixed, /Unit 3\n- Undwendwe lusaqhubeka nokuhlala/);
+});
+
+test("a newer unidentified booking revision does not inherit an old profile ID", () => {
+  const old = { ...reservation({ unitId: 3, guestName: "Old Guest", guests: "1 adult",
+    checkIn: "2026-09-20", checkOut: "2026-09-21" }),
+    confirmationCode: "HMOLD001", sourceEnvelopeId: "old", sourceTimestamp: 100,
+    guestProfileId: "123456789", evidenceKind: "confirmed" };
+  const changed = { ...old, guestName: "Different Guest", guestProfileId: null,
+    sourceEnvelopeId: "changed", sourceTimestamp: 200 };
+  const [merged] = mergeReservations([old, changed]);
+  assert.equal(merged.guestProfileId, null);
+  const next = { ...reservation({ unitId: 3, guestName: "Old Guest", guests: "1 adult",
+    checkIn: "2026-09-21", checkOut: "2026-09-22" }),
+    confirmationCode: "HMNEXT001", guestProfileId: "123456789" };
+  assert.equal(classifyUnits([merged, next], parseISODate("2026-09-21"))[2].action, "turnover");
 });
 
 test("reproduces the July 28 checkout-only and turnover timeline", () => {
