@@ -10,13 +10,17 @@ export const AIRBNB_AUTOMATED_ACCESS_GRANT = null;
 
 export async function assertAirbnbAutomatedAccessAuthorized({ grant = AIRBNB_AUTOMATED_ACCESS_GRANT,
   documentPath = PERMISSION_PATH, now = () => new Date() } = {}) {
-  const expiry = /^\d{4}-\d{2}-\d{2}$/.test(grant?.expiresOn ?? "") ?
-    new Date(`${grant.expiresOn}T23:59:59Z`) : null;
+  const expiryText = grant?.expiresAt ?? "";
+  const expiryParts = /^(\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d)(?:\.\d{1,3})?(Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))$/.exec(expiryText);
+  const expiryMs = expiryParts ? Date.parse(expiryText) : NaN;
+  const zone = expiryParts?.[2];
+  const offsetMinutes = zone === "Z" ? 0 :
+    (zone?.[0] === "-" ? -1 : 1) * (Number(zone?.slice(1, 3)) * 60 + Number(zone?.slice(4, 6)));
+  const validInstant = Number.isFinite(expiryMs) &&
+    new Date(expiryMs + offsetMinutes * 60_000).toISOString().slice(0, 19) === expiryParts[1];
   if (grant?.issuer !== "Airbnb" || grant.scope !== REQUIRED_SCOPE ||
       !/^[a-f0-9]{64}$/.test(grant.documentSha256 ?? "") ||
-      !expiry || !Number.isFinite(expiry.getTime()) ||
-      expiry.toISOString().slice(0, 10) !== grant.expiresOn ||
-      now().getTime() > expiry.getTime() ||
+      !validInstant || now().getTime() > expiryMs ||
       !isAbsolute(documentPath)) {
     throw new Error("Airbnb-issued automated website access permission is not configured or has expired");
   }

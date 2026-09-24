@@ -22,7 +22,7 @@ test("permission gate requires an unexpired Airbnb grant pinned to a private doc
   const document = Buffer.from("SYNTHETIC_AIRBNB_PERMISSION_FIXTURE");
   const documentSha256 = createHash("sha256").update(document).digest("hex");
   const grant = { issuer: "Airbnb", scope: "automated_host_website_read_only_calendar_messages",
-    documentSha256, expiresOn: "2026-12-31" };
+    documentSha256, expiresAt: "2026-12-31T23:59:59Z" };
   try {
     await writeFile(documentPath, document, { mode: 0o600 });
     const options = { grant, documentPath, now: () => new Date("2026-09-24T10:00:00Z") };
@@ -31,7 +31,18 @@ test("permission gate requires an unexpired Airbnb grant pinned to a private doc
     await assert.rejects(assertAirbnbAutomatedAccessAuthorized({ ...options,
       grant: { ...grant, issuer: "Owner" } }), /not configured/);
     await assert.rejects(assertAirbnbAutomatedAccessAuthorized({ ...options,
-      grant: { ...grant, expiresOn: "2026-01-01" } }), /expired/);
+      grant: { ...grant, expiresAt: "2026-01-01T00:00:00Z" } }), /expired/);
+    await assert.rejects(assertAirbnbAutomatedAccessAuthorized({ ...options,
+      grant: { ...grant, expiresAt: "2026-12-31" } }), /expired/);
+    await assert.rejects(assertAirbnbAutomatedAccessAuthorized({ ...options,
+      grant: { ...grant, expiresAt: "2026-12-31T23:59:59" } }), /expired/);
+    await assert.rejects(assertAirbnbAutomatedAccessAuthorized({ ...options,
+      grant: { ...grant, expiresAt: "2026-02-31T23:59:59+02:00" } }), /expired/);
+    const sastGrant = { ...grant, expiresAt: "2026-12-31T23:59:59+02:00" };
+    await assertAirbnbAutomatedAccessAuthorized({ ...options, grant: sastGrant,
+      now: () => new Date("2026-12-31T21:59:59.000Z") });
+    await assert.rejects(assertAirbnbAutomatedAccessAuthorized({ ...options, grant: sastGrant,
+      now: () => new Date("2026-12-31T21:59:59.001Z") }), /expired/);
     await assert.rejects(assertAirbnbAutomatedAccessAuthorized({ ...options,
       grant: { ...grant, documentSha256: "0".repeat(64) } }), /does not match/);
     await writeFile(documentPath, "SYNTHETIC_CHANGED_DOCUMENT");
