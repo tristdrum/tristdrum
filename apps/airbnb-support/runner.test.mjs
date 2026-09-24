@@ -308,6 +308,14 @@ test("only successful adaptive decisions from the same runtime mode are cached",
     new Date("2026-09-24T10:04:59.000Z")), true);
   assert.equal(canReuseStoredDecision(withWebsiteFacts, "live", null,
     new Date("2026-09-24T10:05:01.000Z")), false);
+  const bookingCandidate = { guestMessage: "Is my booking confirmed?" };
+  assert.equal(canReuseStoredDecision(liveDecision, "live", bookingCandidate), false);
+  assert.equal(canReuseStoredDecision({ ...liveDecision, websiteReplyPolicyVersion: 1,
+    autoReply: false }, "live", bookingCandidate), true);
+  assert.equal(canReuseStoredDecision({ ...liveDecision, websiteReplyPolicyVersion: 1,
+    autoReply: true }, "live", bookingCandidate), false);
+  assert.equal(canReuseStoredDecision(liveDecision, "live",
+    { guestMessage: "Is parking available?" }), true);
 });
 
 test("initial inquiries without an SMTP reply route are held and escalated", () => {

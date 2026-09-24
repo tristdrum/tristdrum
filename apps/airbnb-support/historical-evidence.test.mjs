@@ -160,9 +160,10 @@ for (const fixture of corpus.conversations) {
         draft: adjudicated.draft,
       }),
     });
-    assert.equal(decision.autoReply, true);
-    assert.equal(decision.alertManagement, adjudicated.alertManagement);
-    assert.equal(decision.status, "approved_for_guard");
+    const bookingReview = fixture.id === "booking-question";
+    assert.equal(decision.autoReply, !bookingReview);
+    assert.equal(decision.alertManagement, bookingReview || adjudicated.alertManagement);
+    assert.equal(decision.status, bookingReview ? "needs_human" : "approved_for_guard");
   });
 }
 

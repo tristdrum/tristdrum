@@ -12,7 +12,7 @@ Private Fly worker for Tristan's Airbnb conversation stream.
 - Post-stay collection or office-storage questions do not inherit early-check-in or late-checkout rules. Use current collection facts and the conversation instead of granting new room entry.
 - Post-stay replies are checked for contradictory future tense and clear name/emoji tone misses. The same model gets one natural revision attempt; a still-inconsistent draft is held and alerted instead of being sent.
 - The small canonical knowledge module holds stable hosting policy and anonymized precedents. Current property facts remain the source for Wi-Fi, access, directions, parking, and other details that can change.
-- Canonical knowledge includes the verified public Airbnb links for all three studios. When live availability is unknown, the adaptive agent may offer relevant listing links, but they are not vacancy evidence or permission to change a booking. A genuine unresolved guest question may instead receive a short promise to double-check plus a Management alert through the existing paired WhatsApp/Ping path. Thanks and unchanged follow-ups do not create alerts. Host-only links never belong in guest replies.
+- Canonical knowledge includes the verified public Airbnb links for all three studios. When live availability is unknown, the adaptive agent may draft relevant listing links, but they are not vacancy evidence or permission to change a booking. A genuine unresolved guest question may instead get a draft promise to double-check plus a Management alert through the existing paired WhatsApp/Ping path. Booking-status and stay-availability drafts require human review before sending. Thanks and unchanged follow-ups do not create alerts. Host-only links never belong in guest replies.
 - Arrival from 15:00 (including late evening or after midnight within the booked stay) and departure by 10:00 are self-service. Ordinary ETAs, early departures and checkout confirmations do not need Management, Ping, readiness prompts or staff attendance. The same full-context decision distinguishes these from genuine early entry, late checkout, lockouts and other mixed issues. Midnight arrival is grounded in the booked dates, not interpreted as an automatic early-check-in request.
 - Version 3 decisions receive previously delivered Management summaries and can keep thanks or unchanged follow-ups quiet without declaring the underlying issue resolved. The model writes a nullable `managementSummary`: one or two natural sentences naming the guest, known stay dates and the actual issue/action. No headings, field labels, default links or access credentials. Legacy/transport alerts retain a short factual fallback without inventing dates.
 - Reply-route availability is supplied to that same decision. An initial inquiry without an email route retains its useful guest draft and a natural Management summary explaining the question and need to reply in Airbnb; the final route guard remains authoritative.
@@ -39,7 +39,8 @@ Private Fly worker for Tristan's Airbnb conversation stream.
 
 `runSupport({ loadLiveWebsiteFacts })` accepts an optional, read-only async function
 called with `{ candidate, now }` only when making a new decision. It defaults to
-no reader, does not revisit stored decisions, and does not add a browser action,
+no reader, normally reuses stored decisions (except expired facts or older
+booking decisions invalidated by the human-review hold), and adds no browser action,
 new guest-message trigger, or delivery path. The parent browser pilot can return
 `null` on an incomplete/failed read or this typed `liveWebsiteFacts` payload:
 
@@ -73,10 +74,19 @@ the calendar range must match it exactly. Only explicit status values
 was visible. The support boundary drops a facet with missing or false flags,
 invalid/mismatched dates, wrong listing/thread, a future timestamp, or an observation
 older than five minutes. It sends only validated facts to the existing
-`gpt-5.6-sol` xhigh full-context decision. A draft that asserts unsupported or
-contradictory booking/availability claims gets one revision attempt, then is
-held for review. The final draft must name the verified listing and full date
-range. The decision stores only its validated fact snapshot. Stored decisions
+`gpt-5.6-sol` xhigh full-context decision. Claims are checked one sentence or
+clause at a time; a correct range elsewhere cannot excuse a wrong claim, and
+an alternative studio in another sentence is allowed. A draft that asserts an
+unsupported or contradictory claim gets one revision attempt. Because free-form
+claim wording cannot be exhaustively validated, any new booking-status,
+date-change, extension, or stay-availability reply needed is held for human
+review until the typed browser action route is live, even with verified facts.
+Ordinary property replies, such as parking and Wi-Fi, remain eligible for the
+existing autonomous path. `managementNeeds` separates unresolved website checks
+from other host actions so a booking-claim revision cannot erase a lockout
+handoff. Older cached booking decisions are reconsidered, and an already
+approved autonomous booking reply is stopped before SMTP unless it has a human
+approver. The decision stores only its validated fact snapshot. Stored decisions
 with expired facts are not reused; the pre-SMTP guard rechecks that snapshot
 and the final (possibly edited) text at send time. Expiry fails before SMTP and
 returns the delivery for a fresh decision, without replaying an ambiguous send.

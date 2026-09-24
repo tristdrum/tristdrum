@@ -192,14 +192,34 @@ test("live website facts must still be fresh immediately before SMTP", async () 
   }
 });
 
-test("a final-text edit cannot add an unsupported vacancy claim", async () => {
+test("a final-text edit cannot add an unsupported vacancy or acceptance claim", async () => {
   const currentEmail = conversationEmail([{ name: "Guest Alpha", role: "Guest", text: "Hello" }]);
-  const setup = harness(currentEmail);
-  const claim = setup.options.claimDelivery;
-  setup.options.claimDelivery = async () => ({ ...await claim(), finalText: "We have availability." });
-  const result = await processDeliveryGuard(setup.options);
-  assert.equal(result.action, "guard_error");
-  assert.equal(setup.calls.some(([name]) => name === "send"), false);
+  for (const finalText of ["We have availability.",
+    "We have accepted your Jasmine reservation for 12-14 October."]) {
+    const setup = harness(currentEmail);
+    const claim = setup.options.claimDelivery;
+    setup.options.claimDelivery = async () => ({ ...await claim(), finalText });
+    const result = await processDeliveryGuard(setup.options);
+    assert.equal(result.action, "guard_error", finalText);
+    assert.equal(setup.calls.some(([name]) => name === "send"), false);
+  }
+});
+
+test("older autonomous booking drafts stop at the final guard; human approval and parking still pass", async () => {
+  const currentEmail = conversationEmail([{ name: "Guest Alpha", role: "Guest", text: "Hello" }]);
+  for (const [guestMessage, approvedBy, expected] of [
+    ["Is my booking confirmed?", null, "guard_error"],
+    ["Is my booking confirmed?", "reviewed-owner", "sent"],
+    ["Is parking available?", null, "sent"],
+  ]) {
+    const setup = harness(currentEmail);
+    const claim = setup.options.claimDelivery;
+    setup.options.claimDelivery = async () => ({ ...await claim(), guestMessage, approvedBy,
+      draftText: "I'll double-check and get back to you." });
+    const result = await processDeliveryGuard(setup.options);
+    assert.equal(result.action, expected, guestMessage);
+    assert.equal(setup.calls.some(([name]) => name === "send"), expected === "sent");
+  }
 });
 
 test("newer host or guest activity prevents an autonomous reply", async () => {

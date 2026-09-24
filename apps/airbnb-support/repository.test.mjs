@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderSupportManagementAlert } from "./management.mjs";
 import {
+  claimDeliveryForGuard,
   latestConversationEvidenceAt,
   latestConversationImportCursorAt,
   loadDeliveryGuardCandidates,
@@ -15,6 +16,27 @@ import {
 } from "./repository.mjs";
 
 const cursorHouseholdId = "22222222-2222-4222-8222-222222222222";
+
+test("delivery claim reads guest question and human approval for the website hold", async () => {
+  let select = "";
+  const sql = async (strings) => {
+    const query = strings.join("?");
+    if (query.includes("from airbnb.reply_deliveries delivery")) {
+      select = query;
+      return [{ id: "delivery-1", status: "approved", approvedBy: null,
+        guestMessage: "Is my booking confirmed?" }];
+    }
+    return [];
+  };
+  sql.begin = async (callback) => callback(sql);
+  const claimed = await claimDeliveryForGuard(sql, {
+    householdId: cursorHouseholdId, deliveryId: "delivery-1", now: new Date("2026-09-24T10:00:00Z"),
+  });
+  assert.equal(claimed.action, "claimed");
+  assert.match(select, /delivery\.approved_by/);
+  assert.match(select, /latest_guest\.body_normalized as guest_message/);
+  assert.match(select, /message\.direction = 'guest'/);
+});
 
 test("import cursor SQL requires matching mailbox, whole-run success, and strictly empty counts", async () => {
   for (const scope of ["tristan", "jane"]) {

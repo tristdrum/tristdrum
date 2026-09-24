@@ -12,7 +12,7 @@ import {
   retryPendingManagementPings,
   sanitizedError,
 } from "@tristdrum/airbnb-db";
-import { decideGuestResponse } from "./agent.mjs";
+import { decideGuestResponse, liveWebsiteAnswerNeedsHumanReview } from "./agent.mjs";
 import { liveWebsiteObservationIsFresh } from "./live-website-facts.mjs";
 import { processDeliveryGuard } from "./delivery.mjs";
 import {
@@ -147,6 +147,8 @@ export function canReuseStoredDecision(decision, mode, candidate = null, at = ne
   return Boolean(
     decision?.decisionVersion === 3
     && decision?.decisionSource === "adaptive_agent"
+    && !(candidate && liveWebsiteAnswerNeedsHumanReview(candidate.guestMessage)
+      && (decision.websiteReplyPolicyVersion !== 1 || decision.autoReply === true))
     && (!decision?.liveWebsiteFacts
       || liveWebsiteObservationIsFresh(decision.liveWebsiteFacts.observedAt, at))
     && !(mode === "live" && decision?.shadowMode === true)

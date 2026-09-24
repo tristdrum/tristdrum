@@ -427,7 +427,7 @@ test("missing reply routes are in the same decision context so host summaries ex
   assert.equal(result.alertManagement,true);
 });
 
-test("an extension question can receive verified listing links while the host decision remains unresolved", async () => {
+test("an extension question retains a useful link draft while human review remains required", async () => {
   let captured;
   const draft = "You can check your dates here: https://www.airbnb.com/h/jasmine-studio-stay. Your current reservation has not been extended; that still needs confirmation.";
   const result = await decideGuestResponse({
@@ -450,14 +450,14 @@ test("an extension question can receive verified listing links while the host de
   assert.equal(input.canonicalKnowledge.knownProperties.length, 3);
   assert.match(captured.input[0].content[0].text, /verified public listing links may still help/);
   assert.match(captured.input[0].content[0].text, /never host-only links/);
-  assert.equal(result.autoReply, true);
+  assert.equal(result.autoReply, false);
   assert.equal(result.alertManagement, true);
   assert.equal(result.draft, draft);
   assert.equal(result.operationalRequest, null);
-  assert.deepEqual(result.qualityIssues, []);
+  assert.ok(result.qualityIssues.some((issue) => /require human review/.test(issue)));
 });
 
-test("fresh exact Airbnb UI facts can answer booking and availability without changing the model or alert path", async () => {
+test("fresh exact Airbnb UI facts ground a held booking and availability draft without changing the model", async () => {
   const observedAt = "2026-09-24T10:04:00.000Z";
   const stay = { listingName: "Jasmine Studio Stay", checkIn: "2026-10-05", checkOut: "2026-10-07" };
   const liveWebsiteFacts = {
@@ -473,7 +473,7 @@ test("fresh exact Airbnb UI facts can answer booking and availability without ch
     fetchFn: modelDecision({
       replyNeeded: true, sendReply: true, alertManagement: false,
       summary: "Verified booking and calendar answer.", managementSummary: null,
-      draft: "Your Jasmine Studio Stay booking for 5-7 October is confirmed. The calendar also shows those dates as available, but that does not create another booking.",
+      draft: "Your Jasmine Studio Stay booking for 5-7 October is confirmed. Jasmine Studio Stay is available for 5-7 October, but that does not create another booking.",
       roomTimingRequest: null, officeStorageArrangement: null,
     }, (request) => {
       const input = JSON.parse(request.input[1].content[0].text);
@@ -485,9 +485,10 @@ test("fresh exact Airbnb UI facts can answer booking and availability without ch
       assert.match(request.input[0].content[0].text, /A calendar opening is not a confirmed booking/);
     }),
   });
-  assert.equal(result.autoReply, true);
-  assert.equal(result.alertManagement, false);
-  assert.deepEqual(result.qualityIssues, []);
+  assert.equal(result.autoReply, false);
+  assert.equal(result.alertManagement, true);
+  assert.deepEqual(result.qualityIssues,
+    ["Booking-status and stay-availability replies require human review until the typed Airbnb browser action route is live."]);
 });
 
 test("partial or stale UI facts cannot authorize a booking or vacancy claim", async () => {
@@ -543,7 +544,7 @@ test("a wrong UI status is revised; an unresolved real question can be acknowled
         roomTimingRequest: null, officeStorageArrangement: null },
     ]),
   });
-  assert.equal(pending.autoReply, true);
+  assert.equal(pending.autoReply, false);
   assert.equal(pending.qualityRevisionCount, 1);
 
   const uncertain = await decideGuestResponse({
@@ -555,7 +556,7 @@ test("a wrong UI status is revised; an unresolved real question can be acknowled
       draft: "I'll double-check the calendar for 5-7 October and get back to you.",
       roomTimingRequest: null, officeStorageArrangement: null }),
   });
-  assert.equal(uncertain.autoReply, true);
+  assert.equal(uncertain.autoReply, false);
   assert.equal(uncertain.alertManagement, true);
   assert.ok(uncertain.managementSummary);
 
@@ -630,7 +631,7 @@ test("live UI claims with another studio, wrong dates, or unsupported availabili
   assert.ok(unsupported.qualityIssues.some((issue) => /availability/.test(issue)));
 });
 
-test("a grounded revision clears the first-pass Management alert and summary", async () => {
+test("a grounded revision clears the website-only first-pass summary but holds the send", async () => {
   const stay = { listingName: "Jasmine Studio Stay", checkIn: "2026-10-05", checkOut: "2026-10-07" };
   const result = await decideGuestResponse({
     guestMessage: "Is my booking confirmed?", providerThreadId: "airbnb-thread-1",
@@ -641,9 +642,11 @@ test("a grounded revision clears the first-pass Management alert and summary", a
     env: { OPENAI_API_KEY: "test-key" },
     fetchFn: modelDecisionSequence([
       { replyNeeded: true, sendReply: true, alertManagement: true,
+        managementNeeds: { websiteReservation: true, websiteAvailability: false, other: false },
         summary: "Check the booking.", managementSummary: "A booking needs Management review.",
         draft: "Your booking is confirmed.", roomTimingRequest: null, officeStorageArrangement: null },
       { replyNeeded: true, sendReply: true, alertManagement: false,
+        managementNeeds: { websiteReservation: false, websiteAvailability: false, other: false },
         summary: "The current UI answers the question.",
         managementSummary: "Stale first-pass summary must be ignored.",
         draft: "Your Jasmine Studio Stay booking for 5-7 October is confirmed.",
@@ -651,9 +654,104 @@ test("a grounded revision clears the first-pass Management alert and summary", a
     ]),
   });
   assert.equal(result.qualityRevisionCount, 1);
-  assert.equal(result.autoReply, true);
-  assert.equal(result.alertManagement, false);
+  assert.equal(result.autoReply, false);
+  assert.equal(result.alertManagement, true);
   assert.equal(result.managementSummary, null);
+});
+
+test("an unverified acceptance claim is held before guest delivery", async () => {
+  const raw = { replyNeeded: true, sendReply: true, alertManagement: false,
+    summary: "Unsupported acceptance.", managementSummary: null,
+    draft: "We have accepted your Jasmine reservation for 12-14 October.",
+    roomTimingRequest: null, officeStorageArrangement: null };
+  const result = await decideGuestResponse({
+    guestMessage: "Did you accept my reservation?", listingName: "Jasmine Studio Stay",
+    env: { OPENAI_API_KEY: "test-key" }, fetchFn: modelDecisionSequence([raw, raw]),
+  });
+  assert.equal(result.autoReply, false);
+  assert.ok(result.qualityIssues.some((issue) => /no typed Airbnb acceptance action/.test(issue)));
+});
+
+test("an unfamiliar positive booking paraphrase is held by the question boundary", async () => {
+  const result = await decideGuestResponse({
+    guestMessage: "Is my booking confirmed?", listingName: "Jasmine Studio Stay",
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecision({ replyNeeded: true, sendReply: true, alertManagement: false,
+      summary: "Booking question.", managementSummary: null,
+      draft: "Your reservation is all set.",
+      roomTimingRequest: null, officeStorageArrangement: null }),
+  });
+  assert.equal(result.autoReply, false);
+  assert.ok(result.qualityIssues.some((issue) => /require human review/.test(issue)));
+});
+
+test("direct stay-availability phrasings are held even without a recognized claim", async () => {
+  for (const guestMessage of ["Do you have availability?", "Is it free for those dates?",
+    "Are the dates open?"]) {
+    const result = await decideGuestResponse({
+      guestMessage, listingName: "Jasmine Studio Stay",
+      env: { OPENAI_API_KEY: "test-key" },
+      fetchFn: modelDecision({ replyNeeded: true, sendReply: true, alertManagement: false,
+        summary: "Availability question.", managementSummary: null,
+        draft: "I'll double-check and get back to you.",
+        roomTimingRequest: null, officeStorageArrangement: null }),
+    });
+    assert.equal(result.autoReply, false, guestMessage);
+    assert.ok(result.qualityIssues.some((issue) => /require human review/.test(issue)));
+  }
+});
+
+test("each claim carries its own dates, while a separate studio alternative stays in the held draft", async () => {
+  const stay = { listingName: "Jasmine Studio Stay", checkIn: "2026-10-05", checkOut: "2026-10-07" };
+  const liveWebsiteFacts = { source: "airbnb_ui", providerThreadId: "airbnb-thread-1",
+    observedAt: "2026-09-24T10:04:00.000Z",
+    reservation: { ...stay, status: "confirmed", verified: true, complete: true } };
+  const input = { guestMessage: "Is my Jasmine booking confirmed?", providerThreadId: "airbnb-thread-1",
+    listingName: stay.listingName, liveWebsiteFacts,
+    now: new Date("2026-09-24T10:05:00.000Z"), env: { OPENAI_API_KEY: "test-key" } };
+  const wrong = { replyNeeded: true, sendReply: true, alertManagement: false,
+    summary: "Wrong dates.", managementSummary: null,
+    draft: "Jasmine Studio Stay covers 5-7 October. Your Jasmine Studio Stay booking for 12-14 October is confirmed.",
+    roomTimingRequest: null, officeStorageArrangement: null };
+  const held = await decideGuestResponse({ ...input, fetchFn: modelDecisionSequence([wrong, wrong]) });
+  assert.equal(held.autoReply, false);
+  assert.ok(held.qualityIssues.some((issue) => /reservation listing and full date range/.test(issue)));
+
+  const good = { ...wrong, summary: "Grounded booking answer.",
+    draft: "Your Jasmine Studio Stay booking for 5-7 October is confirmed. You could also look at The Spekboom Studio for a future trip." };
+  const allowed = await decideGuestResponse({ ...input, fetchFn: modelDecision(good) });
+  assert.equal(allowed.autoReply, false);
+  assert.deepEqual(allowed.qualityIssues,
+    ["Booking-status and stay-availability replies require human review until the typed Airbnb browser action route is live."]);
+});
+
+test("a booking-claim revision cannot erase a separate lockout Management handoff", async () => {
+  const stay = { listingName: "Jasmine Studio Stay", checkIn: "2026-10-05", checkOut: "2026-10-07" };
+  const managementSummary = "A guest staying 5-7 October at Jasmine is locked out and needs help with the lockbox.";
+  const result = await decideGuestResponse({
+    guestMessage: "Is my booking confirmed? Also, the lockbox will not open.",
+    providerThreadId: "airbnb-thread-1", listingName: stay.listingName,
+    now: new Date("2026-09-24T10:05:00.000Z"),
+    liveWebsiteFacts: { source: "airbnb_ui", providerThreadId: "airbnb-thread-1",
+      observedAt: "2026-09-24T10:04:00.000Z",
+      reservation: { ...stay, status: "confirmed", verified: true, complete: true } },
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecisionSequence([
+      { replyNeeded: true, sendReply: true, alertManagement: true,
+        managementNeeds: { websiteReservation: true, websiteAvailability: false, other: true },
+        summary: "Lockout needs human help.", managementSummary,
+        draft: "Your booking is confirmed. Sorry the lockbox will not open.",
+        roomTimingRequest: null, officeStorageArrangement: null },
+      { replyNeeded: true, sendReply: true, alertManagement: false,
+        managementNeeds: { websiteReservation: false, websiteAvailability: false, other: false },
+        summary: "Grounded booking answer with lockout acknowledgement.", managementSummary: null,
+        draft: "Your Jasmine Studio Stay booking for 5-7 October is confirmed. I'm sorry the lockbox will not open; we'll help you get in.",
+        roomTimingRequest: null, officeStorageArrangement: null },
+    ]),
+  });
+  assert.equal(result.autoReply, false);
+  assert.equal(result.alertManagement, true);
+  assert.equal(result.managementSummary, managementSummary);
 });
 
 test("post-stay collection does not become a new check-in permission", async () => {
@@ -691,6 +789,21 @@ test("verified Wi-Fi details remain eligible for an ordinary in-stay reply", asy
   });
   assert.equal(result.autoReply, true);
   assert.equal(result.alertManagement, false);
+});
+
+test("parking availability remains an ordinary property-fact reply", async () => {
+  const result = await decideGuestResponse({
+    guestMessage: "Is parking available?", listingName: "Jasmine Studio Stay",
+    facts: { parking: "The marked bay is available for guests." },
+    env: { OPENAI_API_KEY: "test-key" },
+    fetchFn: modelDecision({ replyNeeded: true, sendReply: true, alertManagement: false,
+      summary: "Verified parking answer.", managementSummary: null,
+      draft: "The marked parking bay is available for your stay.",
+      roomTimingRequest: null, officeStorageArrangement: null }),
+  });
+  assert.equal(result.autoReply, true);
+  assert.equal(result.alertManagement, false);
+  assert.deepEqual(result.qualityIssues, []);
 });
 
 test("office permission cannot erase an explicit room checkout restriction", async () => {
@@ -982,7 +1095,7 @@ test("a date-change acknowledgement cannot give stale cancellation instructions"
   });
 
   assert.ok(requests[1].revisionFeedback.some((issue) => /do not instruct the guest to cancel/i.test(issue)));
-  assert.equal(result.autoReply, true);
+  assert.equal(result.autoReply, false);
   assert.equal(result.alertManagement, true);
   assert.equal(result.qualityRevisionCount, 1);
   assert.doesNotMatch(result.draft, /cancel|rebook|another booking/i);

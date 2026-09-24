@@ -3,7 +3,7 @@ import {
   parseAirbnbConversationEmail,
   withAutomatedReplyFooter,
 } from "@tristdrum/airbnb-core";
-import { liveWebsiteClaimQualityIssues } from "./agent.mjs";
+import { liveWebsiteAnswerNeedsHumanReview, liveWebsiteClaimQualityIssues } from "./agent.mjs";
 import { liveWebsiteObservationIsFresh } from "./live-website-facts.mjs";
 import {
   collectConversationMessages,
@@ -215,7 +215,8 @@ export async function processDeliveryGuard({
     }
 
     const websiteFacts = claimed.classification?.liveWebsiteFacts ?? null;
-    if ((websiteFacts && !liveWebsiteObservationIsFresh(websiteFacts.observedAt, now()))
+    if ((claimed.approvedBy == null && liveWebsiteAnswerNeedsHumanReview(claimed.guestMessage))
+      || (websiteFacts && !liveWebsiteObservationIsFresh(websiteFacts.observedAt, now()))
       || liveWebsiteClaimQualityIssues(finalText, websiteFacts).length) {
       throw Object.assign(new Error("Live Airbnb website claim needs a fresh guarded decision."), {
         code: "LIVE_WEBSITE_FACTS_NEED_REVIEW",
