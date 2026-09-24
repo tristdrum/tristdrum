@@ -1,7 +1,10 @@
 const LIMIT_USD = 10;
+const WORST_CASE_COMPUTE_RESERVE_USD = 7.5;
 const VOLUME_ROOTFS_SNAPSHOT_RESERVE_USD = 1;
-const MACHINE_USD_PER_HOUR = 0.02;
+const MACHINE_USD_PER_HOUR = 0.01;
+const EGRESS_RESERVE_USD = 0.5;
 const UNMETERED_HEADROOM_USD = 0.25;
+const MODEL_CAP_USD = 0.7;
 const MAX_TRANSFER_BYTES = 2 * 1024 ** 3;
 const EGRESS_USD_PER_GB = 0.25;
 
@@ -22,19 +25,27 @@ export function budgetStatus(stored, now = new Date()) {
   const runtimeUsd = budget.startedSeconds / 3600 * MACHINE_USD_PER_HOUR;
   const transferUsd = budget.transferredBytes / 1024 ** 3 * EGRESS_USD_PER_GB;
   const estimatedUsd = VOLUME_ROOTFS_SNAPSHOT_RESERVE_USD + runtimeUsd + transferUsd + budget.modelUsd;
+  const worstCaseCommittedUsd = WORST_CASE_COMPUTE_RESERVE_USD + VOLUME_ROOTFS_SNAPSHOT_RESERVE_USD +
+    EGRESS_RESERVE_USD + UNMETERED_HEADROOM_USD + budget.modelUsd;
   return {
     month: budget.month,
     limitUsd: LIMIT_USD,
+    worstCaseComputeReserveUsd: WORST_CASE_COMPUTE_RESERVE_USD,
     reservedVolumeRootfsSnapshotsUsd: VOLUME_ROOTFS_SNAPSHOT_RESERVE_USD,
+    reservedEgressUsd: EGRESS_RESERVE_USD,
     runtimeRateUsdPerHour: MACHINE_USD_PER_HOUR,
     runtimeUsd: Number(runtimeUsd.toFixed(4)),
     transferUsd: Number(transferUsd.toFixed(4)),
     unmeteredHeadroomUsd: UNMETERED_HEADROOM_USD,
     estimatedUsd: Number(estimatedUsd.toFixed(4)),
+    worstCaseCommittedUsd: Number(worstCaseCommittedUsd.toFixed(4)),
+    modelCapacityUsd: MODEL_CAP_USD,
+    modelRemainingUsd: Number(Math.max(0, MODEL_CAP_USD - budget.modelUsd).toFixed(4)),
     startedSeconds: budget.startedSeconds,
     transferredBytes: budget.transferredBytes,
     modelUsd: budget.modelUsd,
-    exhausted: estimatedUsd + UNMETERED_HEADROOM_USD >= LIMIT_USD || budget.transferredBytes >= MAX_TRANSFER_BYTES,
+    exhausted: worstCaseCommittedUsd >= LIMIT_USD || estimatedUsd + UNMETERED_HEADROOM_USD >= LIMIT_USD ||
+      budget.transferredBytes >= MAX_TRANSFER_BYTES,
   };
 }
 
@@ -57,6 +68,8 @@ export function reserveEventModelCost(stored, usd, now = new Date()) {
   if (!Number.isFinite(usd) || usd <= 0) throw new Error("Invalid model cost");
   const budget = currentBudget(stored, now);
   budget.modelUsd += usd;
-  if (budgetStatus(budget, now).exhausted) throw new Error("Monthly pilot budget exhausted");
+  if (budget.modelUsd > MODEL_CAP_USD || budgetStatus(budget, now).exhausted) {
+    throw new Error("Monthly pilot budget exhausted");
+  }
   return budget;
 }

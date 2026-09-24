@@ -73,15 +73,27 @@ test("monthly meter resets, caps transfer and gates future event costs", () => {
   const now = new Date("2026-09-24T00:00:00Z");
   const budget = currentBudget({}, now);
   assert.equal(budgetStatus(budget, now).limitUsd, 10);
+  assert.equal(budgetStatus(budget, now).worstCaseComputeReserveUsd, 7.5);
+  assert.equal(budgetStatus(budget, now).worstCaseCommittedUsd, 9.25);
+  assert.equal(budgetStatus(budget, now).modelCapacityUsd, 0.7);
   const running = addRuntime(budget, 3600, now);
-  assert.equal(budgetStatus(running, now).runtimeUsd, 0.02);
+  assert.equal(budgetStatus(running, now).runtimeUsd, 0.01);
   assert.equal(budgetStatus(running, now).reservedVolumeRootfsSnapshotsUsd, 1);
   const nearCap = addTransfer(budget, 2 * 1024 ** 3, now);
   assert.equal(budgetStatus(nearCap, now).exhausted, true);
   assert.equal(currentBudget(nearCap, new Date("2026-09-30T21:59:59Z")).transferredBytes, 2 * 1024 ** 3);
   assert.equal(currentBudget(nearCap, new Date("2026-09-30T22:00:00Z")).transferredBytes, 0);
   assert.equal(currentBudget(nearCap, new Date("2026-10-01T00:00:00Z")).transferredBytes, 0);
-  assert.throws(() => reserveEventModelCost(budget, 9, now), /budget exhausted/);
+  assert.equal(reserveEventModelCost(budget, 0.7, now).modelUsd, 0.7);
+  assert.throws(() => reserveEventModelCost(budget, 0.71, now), /budget exhausted/);
+});
+
+test("Fly config keeps one on-demand Machine reachable by remote MCP", async () => {
+  const fly = await readFile(new URL("./fly.toml", import.meta.url), "utf8");
+  assert.match(fly, /^\s*auto_stop_machines = "stop"\s*$/m);
+  assert.match(fly, /^\s*auto_start_machines = true\s*$/m);
+  assert.match(fly, /^\s*min_machines_running = 0\s*$/m);
+  assert.match(fly, /^\s*memory_mb = 1024\s*$/m);
 });
 
 test("all future Airbnb action types refuse in the pilot", async () => {

@@ -128,7 +128,7 @@ test("started runtime is metered and persisted without billing stopped gaps", as
   await service.init();
   setClock("2026-09-24T11:00:00Z");
   assert.equal(service.status().budget.startedSeconds, 3600);
-  assert.equal(service.status().budget.runtimeUsd, 0.02);
+  assert.equal(service.status().budget.runtimeUsd, 0.01);
   await service.flushRuntime();
   assert.equal(storage.budget.startedSeconds, 3600);
 });
