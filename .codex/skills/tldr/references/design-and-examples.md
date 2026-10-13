@@ -1,4 +1,4 @@
-# TLDR design and examples
+# TL;DR design and examples
 
 Read when maintaining or evaluating the skill. The examples are synthetic, not
 conversation records or prescribed wording. Runtime behavior belongs in
@@ -20,7 +20,7 @@ conversation records or prescribed wording. Runtime behavior belongs in
 - [i-have-adhd](https://github.com/ayghri/i-have-adhd)
   offers practical inspiration for literal language, concrete outcomes and a
   final deletion pass that retains meaningful uncertainty. Its wider interaction
-  rules and clinical claims are not adopted. TLDR leaves the body and Asks intact.
+  rules and clinical claims are not adopted. TL;DR leaves the body and Asks intact.
 - [The Pyramid Method](https://aclanthology.org/N04-1019/)
   evaluates selection of important content while recognizing multiple valid
   summaries. This informs semantic evaluation, not an exact-wording test.
@@ -37,14 +37,14 @@ whether this presentation helps its reader.
 
 | Response meaning | Possible footer or omission |
 | --- | --- |
-| Invoice fix implemented and tested; not released | _**TLDR:** Invoice fix tested; not live yet._ |
-| Most payroll rows reconcile; three employees lack overtime | _**TLDR:** Three employees lack overtime; payroll totals remain unreliable._ |
-| A cause is suspected; a fix is proposed but unbuilt | _**TLDR:** Suspected cause found; fix proposed, not built._ |
-| A quiet, affordable restaurant is recommended; dessert choice is limited | _**TLDR:** Harbor offers a quiet dinner within budget._ |
-| A detailed explanation links seasons to Earth's tilt | _**TLDR:** Earth's tilt changes sunlight and day length, causing seasons._ |
-| Setup is blocked on account approval, with the request already in Asks | _**TLDR:** Setup awaits account approval._ |
-| Plan A fits current small files; Plan B fits growing video storage | _**TLDR:** Choose A for small files; B if video storage grows._ |
-| Website live, insurance claim rejected, order two days late | _**TLDR:** Claim rejected; website live; order arriving two days late._ |
+| Invoice fix implemented and tested; not released | _**TL;DR:** Invoice fix tested; not live yet._ |
+| Most payroll rows reconcile; three employees lack overtime | _**TL;DR:** Three employees lack overtime; payroll totals remain unreliable._ |
+| A cause is suspected; a fix is proposed but unbuilt | _**TL;DR:** Suspected cause found; fix proposed, not built._ |
+| A quiet, affordable restaurant is recommended; dessert choice is limited | _**TL;DR:** Harbor offers a quiet dinner within budget._ |
+| A detailed explanation links seasons to Earth's tilt | _**TL;DR:** Earth's tilt changes sunlight and day length, causing seasons._ |
+| Setup is blocked on account approval, with the request already in Asks | _**TL;DR:** Setup awaits account approval._ |
+| Plan A fits current small files; Plan B fits growing video storage | _**TL;DR:** Choose A for small files; B if video storage grows._ |
+| Website live, insurance claim rejected, order two days late | _**TL;DR:** Claim rejected; website live; order arriving two days late._ |
 | The entire reply asks which account to use | Omit: question only. |
 | The entire reply gives the meeting time | Omit: already concise. |
 | User requests only valid JSON | Omit: preserve the exact output. |

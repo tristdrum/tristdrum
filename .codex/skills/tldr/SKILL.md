@@ -1,9 +1,9 @@
 ---
 name: tldr
-description: Distill substantive final replies into a very short, faithful TLDR footer, including plans, research and structured closeouts. Apply across topics when enabled by personal instructions or explicitly requested; use judgment to skip redundant or intrusive summaries.
+description: Distill substantive final replies into a very short, faithful TL;DR footer, including plans, research and structured closeouts. Apply across topics when enabled by personal instructions or explicitly requested; use judgment to skip redundant or intrusive summaries.
 ---
 
-# TLDR
+# TL;DR
 
 Help the reader quickly understand what matters and whether anything deserves
 closer attention. Use the shortest wording that preserves the important meaning.
@@ -39,10 +39,10 @@ using empty pointers such as "see above", "all done" or "issues remain".
 Append one standalone paragraph using exactly this Markdown shape:
 
 ```markdown
-_**TLDR:** Summary text._
+_**TL;DR:** Summary text._
 ```
 
-The entire paragraph is italic, with only `TLDR:` additionally bold. Put it after
+The entire paragraph is italic, with only `TL;DR:` additionally bold. Put it after
 the existing response sections, including Asks; Asks remains the last substantive
 section, followed by this footer. This is the personal trial's explicit exception
 to an "Asks last" response convention. Preserve required application metadata and
