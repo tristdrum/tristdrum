@@ -44,7 +44,7 @@ _**TL;DR:** Summary text._
 
 The entire paragraph is italic, with only `TL;DR:` additionally bold. Put it after
 the existing response sections, including Asks; Asks remains the last substantive
-section, followed by this footer. This is the personal trial's explicit exception
+section, followed by this footer. This is the personal default's explicit exception
 to an "Asks last" response convention. Preserve required application metadata and
 structured-output boundaries; for a rendered plan, put the footer inside the
 plan block. Do not change the surrounding closeout format or remove its evidence.

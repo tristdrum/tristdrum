@@ -73,7 +73,7 @@ Run commands from the repository root. Select the tests for the changed area:
 Reusable personal skills live under `.codex/skills/`. The
 [TL;DR skill](.codex/skills/tldr/SKILL.md) supplies optional final-response footers;
 its cross-project activation belongs in personal Codex guidance, not application
-code. Keep personal trial schedules and conversation observations outside this
+code. Keep personal evaluation schedules and conversation observations outside this
 public repository. For skill-only edits, validate the skill and its links and
 check representative behavior; application tests are unnecessary.
 

@@ -30,8 +30,8 @@ conversation records or prescribed wording. Runtime behavior belongs in
   do not change its meaning.
 
 These sources inform design judgment. They do not prove an ideal word count,
-that an italic footer is optimal, or a clinical benefit. The personal trial tests
-whether this presentation helps its reader.
+that an italic footer is optimal, or a clinical benefit. The presentation is a
+reader preference; evaluate its usefulness through actual feedback.
 
 ## Illustrative cases
 
@@ -64,9 +64,6 @@ success, blockers, uncertainty, recommendations, explanations, mixed outcomes an
 omission cases. A formatting check is useful, but neither a word counter nor an
 exact expected sentence can establish semantic quality.
 
-Trial schedules and observations stay in personal configuration and the owning
-chat, outside this reusable skill. At the agreed follow-up, privately review a
-small available sample and ask whether to retain, refine, remove or propose team
-adoption. State evidence gaps; do not claim coverage of unavailable conversations.
-Keep the personal skill enabled pending that decision. Remove its activation and
-installed links if the user later chooses to stop; preserve the maintained source.
+Keep conversation observations and any separately requested evaluation schedule
+outside this reusable skill. Evaluate only available examples and state evidence
+gaps; do not claim coverage of unavailable conversations.
