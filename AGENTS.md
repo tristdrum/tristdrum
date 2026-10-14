@@ -68,6 +68,15 @@ Run commands from the repository root. Select the tests for the changed area:
 - For documentation-only edits, verify paths, links, and documented commands,
   and run `git diff --check`; application or live-service tests are unnecessary.
 
+## Personal Codex Skills
+
+Reusable personal skills live under `.codex/skills/`. The
+[TL;DR skill](.codex/skills/tldr/SKILL.md) supplies optional final-response footers;
+its cross-project activation belongs in personal Codex guidance, not application
+code. Keep personal evaluation schedules and conversation observations outside this
+public repository. For skill-only edits, validate the skill and its links and
+check representative behavior; application tests are unnecessary.
+
 ## Keep Guidance Current
 
 Always check whether the work or verified discoveries affect this file, relevant

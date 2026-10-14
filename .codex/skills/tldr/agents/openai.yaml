@@ -1,0 +1,4 @@
+interface:
+  display_name: "TL;DR"
+  short_description: "Very short, faithful final-response summaries"
+  default_prompt: "Use $tldr to distill the important conclusion into a very short footer."
