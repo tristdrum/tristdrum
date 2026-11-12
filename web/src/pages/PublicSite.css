@@ -1,0 +1,784 @@
+@font-face {
+  font-family: Commissioner;
+  src: url('/fonts/commissioner-latin.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+.route-loading {
+  min-height: 100vh;
+  padding: 56px;
+  background: #eef3ed;
+  color: #173a30;
+  font-family: 'Source Sans 3', sans-serif;
+}
+@font-face {
+  font-family: 'Source Sans 3';
+  src: url('/fonts/source-sans-3-latin.woff2') format('woff2');
+  font-weight: 200 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+.public-site {
+  --folio-ground: #eef3ed;
+  --folio-ink: #173a30;
+  --folio-muted: #4b6257;
+  --folio-accent: #a64724;
+  --folio-rule: #bccbbf;
+  background: var(--folio-ground);
+  color: var(--folio-ink);
+  font-family: 'Source Sans 3', sans-serif;
+  font-size: 19px;
+  line-height: 1.55;
+  min-height: 100vh;
+  overflow-wrap: break-word;
+  color-scheme: light;
+}
+.public-site ::selection {
+  color: #eef3ed;
+  background: #173a30;
+}
+.public-site :focus-visible {
+  outline: 3px solid var(--folio-accent);
+  outline-offset: 6px;
+  border-radius: 1px;
+}
+.public-site h1,
+.public-site h2,
+.public-site h3,
+.public-site h4,
+.public-site p,
+.public-site figure {
+  margin: 0;
+}
+.public-site h1,
+.public-site h2,
+.public-site h3,
+.public-site h4 {
+  font-family: Commissioner, sans-serif;
+  font-weight: 500;
+  text-wrap: balance;
+}
+.public-site a {
+  text-underline-offset: 5px;
+  text-decoration-thickness: 1px;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease;
+}
+.public-site a:hover {
+  color: var(--folio-accent);
+}
+.public-site svg {
+  flex: none;
+  vertical-align: middle;
+  stroke-width: 1.5;
+}
+.public-site section[id],
+.public-site article[id] {
+  scroll-margin-top: 28px;
+}
+.folio-width {
+  width: min(100% - 112px, 1280px);
+  margin-inline: auto;
+}
+.public-skip {
+  position: absolute;
+  left: 24px;
+  top: 16px;
+  z-index: 10;
+  transform: translateY(-180%);
+  background: var(--folio-ink);
+  color: var(--folio-ground);
+  padding: 12px 20px;
+}
+.public-skip:focus {
+  transform: none;
+}
+.folio-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+  padding-block: 28px;
+  border-bottom: 1px solid var(--folio-rule);
+  font-size: 17px;
+}
+.folio-name {
+  font-family: Commissioner, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  font-size: 21px;
+}
+.folio-name span,
+.folio-period {
+  color: var(--folio-accent);
+}
+.folio-nav nav {
+  display: flex;
+  align-items: center;
+  gap: 34px;
+}
+.folio-nav nav a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+}
+.folio-intro {
+  padding-block: 66px 58px;
+}
+.folio-intro h1 {
+  font-size: clamp(50px, 7.3vw, 96px);
+  line-height: 1.07;
+  letter-spacing: -0.04em;
+  max-width: 1120px;
+}
+.folio-intro-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.65fr) 144px;
+  align-items: end;
+  gap: 56px;
+  margin-top: 42px;
+}
+.folio-bio {
+  max-width: 470px;
+  font-size: 24px;
+  line-height: 1.4;
+}
+.folio-bio a {
+  text-decoration: underline;
+}
+.folio-bio .folio-location {
+  font-size: 17px;
+  line-height: 1.5;
+  margin-top: 19px;
+  color: var(--folio-muted);
+  max-width: 350px;
+}
+.folio-intro-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 12px;
+}
+.folio-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 15px 20px;
+  white-space: nowrap;
+  background: var(--folio-ink);
+  color: var(--folio-ground);
+  font-weight: 600;
+  min-height: 54px;
+}
+.public-site .folio-action:hover {
+  background: #295444;
+  color: #fff;
+}
+.folio-text-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 600;
+  min-height: 44px;
+}
+.folio-portrait img {
+  width: 144px;
+  height: 168px;
+  object-fit: cover;
+  object-position: center 35%;
+}
+.folio-portrait figcaption {
+  font-size: 14px;
+  margin-top: 9px;
+  color: var(--folio-muted);
+}
+.folio-section-title {
+  border-top: 1px solid var(--folio-ink);
+  padding-top: 22px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 32px;
+}
+.folio-section-title h2 {
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+.folio-section-title p {
+  font-size: 17px;
+  color: var(--folio-muted);
+}
+.folio-project {
+  padding-block: 66px 80px;
+}
+.folio-project-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+.folio-project-heading h3 {
+  font-size: 38px;
+  letter-spacing: -0.035em;
+  line-height: 1.2;
+}
+.folio-role {
+  font-size: 16px;
+  color: var(--folio-muted);
+  margin-top: 7px !important;
+}
+.folio-project-story {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 80px;
+  margin-block: 44px 36px;
+  align-items: start;
+}
+.folio-project-story h4,
+.folio-studio-statement h4 {
+  font-size: clamp(32px, 3.5vw, 48px);
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+.folio-project-story > p {
+  max-width: 52ch;
+  font-size: 21px;
+}
+.folio-product-image {
+  background: #dce6de;
+  padding: 42px 42px 0;
+}
+.folio-product-image img {
+  width: 100%;
+  height: auto;
+}
+.folio-product-image figcaption {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding-block: 19px;
+  font-size: 14px;
+  color: var(--folio-muted);
+}
+.folio-product-image figcaption a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.folio-evidence {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 80px;
+  margin-top: 34px;
+  padding-top: 28px;
+  border-top: 1px solid var(--folio-rule);
+  align-items: center;
+}
+.folio-evidence h4 {
+  font-size: 21px;
+  line-height: 1.4;
+  margin-bottom: 10px;
+}
+.folio-evidence p {
+  font-size: 17px;
+  color: var(--folio-muted);
+  max-width: 65ch;
+}
+.folio-evidence > a {
+  justify-self: end;
+  flex-wrap: wrap;
+  max-width: 295px;
+}
+.folio-evidence > a span {
+  flex-basis: 100%;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--folio-muted);
+  margin-top: -8px;
+}
+.folio-project--studio {
+  border-top: 1px solid var(--folio-rule);
+}
+.folio-studio-layout {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 64px;
+  margin-top: 40px;
+  align-items: center;
+}
+.folio-studio-statement {
+  background: var(--folio-ink);
+  color: var(--folio-ground);
+  padding: 56px 42px;
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 42px;
+}
+.folio-studio-statement p {
+  max-width: 28ch;
+  color: #c4d7c9;
+  font-size: 20px;
+}
+.folio-studio-copy p + p {
+  margin-top: 20px;
+}
+.folio-studio-copy > a {
+  margin-top: 22px;
+  font-size: 17px;
+}
+.folio-studio-links {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  margin-top: 26px;
+  padding-top: 22px;
+  border-top: 1px solid var(--folio-rule);
+  font-size: 17px;
+}
+.folio-studio-links p {
+  color: var(--folio-muted);
+}
+.folio-studio-links a {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  min-height: 44px;
+  font-weight: 600;
+}
+.folio-about {
+  display: grid;
+  grid-template-columns: 1fr 1.35fr;
+  gap: 100px;
+  border-top: 1px solid var(--folio-ink);
+  padding-block: 76px 100px;
+}
+.folio-about h2 {
+  font-size: clamp(42px, 4.4vw, 60px);
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+}
+.folio-about-lead {
+  font-size: 30px;
+  line-height: 1.35;
+  letter-spacing: -0.015em;
+  max-width: 30ch;
+}
+.folio-about p + p {
+  margin-top: 24px;
+  max-width: 62ch;
+  color: var(--folio-muted);
+}
+.folio-contact {
+  background: var(--folio-ink);
+  color: var(--folio-ground);
+  padding-top: 76px;
+}
+.folio-contact h2 {
+  font-size: clamp(42px, 5.5vw, 76px);
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+}
+.folio-contact-bottom {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 70px;
+  align-items: center;
+  margin-block: 40px 70px;
+}
+.folio-contact-bottom p {
+  max-width: 42ch;
+  color: #c4d7c9;
+}
+.folio-email {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  font-size: clamp(19px, 2.3vw, 30px);
+  border-bottom: 1px solid #8aa795;
+  padding-block: 10px;
+  justify-self: end;
+}
+.public-site .folio-contact a:hover {
+  color: #e8b38d;
+}
+.public-site .folio-contact :focus-visible {
+  outline-color: #e8b38d;
+}
+.folio-footer {
+  border-top: 1px solid #567467;
+  padding-block: 23px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 28px;
+  font-size: 15px;
+}
+.folio-footer p {
+  color: #c4d7c9;
+}
+.folio-footer nav {
+  display: flex;
+  gap: 28px;
+  flex-wrap: wrap;
+}
+.folio-footer a {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+}
+
+.public-artwork {
+  padding-bottom: 64px;
+}
+.artwork-content {
+  max-width: 1100px;
+  width: calc(100% - 112px);
+  margin: 64px auto 0;
+}
+.artwork-content h1 {
+  font-size: clamp(36px, 5vw, 64px);
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  overflow-wrap: anywhere;
+}
+.artwork-subtitle {
+  font-size: 25px;
+  color: var(--folio-muted);
+  margin-top: 16px !important;
+}
+.artwork-description {
+  max-width: 70ch;
+  white-space: pre-wrap;
+  margin-top: 28px !important;
+  font-size: 21px;
+}
+.artwork-picture {
+  margin-top: 40px !important;
+  padding: 30px;
+  background: #dce6de;
+}
+.artwork-picture img {
+  max-height: 80vh;
+  width: auto;
+  max-width: 100%;
+  margin-inline: auto;
+  object-fit: contain;
+}
+.artwork-audio {
+  margin-top: 32px;
+  padding-block: 20px;
+  border-block: 1px solid var(--folio-rule);
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+.artwork-audio .artwork-audio-label {
+  font-weight: 600;
+  flex-basis: auto;
+}
+.artwork-audio audio {
+  width: 100%;
+  max-width: 560px;
+  height: 54px;
+}
+.artwork-audio p {
+  flex-basis: 100%;
+  font-size: 17px;
+}
+.artwork-audio a {
+  text-decoration: underline;
+}
+.artwork-state {
+  padding-block: 64px;
+  max-width: 680px;
+}
+.artwork-state p {
+  margin-block: 22px;
+  font-size: 21px;
+  color: var(--folio-muted);
+}
+.artwork-state button {
+  font: inherit;
+  border: 0;
+  cursor: pointer;
+}
+
+@media (min-width: 1000px) and (prefers-reduced-motion: no-preference) {
+  .folio-intro h1 {
+    animation: folio-arrive 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @keyframes folio-arrive {
+    from {
+      transform: translateY(12px);
+      clip-path: inset(0 0 6% 0);
+    }
+    to {
+      transform: translateY(0);
+      clip-path: inset(0);
+    }
+  }
+}
+@media (max-width: 1000px) {
+  .folio-width {
+    width: calc(100% - 64px);
+  }
+  .folio-intro {
+    padding-top: 52px;
+  }
+  .folio-intro-bottom {
+    gap: 28px;
+    grid-template-columns: 1fr 180px 120px;
+  }
+  .folio-portrait img {
+    width: 120px;
+    height: 148px;
+  }
+  .folio-bio {
+    font-size: 22px;
+  }
+  .folio-project-story,
+  .folio-evidence {
+    gap: 40px;
+  }
+  .folio-studio-layout {
+    gap: 32px;
+  }
+  .folio-studio-statement {
+    padding: 38px 30px;
+    min-height: 340px;
+  }
+  .folio-about {
+    gap: 56px;
+  }
+  .folio-contact-bottom {
+    gap: 40px;
+  }
+  .artwork-content {
+    width: calc(100% - 64px);
+  }
+}
+@media (max-width: 700px) {
+  .public-site {
+    font-size: 18px;
+  }
+  .folio-width {
+    width: calc(100% - 40px);
+  }
+  .folio-nav {
+    padding-block: 18px;
+    gap: 16px;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .folio-name {
+    font-size: 20px;
+  }
+  .folio-nav nav {
+    width: 100%;
+    justify-content: space-between;
+    gap: 16px;
+    font-size: 16px;
+  }
+  .folio-intro {
+    padding-block: 40px 42px;
+  }
+  .folio-intro h1 {
+    font-size: clamp(39px, 7.7vw, 54px);
+    letter-spacing: -0.035em;
+    line-height: 1.12;
+  }
+  .folio-intro-bottom {
+    grid-template-columns: 1fr 112px;
+    gap: 28px clamp(10px, 3vw, 20px);
+    margin-top: 30px;
+  }
+  .folio-bio {
+    grid-column: 1/-1;
+    max-width: 480px;
+    font-size: 23px;
+  }
+  .folio-bio .folio-location {
+    font-size: 17px;
+    max-width: 34ch;
+  }
+  .folio-intro-actions {
+    padding-bottom: 0;
+    align-self: center;
+    gap: 10px;
+  }
+  .folio-action {
+    padding: 13px 16px;
+    gap: 18px;
+    font-size: 17px;
+  }
+  .folio-intro-actions .folio-text-link {
+    font-size: 16px;
+    gap: 8px;
+  }
+  .folio-portrait img {
+    width: 112px;
+    height: 134px;
+  }
+  .folio-portrait figcaption {
+    font-size: 12px;
+    margin-top: 7px;
+  }
+  .folio-section-title {
+    display: block;
+    padding-top: 20px;
+  }
+  .folio-section-title p {
+    margin-top: 8px;
+    max-width: 32ch;
+  }
+  .folio-project {
+    padding-block: 40px 48px;
+  }
+  .folio-project-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .folio-project-heading h3 {
+    font-size: 34px;
+  }
+  .folio-project-heading > a {
+    font-size: 16px;
+  }
+  .folio-project-story {
+    grid-template-columns: 1fr;
+    gap: 22px;
+    margin-block: 26px;
+  }
+  .folio-project-story h4,
+  .folio-studio-statement h4 {
+    font-size: 37px;
+  }
+  .folio-project-story > p {
+    font-size: 19px;
+  }
+  .folio-product-image {
+    padding: 16px 16px 0;
+    margin-inline: -4px !important;
+  }
+  .folio-product-image figcaption {
+    font-size: 13px;
+    display: block;
+    padding-block: 12px;
+  }
+  .folio-product-image figcaption a {
+    display: flex;
+    width: fit-content;
+    margin-top: 9px;
+    min-height: 36px;
+  }
+  .folio-evidence {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    margin-top: 24px;
+    padding-top: 24px;
+  }
+  .folio-evidence > a {
+    justify-self: start;
+    font-size: 17px;
+    max-width: 300px;
+  }
+  .folio-studio-layout {
+    grid-template-columns: 1fr;
+    gap: 28px;
+    margin-top: 25px;
+  }
+  .folio-studio-statement {
+    padding: 32px 26px;
+    min-height: 280px;
+  }
+  .folio-studio-statement p {
+    font-size: 19px;
+  }
+  .folio-studio-links {
+    display: block;
+  }
+  .folio-studio-links a {
+    margin-top: 8px;
+    justify-content: space-between;
+    gap: 14px;
+  }
+  .folio-about {
+    grid-template-columns: 1fr;
+    gap: 30px;
+    padding-block: 48px 60px;
+  }
+  .folio-about h2 {
+    font-size: 42px;
+  }
+  .folio-about h2 br {
+    display: none;
+  }
+  .folio-about-lead {
+    font-size: 27px;
+  }
+  .folio-about p + p {
+    margin-top: 20px;
+  }
+  .folio-contact {
+    padding-top: 48px;
+  }
+  .folio-contact h2 {
+    font-size: clamp(37px, 8.5vw, 54px);
+  }
+  .folio-contact-bottom {
+    grid-template-columns: 1fr;
+    gap: 26px;
+    margin-block: 30px 42px;
+  }
+  .folio-email {
+    justify-self: start;
+    font-size: 22px;
+    max-width: 100%;
+  }
+  .folio-footer {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 14px;
+    padding-block: 24px;
+  }
+  .folio-footer nav {
+    gap: 24px;
+  }
+  .artwork-content {
+    width: calc(100% - 40px);
+    margin-top: 40px;
+  }
+  .artwork-picture {
+    padding: 14px;
+  }
+  .artwork-audio {
+    gap: 14px;
+  }
+  .artwork-description {
+    font-size: 19px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .public-site *,
+  .public-site *::before,
+  .public-site *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

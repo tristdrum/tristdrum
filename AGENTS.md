@@ -24,6 +24,12 @@ dated operational evidence. Verify current code and runtime state before
 operational actions: historical receipts and default modes do not prove what
 is deployed, enabled, or healthy now.
 
+For public website work, use [PRODUCT.md](PRODUCT.md) for positioning and source
+truth and [DESIGN.md](DESIGN.md) for the public visual system. Keep public claims
+verifiable and separate from private operational evidence. The web README owns
+the existing GitHub-to-Vercel release route and commit-manifest verification;
+do not create a replacement hosting project for routine website changes.
+
 ## Accounts and Operating Safeguards
 
 - The three `tristdrum-airbnb-*` workers belong to the personal Fly account. On

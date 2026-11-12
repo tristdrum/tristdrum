@@ -1,47 +1,42 @@
 # Tristan Drummond · Web
 
-A black single-page React experience for [tristdrum.com](https://tristdrum.com). The site blends floating gradients, glassmorphism cards, and humble copy to reflect Tristan’s calm-yet-epic craft.
+React, TypeScript and Vite application for [tristdrum.com](https://tristdrum.com). The public portfolio is a founder’s practice folio: specific work, verifiable engineering evidence and a direct invitation to get in touch.
 
-## Features
+## Public experience
 
-- Layered hero with stat badges, motion-driven halos, and dual CTAs.
-- Focus, labs, timeline, and signal sections powered by structured TypeScript arrays for quick edits and deep links (WorkWeek, Tech Local, Champ Foundation).
-- Accurate storytelling for WorkWeek, Tech Local, Champ Foundation, and ongoing lab experiments.
-- Responsive CSS grid layout with glassmorphism accents, plus reduced-motion safeguards.
-- SEO-ready metadata plus typography via Space Grotesk and Manrope.
+- `/`: introduction, WorkWeek and Tech Local, working principles and contact links.
+- `/artwork/:id`: existing public artwork IDs, images and audio, with loading, missing, connection-error and media-error states.
+- Unknown routes: a useful recovery page linking to the homepage.
+- Public styling lives in `src/pages/PublicSite.css`. Commissioner and Source Sans 3 are self-hosted; asset origins and font licences are in [public/ASSETS.md](public/ASSETS.md).
+- [PRODUCT.md](../PRODUCT.md) records positioning and sources; [DESIGN.md](../DESIGN.md) records the built visual system.
 
-## Quick start
+## Development and validation
 
-```bash
-cd web
-npm install
-npm run dev
+Run from the repository root:
+
+```sh
+npm --prefix web install
+npm --prefix web run dev
+npm --prefix web run lint
+npm --prefix web run build
+npm run airbnb:web:test
+npm run airbnb:release:test
 ```
 
-Visit `http://localhost:5173` to explore the site locally. Vite 5 supports Node `>=18`, so Node `20.18` runs smoothly without extra steps.
+Use a supported Node release (Node 20 or later). The local app requires `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in an ignored `web/.env.local` or the process environment. Do not commit credentials. Never use a service-role key in a browser variable.
 
-## Scripts
+The full release check uses the local database on port 54322 and needs OrbStack on the configured Mac. Never substitute a production database. See [AGENTS.md](../AGENTS.md) for component-specific validation. `npm --prefix web run preview` serves the built bundle.
 
-| Command            | Description                                |
-| ------------------ | ------------------------------------------ |
-| `npm run dev`      | Start the development server with HMR.     |
-| `npm run build`    | Type-check and emit a production bundle.   |
-| `npm run test`     | Run Task Pulse status derivation tests.    |
-| `npm run preview`  | Preview the built bundle locally.          |
-| `npm run lint`     | Run ESLint with the shared configuration.  |
+## Application structure
 
-## Project structure
-
-```
-web/
-├── public/         # static assets (favicons, og images)
-├── src/
-│   ├── App.tsx     # page composition & content data
-│   ├── App.css     # layout, gradients, animations
-│   ├── index.css   # base tokens & typography
-│   └── main.tsx    # React entrypoint
-└── dist/           # production output (gitignored)
-```
+- `src/App.tsx`: route composition and access gates. Secondary routes load on demand so public visitors do not download internal tools or spreadsheet code. Its explicit `App.css` import preserves internal styles independently of the homepage.
+- `src/pages/HomePage.tsx`, `PublicArtwork.tsx`, `NotFoundPage.tsx`: public routes.
+- `src/pages/PublicSite.css`: public visual system; unique selectors keep routine public changes from unintentionally restyling operational tools.
+- `src/auth/`: session, admin and household access checks.
+- `src/App.css`, `src/index.css`: legacy application styles and base defaults.
+- `public/`: shipped fonts, images, favicon and social preview.
+- `design/social-preview.html`: editable source for the 1200 × 630 social image; preview through Vite at `/design/social-preview.html`, render at that viewport with fonts loaded, and export to `public/social-preview.png`.
+- `scripts/build.mjs`: type check, Vite bundle and `dist/version.json` containing only the source commit identifier.
 
 ## Task Pulse dashboard
 
@@ -86,6 +81,11 @@ The invite-only finance workspace lives at `/dashboard/finance` behind both sess
 
 ## Deployment
 
-1. `npm run build` to populate `dist/`.
-2. Upload the folder to a static host (Vercel, Netlify, GitHub Pages, Cloudflare Pages).
-3. Point `tristdrum.com` to the deployment and confirm HTTPS + OG previews render.
+The existing Vercel project builds this repository with `web` as its root. GitHub pull requests receive Vercel previews; changes merged into `main` publish to the existing `tristdrum.com` domain. Use this route rather than creating a replacement project or running an unrelated CLI deployment.
+
+1. Run the applicable tests, lint and build. For releases, run `npm run airbnb:release:test`; record any failure accurately and establish whether it predates the change.
+2. Visually inspect desktop and phone layouts, keyboard focus, reduced motion, public links, artwork states and anonymous private-route redirects. Keep test fixtures local and out of production.
+3. Open a draft PR first. Review the diff, exact remote head and available CI/Vercel checks before marking it ready and merging under the task's release authorization.
+4. Verify the merged commit and successful production deployment. Fetch `https://www.tristdrum.com/version.json` and require its `commit` to equal the merge commit; inspect the live public pages and assets before reporting the release as live.
+
+The build reads `VERCEL_GIT_COMMIT_SHA` on Vercel and the local Git HEAD otherwise. Local manifests identify the checkout commit, not uncommitted working-tree changes. Deployment environment variables remain managed by the existing project; a design change does not authorize credential or permission changes.
