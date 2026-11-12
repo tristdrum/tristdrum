@@ -1,367 +1,265 @@
-import '../App.css'
+import { ArrowDown, ArrowRight, ArrowUpRight } from 'lucide-react'
+import './PublicSite.css'
 
-type Stat = {
-  label: string
-  value: string
-}
+const engineeringStory =
+  'https://powersync.com/blog/developer-case-study-tristan-drummond-gideon-boshoff-workweek'
 
-type FocusCard = {
-  title: string
-  subtitle: string
-  description: string
-  tags: string[]
-  linkLabel?: string
-  href?: string
-}
-
-type TimelineItem = {
-  year: string
-  title: string
-  detail: string
-}
-
-type Signal = {
-  title: string
-  description: string
-  meta: string
-}
-
-type LabProject = {
-  title: string
-  detail: string
-  meta: string
-  tags?: string[]
-  href?: string
-}
-
-const stats: Stat[] = [
-  { label: 'Role', value: 'Co-founder & CTO · WorkWeek' },
-  { label: 'Team', value: '6 humans · remote SA' },
-  { label: 'Impact', value: '1M+ shifts logged' },
-  { label: 'Growth', value: 'ZAR 250k MRR · breakeven' },
-]
-
-const focusCards: FocusCard[] = [
-  {
-    title: 'WorkWeek',
-    subtitle: 'Co-founder & CTO',
-    description:
-      'Blue-collar workforce SaaS powering selfie + geolocation clock-ins, automated overtime, and payroll for thousands of workers. Remote six-person team, spun out of The Delta with ZAR 250k MRR and 20% founder ownership.',
-    tags: ['Time tracking', 'Payroll', 'Data-free app'],
-    linkLabel: 'Visit WorkWeek',
-    href: 'https://workweek.africa',
-  },
-  {
-    title: 'Tech Local',
-    subtitle: 'Vibe coder studio',
-    description:
-      'Studio training "vibe coders" to ship AI-assisted sites via WhatsApp, OpenAI platform agents, and automation rails so local businesses access world-class stacks without predatory retainers.',
-    tags: ['AI tooling', 'Agents', 'Training'],
-    linkLabel: 'Explore Tech Local',
-    href: 'https://techlocal.co.za',
-  },
-  {
-    title: 'Champ Foundation',
-    subtitle: 'Human dignity platform',
-    description:
-      'Voucher-powered giving that pairs donors, beneficiaries, and partner NPOs on a "journey to dignity." Heartflow pilots proved the model; Champ keeps the dream alive as resources and AI mature.',
-    tags: ['Impact', 'Dignity', 'Community'],
-    linkLabel: 'Explore Champ Foundation',
-    href: 'https://champ.foundation',
-  },
-]
-
-const timeline: TimelineItem[] = [
-  {
-    year: 'Now',
-    title: 'Tech lead at WorkWeek',
-    detail:
-      'Guiding a sub-10-person crew toward African-unicorn scale—data-free clock-ins, automated wages, and blue-collar justice in every release.',
-  },
-  {
-    year: '2022',
-    title: "Delta's top venture-build squad",
-    detail:
-      "Formed and led Codelight inside The Delta, shipping MVPs in weeks and earning the builder's strongest track record.",
-  },
-  {
-    year: 'Earlier',
-    title: "Business & CS at Africa's top university",
-    detail:
-      "Studied at the continent's best university while raising capital instincts and technical foundations for entrepreneurial work.",
-  },
-  {
-    year: 'Origins',
-    title: 'Raised for entrepreneurship',
-    detail:
-      'Grew up learning to serve people through technology and venture building—a family and community focus that shaped every project since.',
-  },
-]
-
-const signals: Signal[] = [
-  {
-    title: 'Entrepreneurial roots',
-    description:
-      'Raised to build companies with purpose—learned sales, capital instincts, and hustle early so every product starts from real market care.',
-    meta: 'Origin',
-  },
-  {
-    title: 'University craftsmanship',
-    description:
-      "Blended Business + Computer Science at Africa's leading university, pairing disciplined systems thinking with commercial intuition.",
-    meta: 'Foundation',
-  },
-  {
-    title: 'Builder of builders',
-    description:
-      'Led the top-performing venture team inside The Delta, spinning WorkWeek out and coaching talent so small crews can ship huge outcomes.',
-    meta: 'Leadership',
-  },
-]
-
-const labProjects: LabProject[] = [
-  {
-    title: 'MATTTCHES',
-    detail:
-      'Values-based connections app for Matt Budden—AI prompts guide daily reflections and suggest in-person meetups for aligned communities.',
-    meta: 'In-person community',
-    tags: ['AI prompts', 'Events', 'Values'],
-    href: 'https://matttches.com',
-  },
-  {
-    title: 'Clio',
-    detail:
-      'CLI orchestrator that coordinates Codex, Claude, Cursor, and more to vibe-code deployments. Built with Agents SDK + FastAPI on Fly.io.',
-    meta: 'Automation core',
-    tags: ['Agents', 'CLI', 'Automation'],
-  },
-  {
-    title: 'Tech Local client stack',
-    detail:
-      'OpenAI platform agents, Supabase back offices, and low-cost WhatsApp onboarding for Wheco Holdings, civils companies, and micro-enterprises.',
-    meta: 'Delivery system',
-    tags: ['Supabase', 'WhatsApp', 'No lock-in'],
-  },
-]
-
-const socialLinks = [
-  { label: 'WorkWeek', href: 'https://workweek.africa' },
-  { label: 'Tech Local', href: 'https://techlocal.co.za' },
-  { label: 'Champ Foundation', href: 'https://champ.foundation' },
-  { label: 'LinkedIn', href: 'https://www.linkedin.com/in/tristdrum/' },
-  { label: 'GitHub', href: 'https://github.com/tristdrum' },
-  { label: 'X (Twitter)', href: 'https://x.com/tristdrum' },
-]
-
-function HomePage() {
+export default function HomePage() {
   return (
-    <main className="page">
-      <div className="backdrop">
-        <div className="orb orb-one" aria-hidden="true"></div>
-        <div className="orb orb-two" aria-hidden="true"></div>
-        <div className="orb orb-three" aria-hidden="true"></div>
-      </div>
-
-      <div className="frame">
-        <nav className="nav">
-          <div className="nav__brand">
-            <span className="nav__dot" aria-hidden="true"></span>
-            <span>tristdrum.com</span>
-          </div>
-          <div className="nav__links">
-            {socialLinks.map((link) => (
-              <a key={link.href} href={link.href} target="_blank" rel="noreferrer">
-                {link.label}
-              </a>
-            ))}
-          </div>
+    <div className="public-site">
+      <title>Tristan Drummond — WorkWeek CTO &amp; Tech Local co-founder</title>
+      <a className="public-skip" href="#main">
+        Skip to content
+      </a>
+      <header className="folio-nav folio-width">
+        <a className="folio-name" href="/" aria-label="Tristan Drummond, home">
+          Tristan Drummond<span aria-hidden="true">.</span>
+        </a>
+        <nav aria-label="Main navigation">
+          <a href="#work">Work</a>
+          <a href="#about">About</a>
+          <a href="#contact">
+            Contact <ArrowUpRight aria-hidden="true" size={16} />
+          </a>
         </nav>
+      </header>
 
-        <header className="hero">
-          <p className="hero__eyebrow">African technologist · Builder for humans</p>
-          <h1 className="hero__title">
-            Tristan Drummond
-            <span className="hero__subtitle">
-              Calm, exacting technologist composing soulful systems for Africa's dreamers and doers.
-            </span>
+      <main id="main">
+        <section
+          className="folio-intro folio-width"
+          aria-labelledby="intro-title"
+        >
+          <h1 id="intro-title">
+            I build software
+            <br />
+            around real work<span className="folio-period">.</span>
           </h1>
-          <p className="hero__copy">
-            I build for humans before companies—co-founding WorkWeek, coaching Tech Local vibe coders, and nurturing Champ Foundation's dignity work.
-            Every product blends entrepreneurial roots, CS + business rigor, and on-the-ground listening to keep technology humble and human.
-          </p>
-          <div className="hero__actions">
-            <a className="button button--primary" href="mailto:tristan@workweek.africa">
-              Build together
-            </a>
-            <a className="button button--ghost" href="https://github.com/tristdrum" target="_blank" rel="noreferrer">
-              Browse the work
-            </a>
-          </div>
-          <div className="hero__stats">
-            {stats.map((stat) => (
-              <div key={stat.label} className="stat">
-                <span className="stat__label">{stat.label}</span>
-                <span className="stat__value">{stat.value}</span>
-              </div>
-            ))}
-          </div>
-        </header>
-
-        <section className="section">
-          <div className="section__header">
-            <span className="eyebrow">Now</span>
-            <h2>Designing systems with field-trusted care</h2>
-            <p>
-              I translate site walks, founder jams, and lab experiments into craft—whether helping WorkWeek crews clock in with dignity,
-              growing Tech Local's agent-driven stack, or sketching Champ Foundation pathways toward justice.
-            </p>
-          </div>
-          <div className="card-grid">
-            {focusCards.map((card) => (
-              <div key={card.title} className="card">
-                <div className="card__accent" aria-hidden="true"></div>
-                <div className="card__header">
-                  <span className="card__subtitle">{card.subtitle}</span>
-                  <h3>{card.title}</h3>
-                </div>
-                <p className="card__copy">{card.description}</p>
-                <div className="tag-row">
-                  {card.tags.map((tag) => (
-                    <span key={tag} className="tag">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-                {card.href && card.linkLabel && (
-                  <a className="card__link" href={card.href} target="_blank" rel="noreferrer">
-                    {card.linkLabel}
-                    <span aria-hidden="true">↗</span>
-                  </a>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="section section--labs">
-          <div className="section__header">
-            <span className="eyebrow">Active labs</span>
-            <h2>Systems I'm quietly compounding</h2>
-            <p>
-              From WhatsApp copilots to multi-agent coding orchestration, each experiment feeds back into WorkWeek,
-              Tech Local, and the communities we serve.
-            </p>
-          </div>
-          <div className="lab-grid">
-            {labProjects.map((project) => (
-              <div key={project.title} className="lab">
-                <span className="lab__meta">{project.meta}</span>
-                <h3>{project.title}</h3>
-                <p>{project.detail}</p>
-                {project.tags && (
-                  <div className="tag-row">
-                    {project.tags.map((tag) => (
-                      <span key={tag} className="tag">
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {project.href && (
-                  <a className="lab__link" href={project.href} target="_blank" rel="noreferrer">
-                    Learn more <span aria-hidden="true">↗</span>
-                  </a>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="section section--timeline">
-          <div className="section__header">
-            <span className="eyebrow">Chapters</span>
-            <h2>Momentum guided by patience</h2>
-            <p>
-              From civic infrastructure to WorkWeek's time tracking suite, my arc is about building durable systems that honor
-              people, reduce waste, and keep operations calm even as they scale.
-            </p>
-          </div>
-          <div className="timeline">
-            {timeline.map((item) => (
-              <div key={item.year} className="timeline__item">
-                <div className="timeline__marker" aria-hidden="true"></div>
-                <div className="timeline__content">
-                  <span className="timeline__year">{item.year}</span>
-                  <h3>{item.title}</h3>
-                  <p>{item.detail}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="section section--signals">
-          <div className="section__header">
-            <span className="eyebrow">Signals</span>
-            <h2>How Tristan shows up</h2>
-            <p>
-              Expect entrepreneurial grit, talent-density rituals, and humility—every season builds on decades of family influence, university discipline, and venture-building reps.
-            </p>
-          </div>
-          <div className="signal-grid">
-            {signals.map((signal) => (
-              <div key={signal.title} className="signal">
-                <span className="signal__meta">{signal.meta}</span>
-                <h3>{signal.title}</h3>
-                <p>{signal.description}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="section section--cta">
-          <div className="cta">
-            <div>
-              <span className="eyebrow eyebrow--bright">Next build</span>
-              <h2>Bring Tristan into your next chapter</h2>
+          <div className="folio-intro-bottom">
+            <div className="folio-bio">
               <p>
-                Ready for a WorkWeek implementation, a Tech Local experiment, or a Champ Foundation riff?
-                Let's shape technology that honors blue-collar teams and unlocks human dignity.
+                I’m Tristan, co-founder &amp; CTO of{' '}
+                <a href="#workweek">WorkWeek</a> and co-founder of{' '}
+                <a href="#tech-local">Tech Local</a>.
+              </p>
+              <p className="folio-location">
+                East London, South Africa. Building for the people doing the
+                work.
               </p>
             </div>
-            <div className="cta__actions">
-              <a className="button button--primary" href="https://calendar.app.google/Q4Ym3ZFuosmq2j977" target="_blank" rel="noreferrer">
-                Schedule a deep dive
+            <div className="folio-intro-actions">
+              <a className="folio-action" href="mailto:tristan@workweek.africa">
+                Get in touch <ArrowUpRight aria-hidden="true" size={20} />
               </a>
-              <a
-                className="button button--ghost"
-                href="https://www.linkedin.com/in/tristdrum/"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Share context
+              <a className="folio-text-link" href="#work">
+                Explore my work <ArrowDown aria-hidden="true" size={18} />
               </a>
             </div>
+            <figure className="folio-portrait">
+              <img
+                src="/images/tristan-drummond.webp"
+                alt="Tristan Drummond"
+                width="640"
+                height="800"
+                fetchPriority="high"
+              />
+              <figcaption>Founder. Technologist.</figcaption>
+            </figure>
           </div>
         </section>
 
-        <footer className="footer">
-          <div className="footer__meta">
-            <span>© {new Date().getFullYear()} Tristan Drummond</span>
-            <span>Crafted with patience in South Africa</span>
+        <section
+          id="work"
+          className="folio-work folio-width"
+          aria-labelledby="work-title"
+        >
+          <div className="folio-section-title">
+            <h2 id="work-title">The work</h2>
+            <p>Two companies. A shared interest in making technology useful.</p>
           </div>
-          <div className="footer__links">
-            {socialLinks.map((link) => (
-              <a key={link.href} href={link.href} target="_blank" rel="noreferrer">
-                {link.label}
+          <article id="workweek" className="folio-project">
+            <div className="folio-project-heading">
+              <div>
+                <h3>WorkWeek</h3>
+                <p className="folio-role">Co-founder &amp; CTO</p>
+              </div>
+              <a className="folio-text-link" href="https://www.workweek.tech/">
+                Explore WorkWeek <ArrowUpRight aria-hidden="true" size={18} />
               </a>
-            ))}
+            </div>
+            <div className="folio-project-story">
+              <h4>
+                From the site
+                <br />
+                to the payroll run.
+              </h4>
+              <p>
+                WorkWeek helps field teams manage attendance, overtime, payroll
+                calculations and site costs. I lead product and engineering,
+                turning feedback from the people on site into software they can
+                rely on.
+              </p>
+            </div>
+            <figure className="folio-product-image">
+              <img
+                src="/images/workweek-product.png"
+                alt="WorkWeek’s public product demonstration: mobile clock-in, timesheets and site-cost analytics."
+                width="1920"
+                height="1159"
+                loading="lazy"
+              />
+              <figcaption>
+                <span>
+                  The connection between work on site and decisions in the
+                  office.
+                </span>
+                <a href="https://www.workweek.tech/">
+                  WorkWeek product view{' '}
+                  <ArrowUpRight aria-hidden="true" size={14} />
+                </a>
+              </figcaption>
+            </figure>
+            <aside
+              className="folio-evidence"
+              aria-labelledby="engineering-title"
+            >
+              <div>
+                <h4 id="engineering-title">
+                  Good engineering starts with the constraints.
+                </h4>
+                <p>
+                  Construction sites don’t always have a reliable connection. In
+                  a 2024 PowerSync interview, Gideon Boshoff and I discussed why
+                  we chose a local-first approach for WorkWeek’s mobile app.
+                </p>
+              </div>
+              <a className="folio-text-link" href={engineeringStory}>
+                Read the engineering story{' '}
+                <ArrowUpRight aria-hidden="true" size={18} />
+                <span>PowerSync · September 2024</span>
+              </a>
+            </aside>
+          </article>
+
+          <article
+            id="tech-local"
+            className="folio-project folio-project--studio"
+          >
+            <div className="folio-project-heading">
+              <div>
+                <h3>Tech Local</h3>
+                <p className="folio-role">Co-founder</p>
+              </div>
+              <a
+                className="folio-text-link"
+                href="https://www.techlocal.co.za/"
+              >
+                Explore Tech Local <ArrowUpRight aria-hidden="true" size={18} />
+              </a>
+            </div>
+            <div className="folio-studio-layout">
+              <div className="folio-studio-statement">
+                <h4>
+                  New ventures.
+                  <br />
+                  Practical software.
+                </h4>
+                <p>From an idea on the table to something people can use.</p>
+              </div>
+              <div className="folio-studio-copy">
+                <p>
+                  At Tech Local, we build ventures, custom software and AI
+                  tools. The work spans product development, business automation
+                  and helping teams put AI to use in their day-to-day work.
+                </p>
+                <p>
+                  I care about the connection between the business and the
+                  build: understanding the problem, making the technical
+                  decisions, and staying close to how the product is used.
+                </p>
+                <a
+                  className="folio-text-link"
+                  href="https://www.techlocal.co.za/ai-employees"
+                >
+                  See our approach to AI employees{' '}
+                  <ArrowUpRight aria-hidden="true" size={18} />
+                </a>
+              </div>
+            </div>
+            <div className="folio-studio-links">
+              <p>See the work from the team.</p>
+              <a href="https://www.techlocal.co.za/#projects">
+                Explore the published projects{' '}
+                <ArrowRight aria-hidden="true" size={20} />
+              </a>
+            </div>
+          </article>
+        </section>
+
+        <section
+          id="about"
+          className="folio-about folio-width"
+          aria-labelledby="about-title"
+        >
+          <h2 id="about-title">
+            The way
+            <br /> I work.
+          </h2>
+          <div>
+            <p className="folio-about-lead">
+              The people, the business and the software belong in the same
+              conversation.
+            </p>
+            <p>
+              I care about the whole problem: the person using the product, the
+              business behind it, and the technical decisions that make it
+              dependable. That means listening closely, being clear about
+              trade-offs, and taking responsibility for what gets built.
+            </p>
+            <p>
+              My Christian faith shapes how I approach that work—with respect
+              for people’s dignity and a responsibility to serve. I want the
+              things I build to be useful to the people around me.
+            </p>
           </div>
-        </footer>
-      </div>
-    </main>
+        </section>
+
+        <section
+          id="contact"
+          className="folio-contact"
+          aria-labelledby="contact-title"
+        >
+          <div className="folio-width">
+            <h2 id="contact-title">
+              Let’s talk about
+              <br />
+              what you’re building.
+            </h2>
+            <div className="folio-contact-bottom">
+              <p>
+                If you’re building a company or working through a practical
+                software problem, I’d be glad to hear from you.
+              </p>
+              <a className="folio-email" href="mailto:tristan@workweek.africa">
+                tristan@workweek.africa <ArrowUpRight aria-hidden="true" />
+              </a>
+            </div>
+            <footer className="folio-footer">
+              <p>© {new Date().getFullYear()} Tristan Drummond</p>
+              <nav aria-label="Professional profiles">
+                <a href="https://www.linkedin.com/in/tristdrum/">
+                  LinkedIn <ArrowUpRight aria-hidden="true" size={15} />
+                </a>
+                <a href="https://github.com/tristdrum">
+                  GitHub <ArrowUpRight aria-hidden="true" size={15} />
+                </a>
+                <a href="#main">
+                  Back to top <ArrowUpRight aria-hidden="true" size={15} />
+                </a>
+              </nav>
+            </footer>
+          </div>
+        </section>
+      </main>
+    </div>
   )
 }
-
-export default HomePage
-
